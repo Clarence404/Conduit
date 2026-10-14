@@ -106,6 +106,7 @@ class DeviceApiIT extends IntegrationTestBase {
     @Test
     void disablingEvictsIdentityCache() throws Exception {
         String dk = create("d");
+        String hashBefore = jdbc.queryForObject("select secret_hash from device where device_key = ?", String.class, dk);
         identityCache.put(new DeviceIdentity(dk, 1, "ENABLED", "h", "s", productKey));
 
         mvc.perform(put("/api/v1/devices/{dk}", dk).header(HttpHeaders.AUTHORIZATION, auth)
@@ -116,6 +117,8 @@ class DeviceApiIT extends IntegrationTestBase {
                 .andExpect(jsonPath("$.status").value("DISABLED"));
 
         assertThat(identityCache.get(dk)).isEmpty();
+        assertThat(jdbc.queryForObject("select secret_hash from device where device_key = ?", String.class, dk))
+                .isEqualTo(hashBefore);
     }
 
     @Test

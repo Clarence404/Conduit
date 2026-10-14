@@ -1,6 +1,7 @@
 package dev.conduit.server.device;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import dev.conduit.server.device.DeviceDtos.CreateDeviceRequest;
 import dev.conduit.server.device.DeviceDtos.DeviceCreated;
@@ -94,24 +95,27 @@ public class DeviceService {
     public DeviceView update(String deviceKey, UpdateDeviceRequest request) {
         Device d = require(deviceKey);
         boolean statusChanged = !d.getStatus().equals(request.status());
-        d.setName(request.name());
-        d.setStatus(request.status());
-        d.setUpdatedAt(OffsetDateTime.now(clock));
-        devices.updateById(d);
+        // 只更新 name/status，避免用旧快照覆盖并发 reset-secret 写入的密钥
+        devices.update(null, new LambdaUpdateWrapper<Device>()
+                .eq(Device::getId, d.getId())
+                .set(Device::getName, request.name())
+                .set(Device::getStatus, request.status())
+                .set(Device::getUpdatedAt, OffsetDateTime.now(clock)));
         if (statusChanged) {
             identityCache.evict(deviceKey);
         }
-        return toViews(List.of(d)).getFirst();
+        return toViews(List.of(require(deviceKey))).getFirst();
     }
 
     public SecretView resetSecret(String deviceKey) {
         Device d = require(deviceKey);
         String secret = keys.deviceSecret();
         String salt = hasher.newSalt();
-        d.setSecretSalt(salt);
-        d.setSecretHash(hasher.hash(secret, salt));
-        d.setUpdatedAt(OffsetDateTime.now(clock));
-        devices.updateById(d);
+        devices.update(null, new LambdaUpdateWrapper<Device>()
+                .eq(Device::getId, d.getId())
+                .set(Device::getSecretHash, hasher.hash(secret, salt))
+                .set(Device::getSecretSalt, salt)
+                .set(Device::getUpdatedAt, OffsetDateTime.now(clock)));
         identityCache.evict(deviceKey);
         return new SecretView(deviceKey, secret);
     }
