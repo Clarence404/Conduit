@@ -4,6 +4,8 @@
 
 设计文档：`docs/superpowers/specs/2026-10-14-conduit-v0.1-design.md`
 
+设备接入指南（流程、连接参数、上报格式、示例代码、排错）：[`docs/device-integration.md`](docs/device-integration.md)
+
 ## 架构
 
 ```
