@@ -18,3 +18,6 @@ deploy/.env
 # OS
 .DS_Store
 Thumbs.db
+
+# 本地 IDE 连接配置（含主机地址与口令，不入库）
+application-local.yml

@@ -94,6 +94,58 @@ mvn -f backend/pom.xml verify
 cd frontend && npm install && npm test && npm run dev
 ```
 
+### 在 IDE 中运行（连接已部署的 Compose 环境）
+
+server 和 connector 可以直接在 IDEA 里运行，连接「一键演示」起来的 PostgreSQL、Redis、InfluxDB、EMQX：
+
+1. 用 JDK 21 打开 `backend/pom.xml`。
+2. 确认 `.env` 中 `BIND_ADDR`、`POSTGRES_PORT`（默认 15432）、`REDIS_PORT`（默认 16379）已按需设置，并执行过一次 `up -d`，让 PostgreSQL 和 Redis 端口对宿主机开放。
+3. 在 `backend/conduit-server/src/main/resources/` 和 `backend/conduit-connector/src/main/resources/` 下各新建一个 `application-local.yml`，写入 Docker 宿主机地址、端口和 `.env` 中的口令。这个文件已在 `.gitignore` 中，不会被提交。
+
+   ```yaml
+   # conduit-server/application-local.yml
+   spring:
+     datasource:
+       url: jdbc:postgresql://<docker-host>:15432/conduit
+       password: <POSTGRES_PASSWORD>
+     data:
+       redis:
+         host: <docker-host>
+         port: 16379
+   conduit:
+     bootstrap:
+       admin-password: <CONDUIT_ADMIN_PASSWORD>
+     auth:
+       jwt-secret: <CONDUIT_JWT_SECRET>
+     internal:
+       token: <CONDUIT_INTERNAL_TOKEN>
+       connector-password: <CONNECTOR_MQTT_PASSWORD>
+     influx:
+       url: http://<docker-host>:8096
+       token: <INFLUX_TOKEN>
+   ```
+
+   ```yaml
+   # conduit-connector/application-local.yml
+   spring:
+     data:
+       redis:
+         host: <docker-host>
+         port: 16379
+   conduit:
+     connector:
+       mqtt:
+         host: <docker-host>
+         port: 1883
+         client-id: conduit-connector-idea   # 必须以 conduit- 开头
+         username: <CONNECTOR_MQTT_USERNAME>
+         password: <CONNECTOR_MQTT_PASSWORD>
+   ```
+
+4. 运行 `ServerApplication` 和 `ConnectorApplication`，在运行配置的 Active profiles 中填 `local`。前端 `npm run dev` 会把 `/api` 代理到本机 8080。
+
+说明：IDE 中的实例与容器中的实例同时运行时，会加入同一个消费组分担消息、加入同一个共享订阅分担上报，数据不会重复也不会丢；设备鉴权仍由容器里的 server 完成。需要只让本地 connector 收消息时，可以 `docker compose -f deploy/docker-compose.yml stop conduit-connector`；不要停容器里的 `conduit-server`，否则 EMQX 的鉴权回调无处可去，新设备将无法连接。
+
 ## 端到端测试：杀进程不丢数据
 
 10 台设备各发 50 条消息，发送中途 kill 并重启 `conduit-server`，最终 InfluxDB 中应恰好 500 条。需要 Compose 环境已启动（不带 demo profile 亦可）。
