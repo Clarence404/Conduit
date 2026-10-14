@@ -17,7 +17,9 @@ import org.springframework.stereotype.Component;
 
 import dev.conduit.server.telemetry.TelemetryUnavailableException;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.RecoverableDataAccessException;
+import org.springframework.dao.TransientDataAccessException;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -182,13 +184,24 @@ public class PipelineProcessor {
         });
     }
 
+    /** 仅暂时性故障值得原地重试；其余（语法错误、完整性冲突、WRONGTYPE 等）重试也不会成功。 */
+    private static boolean isRecoverable(Throwable e) {
+        return e instanceof TelemetryUnavailableException
+                || e instanceof DataAccessResourceFailureException
+                || e instanceof TransientDataAccessException
+                || e instanceof RecoverableDataAccessException;
+    }
+
     /** 下游暂时不可用时原地指数退避重试，不重新读取，因此不消耗投递次数。 */
     private <T> T retry(String step, Supplier<T> action) {
         long delay = initialBackoff.toMillis();
         for (int attempt = 1; ; attempt++) {
             try {
                 return action.get();
-            } catch (TelemetryUnavailableException | DataAccessException e) {
+            } catch (RuntimeException e) {
+                if (!isRecoverable(e)) {
+                    throw e;
+                }
                 log.warn("{} unavailable (attempt {}), retrying in {} ms: {}", step, attempt, delay, e.getMessage());
                 try {
                     Thread.sleep(delay);

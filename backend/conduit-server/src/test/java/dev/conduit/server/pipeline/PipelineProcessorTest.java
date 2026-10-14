@@ -16,6 +16,8 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.RedisSystemException;
+import org.springframework.jdbc.BadSqlGrammarException;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -128,5 +130,33 @@ class PipelineProcessorTest {
 
         verify(bus, never()).ack(anyString(), anyList());
         verify(bus, never()).deadLetter(anyString(), any(), anyString());
+    }
+
+    @Test
+    void permanentDataAccessFailureInLookupIsNotRetried() {
+        when(identities.find("good")).thenReturn(Optional.of(identity("good")));
+        when(identities.find("bad")).thenThrow(new BadSqlGrammarException("q", "select", new java.sql.SQLException("x")));
+        Delivery bad = delivery("2-0", "bad");
+
+        processor.process(List.of(delivery("1-0", "good"), bad, delivery("3-0", "good")));
+
+        verify(identities, times(1)).find("bad");
+        verify(bus).deadLetter(GROUP, bad, "PROCESSING_ERROR");
+        verify(bus, times(1)).deadLetter(anyString(), any(), anyString());
+        verify(bus).ack(GROUP, List.of("1-0", "3-0"));
+    }
+
+    @Test
+    void permanentRedisFailureInLatestUpdateDeadLettersOnlyThatItem() {
+        when(identities.find(anyString())).thenAnswer(i -> Optional.of(identity(i.getArgument(0))));
+        doThrow(new RedisSystemException("WRONGTYPE", new RuntimeException("WRONGTYPE")))
+                .when(latest).update(eq("bad"), anyLong(), any());
+        Delivery bad = delivery("2-0", "bad");
+
+        processor.process(List.of(delivery("1-0", "good"), bad, delivery("3-0", "good")));
+
+        verify(latest, times(1)).update(eq("bad"), anyLong(), any());
+        verify(bus).deadLetter(GROUP, bad, "PROCESSING_ERROR");
+        verify(bus).ack(GROUP, List.of("1-0", "3-0"));
     }
 }
