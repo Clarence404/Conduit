@@ -28,7 +28,7 @@
 
 ## 一键演示
 
-需要 Docker（本机或远程均可；远程时先设置 `DOCKER_HOST=tcp://<docker-host>:2375`）。
+需要 Docker（本机或远程均可；远程时先设置 `DOCKER_HOST=tcp://<docker-host>:2375`；该端口是无认证的 Docker API，仅限可信局域网使用）。
 
 ```bash
 cp deploy/.env.example deploy/.env   # 按需修改口令与端口
@@ -83,6 +83,14 @@ mvn -f backend/pom.xml verify -Pe2e -pl conduit-e2e
 |---|---|---|
 | `E2E_HOST` | `localhost` | Docker 主机地址（远程 Docker 时填其地址） |
 | `E2E_COMPOSE` | `docker compose` | compose 命令，例如独立二进制的完整路径；子进程继承 `DOCKER_HOST` |
+
+失败时的诊断命令（在 Compose 所在的 Docker 上执行）：
+
+```bash
+docker compose -f deploy/docker-compose.yml exec redis redis-cli XLEN conduit:stream:dead
+docker compose -f deploy/docker-compose.yml exec redis redis-cli XRANGE conduit:stream:dead - + COUNT 5
+docker compose -f deploy/docker-compose.yml exec redis redis-cli XPENDING conduit:stream:up conduit-server
+```
 
 ## 已知限制（V0.1）
 
