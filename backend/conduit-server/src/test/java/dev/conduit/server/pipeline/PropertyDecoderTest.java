@@ -63,10 +63,45 @@ class PropertyDecoderTest {
             "{\"params\":{\"Ua\":{\"nested\":1}}}",
             "{\"params\":{\"Ua\":[1]}}",
             "{\"params\":{\"__last\":1}}",
-            "{\"params\":{\"\":1}}"
+            "{\"params\":{\"\":1}}",
+            "{\"params\":{\"Ua\":1e999}}",
+            "{\"params\":{\"Ua\":-1e999}}"
     })
     void rejectsInvalidParams(String json) {
         assertRejected(json, DeadReason.INVALID_PARAMS);
+    }
+
+    @Test
+    void rejectsIntegerLiteralThatOverflowsDouble() {
+        assertRejected("{\"params\":{\"Ua\":" + "9".repeat(400) + "}}", DeadReason.INVALID_PARAMS);
+    }
+
+    @Test
+    void rejectsDuplicateKeys() {
+        assertRejected("{\"params\":{\"Ua\":1,\"Ua\":\"x\"}}", DeadReason.MALFORMED_JSON);
+    }
+
+    @Test
+    void rejectsTrailingTokens() {
+        assertRejected("{\"params\":{\"Ua\":1}} xyz", DeadReason.MALFORMED_JSON);
+    }
+
+    @Test
+    void malformedJsonErrorDoesNotEchoPayload() {
+        String marker = "SECRET-MARKER-123";
+        String[] payloads = {
+                "{\"params\":{\"Ua\":1,\"note\":\"" + marker,
+                "{\"params\":{\"Ua\":1}, \"x\": " + marker + "}",
+                "{\"params\":{\"Ua\":1,\"note\":\"" + marker + "\"}, ]"
+        };
+        for (String json : payloads) {
+            assertThatThrownBy(() -> decode(json))
+                    .isInstanceOf(DecodeException.class)
+                    .satisfies(e -> {
+                        assertThat(((DecodeException) e).reason()).isEqualTo(DeadReason.MALFORMED_JSON);
+                        assertThat(e.getMessage()).doesNotContain(marker);
+                    });
+        }
     }
 
     @Test

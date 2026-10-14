@@ -1,7 +1,10 @@
 package dev.conduit.server.pipeline;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -21,20 +24,25 @@ public class PropertyDecoder {
     static final Duration MAX_PAST = Duration.ofDays(30);
     static final Duration MAX_FUTURE = Duration.ofMinutes(5);
 
-    private final ObjectMapper objectMapper;
+    private final ObjectReader reader;
     private final Clock clock;
 
     public PropertyDecoder(ObjectMapper objectMapper, Clock clock) {
-        this.objectMapper = objectMapper;
+        this.reader = objectMapper.reader()
+                .with(DeserializationFeature.FAIL_ON_READING_DUP_TREE_KEY,
+                        DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.clock = clock;
     }
 
     public DecodedProperty decode(byte[] payload, long receivedAt) {
         JsonNode root;
         try {
-            root = objectMapper.readTree(payload);
+            root = reader.readTree(payload);
+        } catch (JsonProcessingException e) {
+            // 不使用 getMessage()：它会附带 [Source: ...] 原始报文片段，进而泄漏到死信与日志
+            throw new DecodeException(DeadReason.MALFORMED_JSON, e.getOriginalMessage());
         } catch (IOException e) {
-            throw new DecodeException(DeadReason.MALFORMED_JSON, e.getMessage());
+            throw new DecodeException(DeadReason.MALFORMED_JSON, "unreadable payload");
         }
         if (root == null || !root.isObject()) {
             throw new DecodeException(DeadReason.MALFORMED_JSON, "payload is not a JSON object");
@@ -72,7 +80,12 @@ public class PropertyDecoder {
             JsonNode v = field.getValue();
             Object value;
             if (v.isNumber()) {
-                value = v.doubleValue();
+                double d = v.doubleValue();
+                // 超出 double 范围的字面量会变成 ±Infinity，写入 InfluxDB 会失败
+                if (!Double.isFinite(d)) {
+                    throw new DecodeException(DeadReason.INVALID_PARAMS, "non-finite number for '" + name + "'");
+                }
+                value = d;
             } else if (v.isTextual()) {
                 value = v.textValue();
             } else if (v.isBoolean()) {
