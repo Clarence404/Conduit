@@ -10,8 +10,13 @@ const router = useRouter()
 const activeMenu = computed(() => (route.path.startsWith('/products') ? '/products' : '/devices'))
 
 async function logout() {
-  await auth.logout()
-  await router.replace({ name: 'login' })
+  try {
+    await auth.logout()
+  } catch {
+    // 登出请求失败也要回到登录页
+  } finally {
+    await router.replace({ name: 'login' })
+  }
 }
 </script>
 

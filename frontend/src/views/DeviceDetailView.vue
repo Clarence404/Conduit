@@ -11,12 +11,14 @@ import { usePolling } from '@/composables/usePolling'
 // 不能叫 key：key 是 Vue 保留属性，不会作为 prop 传入
 const props = defineProps<{ deviceKey: string }>()
 
+const mqttPort = Number(import.meta.env.VITE_MQTT_PORT) || 1883
+
 const device = ref<DeviceView | null>(null)
 const values = ref<PointView[]>([])
 const lastRefreshed = ref<number | null>(null)
 
 const connection = computed(() =>
-  device.value ? buildConnectionInfo(device.value.productKey, device.value.deviceKey, window.location.hostname) : null,
+  device.value ? buildConnectionInfo(device.value.productKey, device.value.deviceKey, window.location.hostname, mqttPort) : null,
 )
 
 async function loadDevice() {
