@@ -11,7 +11,9 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/layouts/AppLayout.vue'),
-    children: [],
+    children: [
+      { path: 'products', name: 'products', component: () => import('@/views/ProductsView.vue') },
+    ],
   },
 ]
 
