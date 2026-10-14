@@ -15,9 +15,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import dev.conduit.server.telemetry.TelemetryUnavailableException;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
+
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -40,10 +46,27 @@ public class PipelineProcessor {
     private final TelemetryWriter writer;
     private final LatestValueStore latest;
     private final MeterRegistry meters;
+    private final Duration initialBackoff;
+    private final Duration maxBackoff;
 
+    /** 处理被中断（如 worker 停止）：中止整批，已读取的投递保持未 ACK。 */
+    static class ProcessingAbortedException extends RuntimeException {
+        ProcessingAbortedException(String message) {
+            super(message);
+        }
+    }
+
+    @Autowired
     public PipelineProcessor(MessageBus bus, PipelineProperties props, DeviceIdentityLookup identities,
                              PropertyDecoder decoder, PresenceHandler presenceHandler, TelemetryWriter writer,
                              LatestValueStore latest, MeterRegistry meters) {
+        this(bus, props, identities, decoder, presenceHandler, writer, latest, meters,
+                Duration.ofSeconds(1), Duration.ofSeconds(30));
+    }
+
+    PipelineProcessor(MessageBus bus, PipelineProperties props, DeviceIdentityLookup identities,
+                      PropertyDecoder decoder, PresenceHandler presenceHandler, TelemetryWriter writer,
+                      LatestValueStore latest, MeterRegistry meters, Duration initialBackoff, Duration maxBackoff) {
         this.bus = bus;
         this.props = props;
         this.identities = identities;
@@ -52,6 +75,8 @@ public class PipelineProcessor {
         this.writer = writer;
         this.latest = latest;
         this.meters = meters;
+        this.initialBackoff = initialBackoff;
+        this.maxBackoff = maxBackoff;
     }
 
     public void process(List<Delivery> batch) {
@@ -72,9 +97,13 @@ public class PipelineProcessor {
             }
             try {
                 switch (message.type()) {
-                    case PROPERTY -> properties.add(new PendingProperty(delivery, toPoint(message)));
+                    case PROPERTY -> properties.add(
+                            new PendingProperty(delivery, retry("lookup", () -> toPoint(message))));
                     case PRESENCE_CONNECTED, PRESENCE_DISCONNECTED -> {
-                        presenceHandler.handle(message);
+                        retry("presence", () -> {
+                            presenceHandler.handle(message);
+                            return null;
+                        });
                         presenceAcks.add(delivery.id());
                         meters.counter("conduit.pipeline.processed", "type", "presence").increment();
                     }
@@ -83,10 +112,15 @@ public class PipelineProcessor {
             } catch (DecodeException e) {
                 log.debug("Dead-lettering {}: {} {}", delivery.id(), e.reason(), e.getMessage());
                 dead(delivery, e.reason());
+            } catch (ProcessingAbortedException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                log.error("Unexpected failure processing delivery {}", delivery.id(), e);
+                dead(delivery, DeadReason.PROCESSING_ERROR);
             }
         }
 
-        bus.ack(props.group(), presenceAcks);
+        ack(presenceAcks);
         if (!properties.isEmpty()) {
             writeProperties(properties);
         }
@@ -108,7 +142,8 @@ public class PipelineProcessor {
     }
 
     private void writeProperties(List<PendingProperty> items) {
-        WriteResult result = writer.write(items.stream().map(PendingProperty::point).toList());
+        List<TelemetryPoint> points = items.stream().map(PendingProperty::point).toList();
+        WriteResult result = retry("influx write", () -> writer.write(points));
         Set<Integer> rejected = result.rejected().stream()
                 .map(WriteResult.Rejected::index).collect(Collectors.toSet());
 
@@ -117,18 +152,60 @@ public class PipelineProcessor {
             PendingProperty item = items.get(i);
             if (rejected.contains(i)) {
                 dead(item.delivery(), DeadReason.FIELD_TYPE_CONFLICT);
-            } else {
-                TelemetryPoint p = item.point();
-                latest.update(p.deviceKey(), p.ts(), p.fields());
+                continue;
+            }
+            TelemetryPoint p = item.point();
+            try {
+                retry("latest update", () -> {
+                    latest.update(p.deviceKey(), p.ts(), p.fields());
+                    return null;
+                });
                 acks.add(item.delivery().id());
+            } catch (ProcessingAbortedException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                log.error("Unexpected failure updating latest value for delivery {}", item.delivery().id(), e);
+                dead(item.delivery(), DeadReason.PROCESSING_ERROR);
             }
         }
-        bus.ack(props.group(), acks);
+        ack(acks);
         meters.counter("conduit.pipeline.processed", "type", "property").increment(acks.size());
     }
 
+    private void ack(List<String> ids) {
+        if (ids.isEmpty()) {
+            return;
+        }
+        retry("ack", () -> {
+            bus.ack(props.group(), ids);
+            return null;
+        });
+    }
+
+    /** 下游暂时不可用时原地指数退避重试，不重新读取，因此不消耗投递次数。 */
+    private <T> T retry(String step, Supplier<T> action) {
+        long delay = initialBackoff.toMillis();
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return action.get();
+            } catch (TelemetryUnavailableException | DataAccessException e) {
+                log.warn("{} unavailable (attempt {}), retrying in {} ms: {}", step, attempt, delay, e.getMessage());
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new ProcessingAbortedException("Interrupted while retrying " + step);
+                }
+                delay = Math.min(delay * 2, maxBackoff.toMillis());
+            }
+        }
+    }
+
     private void dead(Delivery delivery, DeadReason reason) {
-        bus.deadLetter(props.group(), delivery, reason.name());
+        retry("dead letter", () -> {
+            bus.deadLetter(props.group(), delivery, reason.name());
+            return null;
+        });
         meters.counter("conduit.pipeline.dead", "reason", reason.name()).increment();
     }
 }

@@ -203,4 +203,24 @@ class PipelineIT extends IntegrationTestBase {
         assertThat(deadReason(id)).contains("MAX_DELIVERY_EXCEEDED");
         assertThat(count(influx, device.deviceKey(), "Ua")).isZero();
     }
+
+    @Test
+    void typeConflictOnlyDeadLettersTheConflictingMessage() {
+        publish(device.productKey(), device.deviceKey(), MessageType.PROPERTY,
+                "{\"ts\":%d,\"params\":{\"Ua\":1}}".formatted(now));
+        assertThat(runner.pollOnce()).isEqualTo(1);
+
+        String conflict = publish(device.productKey(), device.deviceKey(), MessageType.PROPERTY,
+                "{\"ts\":%d,\"params\":{\"Ua\":\"text\"}}".formatted(now + 1000));
+        publish(device.productKey(), device.deviceKey(), MessageType.PROPERTY,
+                "{\"ts\":%d,\"params\":{\"Ia\":7}}".formatted(now + 2000));
+
+        assertThat(runner.pollOnce()).isEqualTo(2);
+
+        assertThat(deadReason(conflict)).contains("FIELD_TYPE_CONFLICT");
+        assertThat(count(influx, device.deviceKey(), "Ia")).isEqualTo(1);
+        assertThat(count(influx, device.deviceKey(), "Ua")).isEqualTo(1);
+        assertThat(latest.get(device.deviceKey())).containsKey("Ia");
+        assertThat(runner.claimOnce()).isZero();
+    }
 }
