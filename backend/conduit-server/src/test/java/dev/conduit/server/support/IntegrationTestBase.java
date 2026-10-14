@@ -1,6 +1,7 @@
 package dev.conduit.server.support;
 
 import com.jayway.jsonpath.JsonPath;
+import dev.conduit.server.security.SecretHasher;
 import dev.conduit.server.tenant.TenantContext;
 import org.junit.jupiter.api.AfterEach;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +33,27 @@ public abstract class IntegrationTestBase {
 
     @Autowired
     protected StringRedisTemplate redis;
+
+    @Autowired
+    protected SecretHasher secretHasher;
+
+    protected record TestDevice(long tenantId, String productKey, String deviceKey, String secret) {
+    }
+
+    /** 直接写库创建「产品 + 设备」，用于不经过 API 的测试。 */
+    protected TestDevice createDevice(long tenantId, String status) {
+        String productKey = unique("pk");
+        String deviceKey = unique("dk");
+        String secret = "secret-" + deviceKey;
+        String salt = secretHasher.newSalt();
+        Long productId = jdbc.queryForObject(
+                "insert into product (tenant_id, product_key, name) values (?, ?, 'test product') returning id",
+                Long.class, tenantId, productKey);
+        jdbc.update("insert into device (tenant_id, product_id, device_key, name, secret_hash, secret_salt, status) "
+                        + "values (?, ?, ?, 'test device', ?, ?, ?)",
+                tenantId, productId, deviceKey, secretHasher.hash(secret, salt), salt, status);
+        return new TestDevice(tenantId, productKey, deviceKey, secret);
+    }
 
     @AfterEach
     void clearTenantContext() {
