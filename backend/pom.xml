@@ -18,6 +18,7 @@
 
   <modules>
     <module>conduit-common</module>
+    <module>conduit-connector</module>
   </modules>
 
   <properties>
