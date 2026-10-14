@@ -37,7 +37,7 @@ flowchart TB
 
 ## 代码结构
 
-后端是一个 Maven 多模块工程，模块之间的依赖关系：
+仓库根目录即 Maven 父工程，Java 模块与前端 `conduit-ui` 平铺在顶层。Java 模块之间的依赖关系：
 
 ```mermaid
 flowchart LR
@@ -52,26 +52,27 @@ flowchart LR
 
 ```
 conduit/
-├── backend/                         Maven 父工程（JDK 21，Spring Boot 3.5）
-│   ├── conduit-common/              dev.conduit.common
-│   │   ├── message/                 RawMessage：协议无关的统一消息，及其与 Stream 字段的编解码
-│   │   └── bus/                     MessageBus 接口和 Redis Streams 实现（投递、消费组、认领、死信）
-│   ├── conduit-connector/           dev.conduit.connector（端口 8081）
-│   │   ├── adapter/                 ProtocolAdapter 接口；新增协议就是新增一个实现
-│   │   └── mqtt/                    MQTT 适配器：共享订阅、写入总线成功后才确认、topic 解析
-│   ├── conduit-server/              dev.conduit.server（端口 8080），按业务领域分包
-│   │   ├── auth/                    登录、JWT、Spring Security 配置
-│   │   ├── tenant/                  租户上下文与租户隔离
-│   │   ├── product/  device/        产品、设备的增删改查和接口
-│   │   ├── mqttauth/                EMQX 鉴权回调
-│   │   ├── pipeline/                数据流水线：消费总线、解码校验、重试、死信
-│   │   ├── telemetry/               InfluxDB 写入、最新值存储与查询
-│   │   ├── presence/                设备上下线状态
-│   │   ├── security/  bootstrap/    密钥生成与哈希；启动时创建默认租户和管理员
-│   │   └── config/  web/            框架配置；统一错误响应、分页
-│   ├── conduit-simulator/           dev.conduit.simulator：通过 REST 开通设备，再按周期上报
-│   └── conduit-e2e/                 端到端测试（-Pe2e 时才参与构建）
-├── frontend/                        Vue 3 + TypeScript + Element Plus
+├── pom.xml                          Maven 父工程（JDK 21，Spring Boot 3.5），聚合下列 conduit-* Java 模块
+├── Dockerfile                       构建 Java 应用镜像（构建参数 MODULE 指定模块）
+├── conduit-common/                  dev.conduit.common
+│   ├── message/                     RawMessage：协议无关的统一消息，及其与 Stream 字段的编解码
+│   └── bus/                         MessageBus 接口和 Redis Streams 实现（投递、消费组、认领、死信）
+├── conduit-connector/               dev.conduit.connector（端口 8081）
+│   ├── adapter/                     ProtocolAdapter 接口；新增协议就是新增一个实现
+│   └── mqtt/                        MQTT 适配器：共享订阅、写入总线成功后才确认、topic 解析
+├── conduit-server/                  dev.conduit.server（端口 8080），按业务领域分包
+│   ├── auth/                        登录、JWT、Spring Security 配置
+│   ├── tenant/                      租户上下文与租户隔离
+│   ├── product/  device/            产品、设备的增删改查和接口
+│   ├── mqttauth/                    EMQX 鉴权回调
+│   ├── pipeline/                    数据流水线：消费总线、解码校验、重试、死信
+│   ├── telemetry/                   InfluxDB 写入、最新值存储与查询
+│   ├── presence/                    设备上下线状态
+│   ├── security/  bootstrap/        密钥生成与哈希；启动时创建默认租户和管理员
+│   └── config/  web/                框架配置；统一错误响应、分页
+├── conduit-simulator/               dev.conduit.simulator：通过 REST 开通设备，再按周期上报
+├── conduit-e2e/                     端到端测试（-Pe2e 时才参与构建）
+├── conduit-ui/                      Vue 3 + TypeScript + Element Plus（独立 npm 工程，自带 Dockerfile）
 │   └── src/  api/  stores/  router/  views/  components/  composables/  utils/
 ├── deploy/                          docker-compose.yml、.env.example、EMQX 鉴权与 ACL 配置
 ├── docs/                            设备接入指南、待办清单、设计文档与实现计划
@@ -120,29 +121,29 @@ PostgreSQL 与 Redis 不对外暴露。
 ## 开发
 
 ```bash
-mvn -f backend/pom.xml verify
+mvn verify
 ```
 
 ```bash
-cd frontend && npm install && npm test && npm run dev
+cd conduit-ui && npm install && npm test && npm run dev
 ```
 
 ### 在 IDE 中运行（连接已部署的 Compose 环境）
 
 server、connector、simulator 和前端都可以直接在 IDEA 里运行，连接「一键演示」起来的 PostgreSQL、Redis、InfluxDB、EMQX。
 
-1. 用 IDEA 打开仓库根目录，把 `backend/pom.xml` 作为 Maven 工程导入，Project SDK 选 **JDK 21**。仓库自带的运行配置（`.run/`）会自动出现：
+1. 用 IDEA 打开仓库根目录，把根目录的 `pom.xml` 作为 Maven 工程导入，Project SDK 选 **JDK 21**。仓库自带的运行配置（`.run/`）会自动出现：
 
    | 运行配置 | 作用 |
    |---|---|
    | `Conduit Server (local)` | `ServerApplication`，已带 `-Dspring.profiles.active=local` |
    | `Conduit Connector (local)` | `ConnectorApplication`，同上 |
    | `Conduit Simulator (local)` | `SimulatorApplication`，读取 `simulator-local.properties` |
-   | `Conduit Frontend (dev)` | 在 `frontend/` 下执行 `npm run dev`（首次先 `npm install`） |
+   | `Conduit Frontend (dev)` | 在 `conduit-ui/` 下执行 `npm run dev`（首次先 `npm install`） |
    | `Conduit (local all)` | 一次启动 Server、Connector、Frontend |
 
 2. 确认 `.env` 中 `BIND_ADDR`、`POSTGRES_PORT`（默认 15432）、`REDIS_PORT`（默认 16379）已按需设置，并执行过一次 `up -d`，让 PostgreSQL 和 Redis 端口对宿主机开放。
-3. 在 `backend/conduit-server/src/main/resources/` 和 `backend/conduit-connector/src/main/resources/` 下各新建一个 `application-local.yml`，写入 Docker 宿主机地址、端口和 `.env` 中的口令。这个文件已在 `.gitignore` 中，不会被提交。
+3. 在 `conduit-server/src/main/resources/` 和 `conduit-connector/src/main/resources/` 下各新建一个 `application-local.yml`，写入 Docker 宿主机地址、端口和 `.env` 中的口令。这个文件已在 `.gitignore` 中，不会被提交。
 
    ```yaml
    # conduit-server/application-local.yml
@@ -184,7 +185,7 @@ server、connector、simulator 和前端都可以直接在 IDEA 里运行，连�
          password: <CONNECTOR_MQTT_PASSWORD>
    ```
 
-4. 模拟器不是 Spring 应用，在 `backend/conduit-simulator/src/main/resources/` 下新建 `simulator-local.properties`（同样不入库），键名与环境变量相同，环境变量优先：
+4. 模拟器不是 Spring 应用，在 `conduit-simulator/src/main/resources/` 下新建 `simulator-local.properties`（同样不入库），键名与环境变量相同，环境变量优先：
 
    ```properties
    CONDUIT_API_URL=http://localhost:8080
@@ -207,8 +208,8 @@ server、connector、simulator 和前端都可以直接在 IDEA 里运行，连�
 10 台设备各发 50 条消息，发送中途 kill 并重启 `conduit-server`，最终 InfluxDB 中应恰好 500 条。需要 Compose 环境已启动（不带 demo profile 亦可）。
 
 ```bash
-mvn -f backend/pom.xml install -DskipTests
-mvn -f backend/pom.xml verify -Pe2e -pl conduit-e2e
+mvn install -DskipTests
+mvn verify -Pe2e -pl conduit-e2e
 ```
 
 测试读取 `deploy/.env` 中的凭证与端口，并支持环境变量：

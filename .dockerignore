@@ -1,0 +1,17 @@
+# 构建上下文为仓库根目录，只供根 Dockerfile 构建 Java 应用使用：
+# 先排除全部，再只放行 Maven 需要的 pom.xml 与 conduit-* Java 模块
+*
+!pom.xml
+!conduit-*
+
+# 前端有自己的 Dockerfile 和构建上下文（conduit-ui/）
+conduit-ui
+
+# 构建产物、IDE 文件与本地配置（含主机地址与口令）
+**/target
+**/node_modules
+**/.idea
+**/*.iml
+**/application-local.yml
+**/simulator-local.properties
+**/.env*

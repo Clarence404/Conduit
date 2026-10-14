@@ -1,5 +1,0 @@
-**/target
-**/.idea
-**/*.iml
-**/application-local.yml
-**/simulator-local.properties

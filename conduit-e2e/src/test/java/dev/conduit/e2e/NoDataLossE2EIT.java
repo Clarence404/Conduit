@@ -34,7 +34,7 @@ import static org.awaitility.Awaitility.await;
  */
 class NoDataLossE2EIT {
 
-    static final Path DEPLOY = Path.of("..", "..", "deploy").toAbsolutePath().normalize();
+    static final Path DEPLOY = Path.of("..", "deploy").toAbsolutePath().normalize();
     static final int DEVICES = 10;
     static final int MESSAGES_PER_DEVICE = 50;
 

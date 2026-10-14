@@ -79,7 +79,8 @@ services:
 
   conduit-server:
     build:
-      context: ../backend
+      context: ..
+      dockerfile: Dockerfile
       args:
         MODULE: conduit-server
     environment:
@@ -123,7 +124,8 @@ services:
 
   conduit-connector:
     build:
-      context: ../backend
+      context: ..
+      dockerfile: Dockerfile
       args:
         MODULE: conduit-connector
     environment:
@@ -143,7 +145,7 @@ services:
 
   conduit-web:
     build:
-      context: ../frontend
+      context: ../conduit-ui
       args:
         VITE_MQTT_PORT: ${MQTT_PORT:-1883}
     ports:
@@ -155,7 +157,8 @@ services:
   simulator:
     profiles: ["demo"]
     build:
-      context: ../backend
+      context: ..
+      dockerfile: Dockerfile
       args:
         MODULE: conduit-simulator
         JAR_NAME: conduit-simulator-exec

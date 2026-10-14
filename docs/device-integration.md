@@ -140,7 +140,7 @@ while True:
     time.sleep(10)
 ```
 
-仓库里的设备模拟器 `backend/conduit-simulator` 是一个完整的 Java 参考实现，使用 HiveMQ MQTT Client，支持断线重连和发送失败重试。
+仓库里的设备模拟器 `conduit-simulator` 是一个完整的 Java 参考实现，使用 HiveMQ MQTT Client，支持断线重连和发送失败重试。
 
 ## 6. 核对结果
 

@@ -1,3 +1,4 @@
+# 构建上下文为仓库根目录；.dockerignore 只放行 pom.xml 与 conduit-* Java 模块（不含 conduit-ui）
 FROM maven:3.9.9-eclipse-temurin-21 AS build
 WORKDIR /src
 COPY . .
