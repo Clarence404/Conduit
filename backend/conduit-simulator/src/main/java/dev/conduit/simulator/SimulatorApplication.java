@@ -12,7 +12,25 @@ public final class SimulatorApplication {
     private SimulatorApplication() {
     }
 
-    public static void main(String[] args) throws InterruptedException {
+    /**
+     * 失败时显式 System.exit(1)：未连上的 HiveMQ 客户端的自动重连线程是非守护线程，
+     * 仅抛出异常 JVM 不会退出，容器的 restart: on-failure 也就无从触发。
+     */
+    public static void main(String[] args) {
+        int status = 0;
+        try {
+            run();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            status = 1;
+        } catch (RuntimeException e) {
+            log.error("Simulator failed", e);
+            status = 1;
+        }
+        System.exit(status);
+    }
+
+    private static void run() throws InterruptedException {
         SimulatorConfig config = SimulatorConfig.fromEnv(System.getenv());
         ConduitApiClient api = new ConduitApiClient(config.apiUrl());
         loginWithRetry(api, config);
