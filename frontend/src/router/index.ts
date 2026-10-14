@@ -11,8 +11,16 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/layouts/AppLayout.vue'),
+    redirect: '/devices',
     children: [
       { path: 'products', name: 'products', component: () => import('@/views/ProductsView.vue') },
+      { path: 'devices', name: 'devices', component: () => import('@/views/DevicesView.vue') },
+      {
+        path: 'devices/:deviceKey',
+        name: 'device-detail',
+        component: () => import('@/views/DeviceDetailView.vue'),
+        props: true,
+      },
     ],
   },
 ]
