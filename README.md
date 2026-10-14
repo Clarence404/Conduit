@@ -35,15 +35,48 @@ flowchart TB
 
 设备数据从不直连 server，所以 server 重启或变慢不会堵住 EMQX；新增协议也只需在 connector 侧加适配器。完整接入流程见[设备接入指南](docs/device-integration.md)。
 
-| 模块 | 说明 |
-|---|---|
-| `backend/conduit-common` | 统一消息模型、`MessageBus`（Redis Streams 实现） |
-| `backend/conduit-connector` | 协议适配层，V0.1 只有 MQTT |
-| `backend/conduit-server` | REST 接口、EMQX 鉴权回调、数据流水线 |
-| `backend/conduit-simulator` | 演示设备模拟器 |
-| `backend/conduit-e2e` | 端到端测试（`-Pe2e` 时才参与构建） |
-| `frontend` | Vue 3 + Element Plus 管理界面 |
-| `deploy` | Docker Compose 一键环境 |
+## 代码结构
+
+后端是一个 Maven 多模块工程，模块之间的依赖关系：
+
+```mermaid
+flowchart LR
+    common[conduit-common<br/>消息模型 + 总线]
+    connector[conduit-connector<br/>协议接入] --> common
+    server[conduit-server<br/>平台服务] --> common
+    simulator[conduit-simulator<br/>设备模拟器]
+    e2e[conduit-e2e<br/>端到端测试] --> simulator
+```
+
+`connector` 和 `server` 之间没有代码依赖，只通过 `common` 里定义的消息格式和 Redis Streams 通信。
+
+```
+conduit/
+├── backend/                         Maven 父工程（JDK 21，Spring Boot 3.5）
+│   ├── conduit-common/              dev.conduit.common
+│   │   ├── message/                 RawMessage：协议无关的统一消息，及其与 Stream 字段的编解码
+│   │   └── bus/                     MessageBus 接口和 Redis Streams 实现（投递、消费组、认领、死信）
+│   ├── conduit-connector/           dev.conduit.connector（端口 8081）
+│   │   ├── adapter/                 ProtocolAdapter 接口；新增协议就是新增一个实现
+│   │   └── mqtt/                    MQTT 适配器：共享订阅、写入总线成功后才确认、topic 解析
+│   ├── conduit-server/              dev.conduit.server（端口 8080），按业务领域分包
+│   │   ├── auth/                    登录、JWT、Spring Security 配置
+│   │   ├── tenant/                  租户上下文与租户隔离
+│   │   ├── product/  device/        产品、设备的增删改查和接口
+│   │   ├── mqttauth/                EMQX 鉴权回调
+│   │   ├── pipeline/                数据流水线：消费总线、解码校验、重试、死信
+│   │   ├── telemetry/               InfluxDB 写入、最新值存储与查询
+│   │   ├── presence/                设备上下线状态
+│   │   ├── security/  bootstrap/    密钥生成与哈希；启动时创建默认租户和管理员
+│   │   └── config/  web/            框架配置；统一错误响应、分页
+│   ├── conduit-simulator/           dev.conduit.simulator：通过 REST 开通设备，再按周期上报
+│   └── conduit-e2e/                 端到端测试（-Pe2e 时才参与构建）
+├── frontend/                        Vue 3 + TypeScript + Element Plus
+│   └── src/  api/  stores/  router/  views/  components/  composables/  utils/
+├── deploy/                          docker-compose.yml、.env.example、EMQX 鉴权与 ACL 配置
+├── docs/                            设备接入指南、待办清单、设计文档与实现计划
+└── .run/                            IntelliJ IDEA 共享运行配置
+```
 
 ## 一键演示
 
@@ -96,9 +129,18 @@ cd frontend && npm install && npm test && npm run dev
 
 ### 在 IDE 中运行（连接已部署的 Compose 环境）
 
-server 和 connector 可以直接在 IDEA 里运行，连接「一键演示」起来的 PostgreSQL、Redis、InfluxDB、EMQX：
+server、connector、simulator 和前端都可以直接在 IDEA 里运行，连接「一键演示」起来的 PostgreSQL、Redis、InfluxDB、EMQX。
 
-1. 用 JDK 21 打开 `backend/pom.xml`。
+1. 用 IDEA 打开仓库根目录，把 `backend/pom.xml` 作为 Maven 工程导入，Project SDK 选 **JDK 21**。仓库自带的运行配置（`.run/`）会自动出现：
+
+   | 运行配置 | 作用 |
+   |---|---|
+   | `Conduit Server (local)` | `ServerApplication`，已带 `-Dspring.profiles.active=local` |
+   | `Conduit Connector (local)` | `ConnectorApplication`，同上 |
+   | `Conduit Simulator (local)` | `SimulatorApplication`，读取 `simulator-local.properties` |
+   | `Conduit Frontend (dev)` | 在 `frontend/` 下执行 `npm run dev`（首次先 `npm install`） |
+   | `Conduit (local all)` | 一次启动 Server、Connector、Frontend |
+
 2. 确认 `.env` 中 `BIND_ADDR`、`POSTGRES_PORT`（默认 15432）、`REDIS_PORT`（默认 16379）已按需设置，并执行过一次 `up -d`，让 PostgreSQL 和 Redis 端口对宿主机开放。
 3. 在 `backend/conduit-server/src/main/resources/` 和 `backend/conduit-connector/src/main/resources/` 下各新建一个 `application-local.yml`，写入 Docker 宿主机地址、端口和 `.env` 中的口令。这个文件已在 `.gitignore` 中，不会被提交。
 
@@ -142,7 +184,21 @@ server 和 connector 可以直接在 IDEA 里运行，连接「一键演示」�
          password: <CONNECTOR_MQTT_PASSWORD>
    ```
 
-4. 运行 `ServerApplication` 和 `ConnectorApplication`，在运行配置的 Active profiles 中填 `local`。前端 `npm run dev` 会把 `/api` 代理到本机 8080。
+4. 模拟器不是 Spring 应用，在 `backend/conduit-simulator/src/main/resources/` 下新建 `simulator-local.properties`（同样不入库），键名与环境变量相同，环境变量优先：
+
+   ```properties
+   CONDUIT_API_URL=http://localhost:8080
+   CONDUIT_ADMIN_USERNAME=<CONDUIT_ADMIN_USERNAME>
+   CONDUIT_ADMIN_PASSWORD=<CONDUIT_ADMIN_PASSWORD>
+   MQTT_HOST=<docker-host>
+   MQTT_PORT=1883
+   # 不要用 Demo Meter：模拟器启动时会重置该产品下设备的密钥，会影响容器里的演示设备
+   SIM_PRODUCT_NAME=IDEA Meter
+   SIM_DEVICE_COUNT=5
+   SIM_INTERVAL_MS=5000
+   ```
+
+5. 先启动 `Conduit Server (local)`，再按需启动 Connector、Simulator、Frontend。前端默认把 `/api` 代理到本机 8080；要直接连远程 server，可设置环境变量 `VITE_API_TARGET=http://<docker-host>:8091`。
 
 说明：IDE 中的实例与容器中的实例同时运行时，会加入同一个消费组分担消息、加入同一个共享订阅分担上报，数据不会重复也不会丢；设备鉴权仍由容器里的 server 完成。需要只让本地 connector 收消息时，可以 `docker compose -f deploy/docker-compose.yml stop conduit-connector`；不要停容器里的 `conduit-server`，否则 EMQX 的鉴权回调无处可去，新设备将无法连接。
 

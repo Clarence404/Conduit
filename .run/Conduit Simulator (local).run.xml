@@ -1,0 +1,9 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Conduit Simulator (local)" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="dev.conduit.simulator.SimulatorApplication" />
+    <module name="conduit-simulator" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

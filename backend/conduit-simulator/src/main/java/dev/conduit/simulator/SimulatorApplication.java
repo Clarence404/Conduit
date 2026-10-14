@@ -31,7 +31,7 @@ public final class SimulatorApplication {
     }
 
     private static void run() throws InterruptedException {
-        SimulatorConfig config = SimulatorConfig.fromEnv(System.getenv());
+        SimulatorConfig config = SimulatorConfig.load();
         ConduitApiClient api = new ConduitApiClient(config.apiUrl());
         loginWithRetry(api, config);
 

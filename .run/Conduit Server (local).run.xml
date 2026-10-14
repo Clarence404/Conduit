@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Conduit Server (local)" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="dev.conduit.server.ServerApplication" />
+    <module name="conduit-server" />
+    <option name="VM_PARAMETERS" value="-Dspring.profiles.active=local" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
