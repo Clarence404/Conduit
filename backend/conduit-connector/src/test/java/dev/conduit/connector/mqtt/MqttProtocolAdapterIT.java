@@ -30,6 +30,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -82,7 +83,7 @@ class MqttProtocolAdapterIT {
         bus.ensureGroup(GROUP);
 
         var props = new MqttConnectorProperties(EMQX.getHost(), EMQX.getMappedPort(1883),
-                "conduit-connector-it", null, null, "conduit", 300, "conduit-");
+                "conduit-connector-it-" + UUID.randomUUID(), null, null, "it-" + UUID.randomUUID(), 300, "conduit-");
         adapter = new MqttProtocolAdapter(props, bus, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
         adapter.start();
     }
@@ -139,6 +140,9 @@ class MqttProtocolAdapterIT {
 
     @Test
     void forwardsPresenceEventsButIgnoresOwnClient() {
+        // 适配器已启动并订阅完成后再连接，确保事件真实经过过滤逻辑
+        Mqtt5BlockingClient own = device("conduit-internal-" + UUID.randomUUID());
+        own.disconnect();
         Mqtt5BlockingClient client = device("dk-presence");
         client.disconnect();
 
@@ -155,6 +159,7 @@ class MqttProtocolAdapterIT {
             assertThat(d.message().deviceKey()).isEqualTo("dk-presence");
             assertThat(d.message().type()).isEqualTo(MessageType.PRESENCE_CONNECTED);
         });
+        // 自有客户端的事件先于 dk-presence 产生，此时必已处理完毕
         assertThat(received).noneSatisfy(d ->
                 assertThat(d.message().deviceKey()).startsWith("conduit-"));
     }
