@@ -8,15 +8,32 @@
 
 ## 架构
 
+```mermaid
+flowchart LR
+    D[设备] -->|MQTT| E[EMQX]
+    E -->|"① 连接时同步鉴权"| A
+    E -->|共享订阅| C[conduit-connector]
+    C -->|写入| R[(Redis Streams)]
+    R -->|"② 消费组拉取"| P
+    subgraph S["conduit-server（同一个进程）"]
+        A["鉴权回调<br/>/internal/mqtt/auth"]
+        P[数据流水线]
+        API[REST 接口]
+    end
+    A --> PG[(PostgreSQL)]
+    P --> IF[(InfluxDB)]
+    P --> RD[(Redis 最新值 / 在线状态)]
+    API --> PG
+    API --> RD
+    W["Vue 前端（nginx）"] -->|/api| API
 ```
-设备 ──MQTT──▶ EMQX ──HTTP 鉴权──▶ conduit-server
-                │
-                ▼
-        conduit-connector ──▶ Redis Streams ──▶ conduit-server ──▶ InfluxDB / Redis / PostgreSQL
-                                                     │
-                                                     ▼
-                                               Vue 前端（nginx）
-```
+
+`conduit-server` 只有一个进程，但有两个入口：
+
+- **① 鉴权回调（控制面）**：设备建立 MQTT 连接时，EMQX 同步调用它，拿到 allow / deny 才放行。频率低，每次连接一次。server 不可用时新设备连不上，已连接的设备不受影响。
+- **② 数据流水线（数据面）**：设备每条上报都先经 connector 写入 Redis Streams，server 以消费组身份异步拉取、处理、入库后再确认。server 重启期间消息在 Redis 中排队，恢复后继续处理，不丢数据。
+
+设备数据从不直连 server，所以 server 重启或变慢不会堵住 EMQX；新增协议也只需在 connector 侧加适配器。完整接入流程见[设备接入指南](docs/device-integration.md)。
 
 | 模块 | 说明 |
 |---|---|
