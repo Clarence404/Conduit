@@ -1,6 +1,8 @@
 package dev.conduit.connector.mqtt;
 
 import com.hivemq.client.mqtt.datatypes.MqttTopic;
+import com.hivemq.client.mqtt.mqtt5.lifecycle.Mqtt5ClientConnectedContext;
+import com.hivemq.client.mqtt.mqtt5.message.connect.connack.Mqtt5ConnAck;
 import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5Publish;
 import dev.conduit.common.bus.MessageBus;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,7 +13,13 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -63,6 +71,7 @@ class MqttProtocolAdapterTest {
         t.interrupt();
         t.join(2000);
 
+        assertThat(t.isAlive()).isFalse();
         verify(publish, never()).acknowledge();
     }
 
@@ -79,32 +88,61 @@ class MqttProtocolAdapterTest {
 
     @Test
     void subscribeIsRetriedWhileConnectedAndNeverDisconnects() throws Exception {
-        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
-        java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
-        java.util.function.Supplier<java.util.concurrent.CompletableFuture<?>> subscriber = () -> {
+        AtomicInteger calls = new AtomicInteger();
+        CountDownLatch done = new CountDownLatch(1);
+        Supplier<CompletableFuture<?>> subscriber = () -> {
             if (calls.incrementAndGet() < 3) {
-                return java.util.concurrent.CompletableFuture.failedFuture(new IllegalStateException("suback fail"));
+                return CompletableFuture.failedFuture(new IllegalStateException("suback fail"));
             }
             done.countDown();
-            return java.util.concurrent.CompletableFuture.completedFuture(null);
+            return CompletableFuture.completedFuture(null);
         };
 
         adapter.subscribeWithRetry(subscriber, () -> true, 0);
 
-        org.assertj.core.api.Assertions.assertThat(done.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-        org.assertj.core.api.Assertions.assertThat(calls.get()).isEqualTo(3);
+        assertThat(done.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(calls.get()).isEqualTo(3);
         adapter.stop();
     }
 
     @Test
     void subscribeRetryStopsWhenDisconnected() throws Exception {
-        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        AtomicInteger calls = new AtomicInteger();
         adapter.subscribeWithRetry(() -> {
             calls.incrementAndGet();
-            return java.util.concurrent.CompletableFuture.failedFuture(new IllegalStateException("fail"));
+            return CompletableFuture.failedFuture(new IllegalStateException("fail"));
         }, () -> false, 0);
         Thread.sleep(100);
-        org.assertj.core.api.Assertions.assertThat(calls.get()).isEqualTo(1);
+        assertThat(calls.get()).isEqualTo(1);
         adapter.stop();
+    }
+
+    @Test
+    void everyConnackSubscribesEvenWhenSessionPresentAndSignalCompletesOnlyOnSuback() {
+        AtomicInteger calls = new AtomicInteger();
+        adapter.subscriber = () -> calls.incrementAndGet() == 1
+                ? CompletableFuture.failedFuture(new IllegalStateException("dropped before suback"))
+                : CompletableFuture.completedFuture(null);
+        adapter.connected = () -> false; // first attempt fails and is not retried (connection lost)
+
+        adapter.onConnected(connAckContext(false));
+
+        assertThat(calls.get()).isEqualTo(1);
+        assertThat(adapter.initialSubscription).isNotDone();
+
+        // auto-reconnect: broker kept the session (sessionPresent=true) but it has no subscriptions
+        adapter.onConnected(connAckContext(true));
+
+        assertThat(calls.get()).isEqualTo(2);
+        assertThat(adapter.initialSubscription).isCompleted();
+        adapter.stop();
+    }
+
+    private static Mqtt5ClientConnectedContext connAckContext(boolean sessionPresent) {
+        Mqtt5ConnAck connAck = mock(Mqtt5ConnAck.class);
+        when(connAck.isSessionPresent()).thenReturn(sessionPresent);
+        Mqtt5ClientConnectedContext ctx = mock(Mqtt5ClientConnectedContext.class);
+        when(ctx.getConnAck()).thenReturn(connAck);
+        return ctx;
     }
 }

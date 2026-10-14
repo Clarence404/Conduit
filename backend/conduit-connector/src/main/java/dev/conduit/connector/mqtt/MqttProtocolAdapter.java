@@ -6,7 +6,6 @@ import com.hivemq.client.mqtt.MqttGlobalPublishFilter;
 import com.hivemq.client.mqtt.datatypes.MqttQos;
 import com.hivemq.client.mqtt.mqtt5.Mqtt5AsyncClient;
 import com.hivemq.client.mqtt.mqtt5.Mqtt5ClientBuilder;
-import com.hivemq.client.mqtt.mqtt5.lifecycle.Mqtt5ClientConnectedContext;
 import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5Publish;
 import dev.conduit.common.bus.MessageBus;
 import dev.conduit.common.message.MessageType;
@@ -48,10 +47,14 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
             Thread.ofPlatform().name("mqtt-delivery").daemon().factory());
     private final ScheduledExecutorService subscribeRetryExecutor = Executors.newSingleThreadScheduledExecutor(
             Thread.ofPlatform().name("mqtt-subscribe-retry").daemon().factory());
-    private final CompletableFuture<Void> initialSubscription = new CompletableFuture<>();
+    /** 仅在某次订阅真正收到成功 SUBACK 时完成；start() 据此判断就绪。 */
+    final CompletableFuture<Void> initialSubscription = new CompletableFuture<>();
+    // 测试接缝：默认走真实客户端
+    Supplier<CompletableFuture<?>> subscriber = this::subscribe;
+    BooleanSupplier connected = () -> this.client != null && this.client.getState().isConnected();
     private volatile boolean stopping;
 
-    private Mqtt5AsyncClient client;
+    private volatile Mqtt5AsyncClient client;
 
     public MqttProtocolAdapter(MqttConnectorProperties props, MessageBus bus, Clock clock) {
         this(props, bus, clock, Duration.ofSeconds(1));
@@ -90,20 +93,26 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
         // 先注册全局回调再连接：持久会话重连后 broker 会直接推送积压消息
         client.publishes(MqttGlobalPublishFilter.SUBSCRIBED, this::onPublish, deliveryExecutor, true);
 
-        client.connectWith()
-                .cleanStart(false)
-                .sessionExpiryInterval(props.sessionExpirySeconds())
-                .send().join();
-        // 订阅由 connected listener 完成；等待首次订阅就绪后才返回
         try {
+            client.connectWith()
+                    .cleanStart(false)
+                    .sessionExpiryInterval(props.sessionExpirySeconds())
+                    .send().join();
+            // 订阅由 connected listener 完成；等待首次订阅就绪后才返回
             initialSubscription.get(30, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
+            cleanupAfterFailedStart();
             throw new IllegalStateException("Timed out after 30s waiting for MQTT subscriptions to be established", e);
         } catch (ExecutionException e) {
+            cleanupAfterFailedStart();
             throw new IllegalStateException("MQTT subscription failed", e.getCause());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            cleanupAfterFailedStart();
             throw new IllegalStateException("Interrupted while waiting for MQTT subscriptions", e);
+        } catch (RuntimeException e) {
+            cleanupAfterFailedStart();
+            throw new IllegalStateException("MQTT connect to " + props.host() + ":" + props.port() + " failed", e);
         }
 
         log.info("MQTT adapter connected to {}:{} as {}", props.host(), props.port(), props.clientId());
@@ -113,26 +122,42 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
     public void stop() {
         stopping = true;
         subscribeRetryExecutor.shutdownNow();
-        if (client != null && client.getState().isConnected()) {
-            client.disconnect().join();
-        }
+        disconnectQuietly();
         deliveryExecutor.shutdownNow();
     }
 
-    /** 会话丢失（sessionPresent=false，含首次连接）时重新订阅；运行在事件循环上，不可阻塞。 */
-    private void onConnected(MqttClientConnectedContext context) {
-        boolean sessionPresent = context instanceof Mqtt5ClientConnectedContext c
-                && c.getConnAck().isSessionPresent();
-        if (sessionPresent) {
-            initialSubscription.complete(null);
-            return;
+    private void cleanupAfterFailedStart() {
+        stopping = true;
+        subscribeRetryExecutor.shutdownNow();
+        disconnectQuietly();
+        deliveryExecutor.shutdownNow();
+    }
+
+    /** 有界等待断开，避免 broker 无响应时无限阻塞。 */
+    private void disconnectQuietly() {
+        Mqtt5AsyncClient c = client;
+        if (c != null && c.getState().isConnected()) {
+            try {
+                c.disconnect().get(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (ExecutionException | TimeoutException e) {
+                log.warn("MQTT disconnect did not complete cleanly: {}", e.toString());
+            }
         }
-        subscribeWithRetry(this::subscribe, () -> client.getState().isConnected(), 0);
+    }
+
+    /**
+     * 每次 CONNACK 都订阅，不看 sessionPresent：首次订阅失败/断线后重连可能返回 sessionPresent=true
+     * 但会话里并没有订阅。MQTT 5 重复订阅只是替换原订阅，无害。运行在事件循环上，不可阻塞。
+     */
+    void onConnected(MqttClientConnectedContext context) {
+        subscribeWithRetry(subscriber, connected, 0);
     }
 
     /**
      * 订阅失败时按同一退避策略重试；仅在仍连接且未停止时重试。绝不 disconnect()：
-     * 客户端主动断开不会触发自动重连。若连接断开，下一次 CONNACK(sessionPresent=false) 会重新订阅。
+     * 客户端主动断开不会触发自动重连。若连接断开，下一次 CONNACK 会重新订阅。
      * 首次订阅信号仅在 SUBACK 成功时完成。
      */
     void subscribeWithRetry(Supplier<CompletableFuture<?>> subscriber, BooleanSupplier connected, int attempt) {
