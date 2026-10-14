@@ -37,7 +37,7 @@ services:
       DOCKER_INFLUXDB_INIT_RETENTION: 30d
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:?INFLUX_TOKEN is required}
     ports:
-      - "${INFLUX_PORT:-8096}:8086"
+      - "${BIND_ADDR:-127.0.0.1}:${INFLUX_PORT:-8096}:8086"
     volumes:
       - influx-data:/var/lib/influxdb2
     healthcheck:
@@ -60,8 +60,8 @@ services:
     volumes:
       - emqx-data:/opt/emqx/data
     ports:
-      - "${MQTT_PORT:-1883}:1883"
-      - "${EMQX_DASHBOARD_PORT:-18083}:18083"
+      - "${BIND_ADDR:-127.0.0.1}:${MQTT_PORT:-1883}:1883"
+      - "${BIND_ADDR:-127.0.0.1}:${EMQX_DASHBOARD_PORT:-18083}:18083"
     # 设备/connector 的连接鉴权回调 conduit-server：server 就绪后再起 EMQX，
     # 否则 HTTP 鉴权资源启动时解析不到主机，早到的连接会被拒绝
     depends_on:
@@ -92,7 +92,7 @@ services:
       CONNECTOR_MQTT_PASSWORD: ${CONNECTOR_MQTT_PASSWORD:?CONNECTOR_MQTT_PASSWORD is required}
       PIPELINE_CLAIM_MIN_IDLE: ${PIPELINE_CLAIM_MIN_IDLE:-60s}
     ports:
-      - "${API_PORT:-8091}:8080"
+      - "${BIND_ADDR:-127.0.0.1}:${API_PORT:-8091}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -140,8 +140,10 @@ services:
   conduit-web:
     build:
       context: ../frontend
+      args:
+        VITE_MQTT_PORT: ${MQTT_PORT:-1883}
     ports:
-      - "${WEB_PORT:-8090}:80"
+      - "${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-8090}:80"
     depends_on:
       - conduit-server
     restart: unless-stopped

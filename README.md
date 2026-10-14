@@ -30,6 +30,13 @@
 
 需要 Docker（本机或远程均可；远程时先设置 `DOCKER_HOST=tcp://<docker-host>:2375`；该端口是无认证的 Docker API，仅限可信局域网使用）。
 
+> **安全提示**
+>
+> - `.env` 中所有 `change-me-*` 值必须在宿主机可被他人访问之前替换掉，例如用 `openssl rand -hex 32` 生成。
+> - 端口默认只绑定 `127.0.0.1`。Docker 宿主机是远程机器、或需被其他机器访问时，在 `.env` 中设置 `BIND_ADDR=0.0.0.0`，并确保网络可信。
+> - API 端口同时暴露 `/internal/mqtt/auth`（EMQX 鉴权回调，受内部 token 保护）和健康检查端点。
+> - `EMQX_DASHBOARD_PASSWORD` 仅在首次启动（`emqx-data` 卷为空）时生效；之后修改请在控制台中操作，或 `down -v` 清卷重来。
+
 ```bash
 cp deploy/.env.example deploy/.env   # 按需修改口令与端口
 docker compose -f deploy/docker-compose.yml --profile demo up -d --build
