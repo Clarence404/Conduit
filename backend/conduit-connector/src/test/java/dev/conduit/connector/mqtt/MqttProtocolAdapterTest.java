@@ -76,4 +76,35 @@ class MqttProtocolAdapterTest {
         verify(bus, times(1)).publish(any());
         verify(publish, times(1)).acknowledge();
     }
+
+    @Test
+    void subscribeIsRetriedWhileConnectedAndNeverDisconnects() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(1);
+        java.util.function.Supplier<java.util.concurrent.CompletableFuture<?>> subscriber = () -> {
+            if (calls.incrementAndGet() < 3) {
+                return java.util.concurrent.CompletableFuture.failedFuture(new IllegalStateException("suback fail"));
+            }
+            done.countDown();
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        };
+
+        adapter.subscribeWithRetry(subscriber, () -> true, 0);
+
+        org.assertj.core.api.Assertions.assertThat(done.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        org.assertj.core.api.Assertions.assertThat(calls.get()).isEqualTo(3);
+        adapter.stop();
+    }
+
+    @Test
+    void subscribeRetryStopsWhenDisconnected() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        adapter.subscribeWithRetry(() -> {
+            calls.incrementAndGet();
+            return java.util.concurrent.CompletableFuture.failedFuture(new IllegalStateException("fail"));
+        }, () -> false, 0);
+        Thread.sleep(100);
+        org.assertj.core.api.Assertions.assertThat(calls.get()).isEqualTo(1);
+        adapter.stop();
+    }
 }

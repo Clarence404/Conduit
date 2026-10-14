@@ -21,8 +21,15 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
  * 以持久会话 + 共享订阅接收设备消息，XADD 成功后才回 PUBACK（手动 ACK），保证至少一次投递。
@@ -39,6 +46,8 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
     // 单线程串行处理：保序，且阻塞重试不会卡住 Netty 事件循环
     private final ExecutorService deliveryExecutor = Executors.newSingleThreadExecutor(
             Thread.ofPlatform().name("mqtt-delivery").daemon().factory());
+    private final ScheduledExecutorService subscribeRetryExecutor = Executors.newSingleThreadScheduledExecutor(
+            Thread.ofPlatform().name("mqtt-subscribe-retry").daemon().factory());
     private final CompletableFuture<Void> initialSubscription = new CompletableFuture<>();
     private volatile boolean stopping;
 
@@ -86,7 +95,16 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
                 .sessionExpiryInterval(props.sessionExpirySeconds())
                 .send().join();
         // 订阅由 connected listener 完成；等待首次订阅就绪后才返回
-        initialSubscription.join();
+        try {
+            initialSubscription.get(30, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            throw new IllegalStateException("Timed out after 30s waiting for MQTT subscriptions to be established", e);
+        } catch (ExecutionException e) {
+            throw new IllegalStateException("MQTT subscription failed", e.getCause());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for MQTT subscriptions", e);
+        }
 
         log.info("MQTT adapter connected to {}:{} as {}", props.host(), props.port(), props.clientId());
     }
@@ -94,10 +112,11 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
     @Override
     public void stop() {
         stopping = true;
-        deliveryExecutor.shutdownNow();
+        subscribeRetryExecutor.shutdownNow();
         if (client != null && client.getState().isConnected()) {
             client.disconnect().join();
         }
+        deliveryExecutor.shutdownNow();
     }
 
     /** 会话丢失（sessionPresent=false，含首次连接）时重新订阅；运行在事件循环上，不可阻塞。 */
@@ -108,17 +127,44 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
             initialSubscription.complete(null);
             return;
         }
-        subscribe().whenComplete((ack, error) -> {
-            if (error != null) {
-                log.error("MQTT subscribe failed", error);
-                initialSubscription.completeExceptionally(error);
-                // 重连后订阅失败不能静默：断开以触发自动重连并重新订阅
-                client.disconnect();
-            } else {
+        subscribeWithRetry(this::subscribe, () -> client.getState().isConnected(), 0);
+    }
+
+    /**
+     * 订阅失败时按同一退避策略重试；仅在仍连接且未停止时重试。绝不 disconnect()：
+     * 客户端主动断开不会触发自动重连。若连接断开，下一次 CONNACK(sessionPresent=false) 会重新订阅。
+     * 首次订阅信号仅在 SUBACK 成功时完成。
+     */
+    void subscribeWithRetry(Supplier<CompletableFuture<?>> subscriber, BooleanSupplier connected, int attempt) {
+        subscriber.get().whenComplete((ack, error) -> {
+            if (error == null) {
                 log.info("MQTT subscriptions established");
                 initialSubscription.complete(null);
+                return;
+            }
+            if (stopping || !connected.getAsBoolean()) {
+                log.warn("MQTT subscribe failed and will not be retried (stopping or disconnected): {}",
+                        error.getMessage());
+                return;
+            }
+            Duration delay = backoff(attempt);
+            log.warn("MQTT subscribe failed (attempt {}), retrying in {} ms: {}",
+                    attempt + 1, delay.toMillis(), error.getMessage());
+            try {
+                subscribeRetryExecutor.schedule(() -> {
+                    if (!stopping && connected.getAsBoolean()) {
+                        subscribeWithRetry(subscriber, connected, attempt + 1);
+                    }
+                }, delay.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (RejectedExecutionException e) {
+                log.warn("MQTT subscribe retry rejected, adapter is stopping");
             }
         });
+    }
+
+    private Duration backoff(int attempt) {
+        Duration delay = initialBackoff.multipliedBy(1L << Math.min(attempt, 5));
+        return delay.compareTo(MAX_RETRY_DELAY) > 0 ? MAX_RETRY_DELAY : delay;
     }
 
     private CompletableFuture<?> subscribe() {
@@ -160,10 +206,7 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
                 bus.publish(message);
                 return true;
             } catch (RuntimeException e) {
-                Duration delay = initialBackoff.multipliedBy(1L << Math.min(attempt, 5));
-                if (delay.compareTo(MAX_RETRY_DELAY) > 0) {
-                    delay = MAX_RETRY_DELAY;
-                }
+                Duration delay = backoff(attempt);
                 log.warn("Bus publish failed for device {} (attempt {}), retrying in {} ms: {}",
                         message.deviceKey(), attempt + 1, delay.toMillis(), e.getMessage());
                 try {
