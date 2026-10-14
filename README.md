@@ -9,7 +9,7 @@
 ## 架构
 
 ```mermaid
-flowchart LR
+flowchart TB
     D[设备] -->|MQTT| E[EMQX]
     E -->|"① 连接时同步鉴权"| A
     E -->|共享订阅| C[conduit-connector]
