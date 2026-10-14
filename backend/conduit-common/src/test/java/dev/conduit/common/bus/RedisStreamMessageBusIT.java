@@ -131,4 +131,49 @@ class RedisStreamMessageBusIT {
     void readReturnsEmptyListWhenNothingArrives() {
         assertThat(bus.read(GROUP, "c1", 10, Duration.ofMillis(50))).isEmpty();
     }
+
+    @Test
+    void claimStaleIsNotStarvedByRecentlyClaimedEntriesAtHeadOfPending() throws InterruptedException {
+        bus.publish(message("dk1"));
+        bus.publish(message("dk2"));
+        String staleId = bus.publish(message("dk3"));
+        bus.read(GROUP, "a", 10, Duration.ofMillis(100));
+        Thread.sleep(400);
+        // re-claim the first two: they keep their IDs at the head of the PEL but their idle time resets
+        assertThat(bus.claimStale(GROUP, "b", Duration.ZERO, 2)).hasSize(2);
+
+        List<Delivery> claimed = bus.claimStale(GROUP, "c", Duration.ofMillis(300), 2);
+
+        assertThat(claimed).singleElement().satisfies(d -> {
+            assertThat(d.id()).isEqualTo(staleId);
+            assertThat(d.deliveryCount()).isEqualTo(2);
+        });
+    }
+
+    @Test
+    void publishTrimsStreamApproximately() {
+        MessageBus small = new RedisStreamMessageBus(redis,
+                new MessageBusProperties("test:up", "test:dead", 10, 1000));
+
+        for (int i = 0; i < 500; i++) {
+            small.publish(message("dk" + i));
+        }
+
+        assertThat(redis.opsForStream().size("test:up")).isLessThan(200);
+    }
+
+    @Test
+    void deadLetterStreamIsTrimmedApproximately() {
+        MessageBus small = new RedisStreamMessageBus(redis,
+                new MessageBusProperties("test:up", "test:dead", 100000, 10));
+        small.ensureGroup(GROUP);
+        for (int i = 0; i < 500; i++) {
+            small.publish(message("dk" + i));
+        }
+        for (Delivery d : small.read(GROUP, "c1", 500, Duration.ofMillis(100))) {
+            small.deadLetter(GROUP, d, "UNKNOWN_DEVICE");
+        }
+
+        assertThat(redis.opsForStream().size("test:dead")).isLessThan(200);
+    }
 }

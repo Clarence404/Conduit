@@ -2,13 +2,10 @@ package dev.conduit.common.bus;
 
 import dev.conduit.common.message.RawMessage;
 import dev.conduit.common.message.RawMessageCodec;
-import org.springframework.data.domain.Range;
 import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.RedisStreamCommands.XAddOptions;
 import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
-import org.springframework.data.redis.connection.stream.PendingMessage;
-import org.springframework.data.redis.connection.stream.PendingMessages;
 import org.springframework.data.redis.connection.stream.ReadOffset;
 import org.springframework.data.redis.connection.stream.RecordId;
 import org.springframework.data.redis.connection.stream.StreamOffset;
@@ -16,15 +13,19 @@ import org.springframework.data.redis.connection.stream.StreamReadOptions;
 import org.springframework.data.redis.connection.stream.StreamRecords;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 public class RedisStreamMessageBus implements MessageBus {
+
+    // Lettuce's generic execute() cannot decode integer replies, so XPENDING goes through a script.
+    private static final DefaultRedisScript<List> PENDING_IDLE = new DefaultRedisScript<>(
+            "return redis.call('XPENDING', KEYS[1], ARGV[1], 'IDLE', ARGV[2], '-', '+', ARGV[3])", List.class);
 
     private final StringRedisTemplate redis;
     private final MessageBusProperties props;
@@ -70,20 +71,18 @@ public class RedisStreamMessageBus implements MessageBus {
 
     @Override
     public List<Delivery> claimStale(String group, String consumer, Duration minIdle, int count) {
-        PendingMessages pending = redis.opsForStream()
-                .pending(props.streamKey(), group, Range.unbounded(), count);
-        List<PendingMessage> stale = pending.stream()
-                .filter(p -> p.getElapsedTimeSinceLastDelivery().compareTo(minIdle) >= 0)
-                .toList();
+        // IDLE filter runs server-side so the count window only holds genuinely stale entries
+        // (Spring Data Redis 3.5 XPendingOptions has no IDLE support, hence the raw command).
+        List<Object[]> stale = pendingIdle(group, minIdle, count);
         if (stale.isEmpty()) {
             return List.of();
         }
-        Map<String, Long> previousCounts = stale.stream()
-                .collect(Collectors.toMap(PendingMessage::getIdAsString, PendingMessage::getTotalDeliveryCount));
+        Map<String, Long> previousCounts = new LinkedHashMap<>();
+        stale.forEach(e -> previousCounts.put((String) e[0], (Long) e[1]));
 
         List<MapRecord<String, Object, Object>> claimed = redis.opsForStream().claim(
                 props.streamKey(), group, consumer, minIdle,
-                stale.stream().map(PendingMessage::getId).toArray(RecordId[]::new));
+                previousCounts.keySet().stream().map(RecordId::of).toArray(RecordId[]::new));
 
         return claimed.stream()
                 .map(r -> {
@@ -91,6 +90,20 @@ public class RedisStreamMessageBus implements MessageBus {
                     return new Delivery(id, toStringMap(r.getValue()), previousCounts.getOrDefault(id, 0L) + 1);
                 })
                 .toList();
+    }
+
+    /** XPENDING key group IDLE ms - + count; returns {id, totalDeliveryCount} per entry. */
+    private List<Object[]> pendingIdle(String group, Duration minIdle, int count) {
+        List<?> rows = (List<?>) redis.execute(PENDING_IDLE, List.of(props.streamKey()),
+                group, Long.toString(minIdle.toMillis()), Integer.toString(count));
+        List<Object[]> result = new java.util.ArrayList<>();
+        if (rows != null) {
+            for (Object row : rows) {
+                List<?> f = (List<?>) row; // [id, consumer, idleMs, deliveryCount]
+                result.add(new Object[]{String.valueOf(f.get(0)), (Long) f.get(3)});
+            }
+        }
+        return result;
     }
 
     @Override
