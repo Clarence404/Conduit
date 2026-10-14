@@ -1,0 +1,176 @@
+name: conduit
+
+services:
+  postgres:
+    image: postgres:16.8
+    environment:
+      POSTGRES_DB: conduit
+      POSTGRES_USER: conduit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conduit -d conduit"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.2
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  influxdb:
+    image: influxdb:2.7.11
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: conduit
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD:?INFLUX_PASSWORD is required}
+      DOCKER_INFLUXDB_INIT_ORG: conduit
+      DOCKER_INFLUXDB_INIT_BUCKET: telemetry
+      DOCKER_INFLUXDB_INIT_RETENTION: 30d
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:?INFLUX_TOKEN is required}
+    ports:
+      - "${INFLUX_PORT:-8096}:8086"
+    volumes:
+      - influx-data:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  emqx:
+    build:
+      context: ./emqx
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        sed "s|__CONDUIT_INTERNAL_TOKEN__|$${CONDUIT_INTERNAL_TOKEN}|" /conduit/base.hocon.tpl > /opt/emqx/etc/base.hocon
+        && exec /usr/bin/docker-entrypoint.sh /opt/emqx/bin/emqx foreground
+    environment:
+      CONDUIT_INTERNAL_TOKEN: ${CONDUIT_INTERNAL_TOKEN:?CONDUIT_INTERNAL_TOKEN is required}
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:?EMQX_DASHBOARD_PASSWORD is required}
+    volumes:
+      - emqx-data:/opt/emqx/data
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+      - "${EMQX_DASHBOARD_PORT:-18083}:18083"
+    # 设备/connector 的连接鉴权回调 conduit-server：server 就绪后再起 EMQX，
+    # 否则 HTTP 鉴权资源启动时解析不到主机，早到的连接会被拒绝
+    depends_on:
+      conduit-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 5s
+      retries: 30
+    restart: unless-stopped
+
+  conduit-server:
+    build:
+      context: ../backend
+      args:
+        MODULE: conduit-server
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: redis
+      INFLUX_URL: http://influxdb:8086
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      CONDUIT_ADMIN_USERNAME: ${CONDUIT_ADMIN_USERNAME:-admin}
+      CONDUIT_ADMIN_PASSWORD: ${CONDUIT_ADMIN_PASSWORD:?CONDUIT_ADMIN_PASSWORD is required}
+      CONDUIT_JWT_SECRET: ${CONDUIT_JWT_SECRET:?CONDUIT_JWT_SECRET is required}
+      CONDUIT_INTERNAL_TOKEN: ${CONDUIT_INTERNAL_TOKEN}
+      CONNECTOR_MQTT_USERNAME: ${CONNECTOR_MQTT_USERNAME:-conduit-connector}
+      CONNECTOR_MQTT_PASSWORD: ${CONNECTOR_MQTT_PASSWORD:?CONNECTOR_MQTT_PASSWORD is required}
+      PIPELINE_CLAIM_MIN_IDLE: ${PIPELINE_CLAIM_MIN_IDLE:-60s}
+    ports:
+      - "${API_PORT:-8091}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+    healthcheck:
+      # JRE 镜像无 curl/wget：用 bash /dev/tcp 请求 readiness 探针，
+      # 只有 ApplicationRunner（含 AdminBootstrap）执行完毕后才返回 UP
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/8080
+          && printf 'GET /actuator/health/readiness HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3
+          && grep -q '"UP"' <&3
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 30
+    restart: unless-stopped
+
+  conduit-connector:
+    build:
+      context: ../backend
+      args:
+        MODULE: conduit-connector
+    environment:
+      REDIS_HOST: redis
+      EMQX_HOST: emqx
+      CONNECTOR_CLIENT_ID: conduit-connector-1
+      CONNECTOR_MQTT_USERNAME: ${CONNECTOR_MQTT_USERNAME:-conduit-connector}
+      CONNECTOR_MQTT_PASSWORD: ${CONNECTOR_MQTT_PASSWORD}
+    depends_on:
+      redis:
+        condition: service_healthy
+      emqx:
+        condition: service_healthy
+      conduit-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  conduit-web:
+    build:
+      context: ../frontend
+    ports:
+      - "${WEB_PORT:-8090}:80"
+    depends_on:
+      - conduit-server
+    restart: unless-stopped
+
+  simulator:
+    profiles: ["demo"]
+    build:
+      context: ../backend
+      args:
+        MODULE: conduit-simulator
+        JAR_NAME: conduit-simulator-exec
+    environment:
+      CONDUIT_API_URL: http://conduit-server:8080
+      CONDUIT_ADMIN_USERNAME: ${CONDUIT_ADMIN_USERNAME:-admin}
+      CONDUIT_ADMIN_PASSWORD: ${CONDUIT_ADMIN_PASSWORD}
+      MQTT_HOST: emqx
+      SIM_DEVICE_COUNT: ${SIM_DEVICE_COUNT:-100}
+      SIM_INTERVAL_MS: ${SIM_INTERVAL_MS:-10000}
+    depends_on:
+      emqx:
+        condition: service_healthy
+      conduit-server:
+        condition: service_healthy
+      conduit-connector:
+        condition: service_started
+    restart: on-failure
+
+volumes:
+  pg-data:
+  redis-data:
+  influx-data:
+  emqx-data:
