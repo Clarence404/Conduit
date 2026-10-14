@@ -20,6 +20,7 @@
     <module>conduit-common</module>
     <module>conduit-connector</module>
     <module>conduit-server</module>
+    <module>conduit-simulator</module>
   </modules>
 
   <properties>
@@ -35,6 +36,11 @@
       <dependency>
         <groupId>dev.conduit</groupId>
         <artifactId>conduit-common</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>dev.conduit</groupId>
+        <artifactId>conduit-simulator</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
