@@ -8,6 +8,7 @@ import com.influxdb.exceptions.InfluxException;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 @Component
@@ -27,10 +28,26 @@ public class TelemetryWriter {
         if (points.isEmpty()) {
             return WriteResult.ok();
         }
+        // 先全部转换：无法转换的点（不支持的类型、null 等）直接拒绝，不能让它导致整批无限重试。
+        List<WriteResult.Rejected> rejected = new ArrayList<>();
+        List<Integer> indexes = new ArrayList<>();
+        List<Point> converted = new ArrayList<>();
+        for (int i = 0; i < points.size(); i++) {
+            try {
+                converted.add(toPoint(points.get(i)));
+                indexes.add(i);
+            } catch (RuntimeException e) {
+                rejected.add(new WriteResult.Rejected(i, String.valueOf(e.getMessage())));
+            }
+        }
+        if (converted.isEmpty()) {
+            return new WriteResult(rejected);
+        }
+
         WriteApiBlocking api = client.getWriteApiBlocking();
         try {
-            api.writePoints(props.bucket(), props.org(), points.stream().map(TelemetryWriter::toPoint).toList());
-            return WriteResult.ok();
+            api.writePoints(props.bucket(), props.org(), converted);
+            return new WriteResult(rejected);
         } catch (InfluxException e) {
             if (!isDataRejection(e)) {
                 throw new TelemetryUnavailableException(e);
@@ -40,19 +57,19 @@ public class TelemetryWriter {
         }
 
         // 整批被拒（通常是字段类型冲突）：逐条重写，找出真正有问题的点。重写成功的点是幂等的。
-        List<WriteResult.Rejected> rejected = new ArrayList<>();
-        for (int i = 0; i < points.size(); i++) {
+        for (int i = 0; i < converted.size(); i++) {
             try {
-                api.writePoint(props.bucket(), props.org(), toPoint(points.get(i)));
+                api.writePoint(props.bucket(), props.org(), converted.get(i));
             } catch (InfluxException e) {
                 if (!isDataRejection(e)) {
                     throw new TelemetryUnavailableException(e);
                 }
-                rejected.add(new WriteResult.Rejected(i, e.getMessage()));
+                rejected.add(new WriteResult.Rejected(indexes.get(i), e.getMessage()));
             } catch (RuntimeException e) {
                 throw new TelemetryUnavailableException(e);
             }
         }
+        rejected.sort(Comparator.comparingInt(WriteResult.Rejected::index));
         return new WriteResult(rejected);
     }
 
