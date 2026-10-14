@@ -181,6 +181,7 @@ server、connector、simulator 和前端都可以直接在 IDEA 里运行，连�
          host: <docker-host>
          port: 1883
          client-id: conduit-connector-idea   # 必须以 conduit- 开头
+         session-expiry-seconds: 0           # 必须为 0，见下方说明
          username: <CONNECTOR_MQTT_USERNAME>
          password: <CONNECTOR_MQTT_PASSWORD>
    ```
@@ -201,7 +202,7 @@ server、connector、simulator 和前端都可以直接在 IDEA 里运行，连�
 
 5. 先启动 `Conduit Server (local)`，再按需启动 Connector、Simulator、Frontend。前端默认把 `/api` 代理到本机 8080；要直接连远程 server，可设置环境变量 `VITE_API_TARGET=http://<docker-host>:8091`。
 
-说明：IDE 中的实例与容器中的实例同时运行时，会加入同一个消费组分担消息、加入同一个共享订阅分担上报，数据不会重复也不会丢；设备鉴权仍由容器里的 server 完成。需要只让本地 connector 收消息时，可以 `docker compose -f deploy/docker-compose.yml stop conduit-connector`；不要停容器里的 `conduit-server`，否则 EMQX 的鉴权回调无处可去，新设备将无法连接。
+说明：IDE 中的实例与容器中的实例同时运行时，会加入同一个消费组分担消息、加入同一个共享订阅分担上报，数据不会重复也不会丢；设备鉴权仍由容器里的 server 完成。本地 connector 的 `session-expiry-seconds` 必须设为 0：它加入了和容器 connector 相同的共享订阅组，如果使用持久会话，进程停止后 EMQX 仍会把一部分设备消息分给这个已离线的会话，这些消息要等会话过期（默认 1 小时）才会被丢弃，期间相当于丢数据。需要只让本地 connector 收消息时，可以 `docker compose -f deploy/docker-compose.yml stop conduit-connector`；不要停容器里的 `conduit-server`，否则 EMQX 的鉴权回调无处可去，新设备将无法连接。
 
 ## 端到端测试：杀进程不丢数据
 
