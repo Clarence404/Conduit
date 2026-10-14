@@ -1,0 +1,14 @@
+package dev.conduit.server.pipeline;
+
+public enum DeadReason {
+    MALFORMED_ENVELOPE,
+    MALFORMED_JSON,
+    INVALID_PARAMS,
+    UNKNOWN_DEVICE,
+    DEVICE_DISABLED,
+    PRODUCT_MISMATCH,
+    TS_OUT_OF_RANGE,
+    FIELD_TYPE_CONFLICT,
+    UNSUPPORTED_TYPE,
+    MAX_DELIVERY_EXCEEDED
+}
