@@ -15,6 +15,7 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const editingKey = ref<string | null>(null)
 const saving = ref(false)
+const removing = ref(false)
 const form = reactive({ name: '', description: '' })
 
 async function load() {
@@ -45,6 +46,7 @@ function openEdit(row: ProductView) {
 }
 
 async function save() {
+  if (saving.value) return
   if (!form.name.trim()) {
     ElMessage.warning('请输入产品名称')
     return
@@ -68,17 +70,24 @@ async function save() {
 }
 
 async function remove(row: ProductView) {
+  if (removing.value) return
   try {
     await ElMessageBox.confirm(`确定删除产品「${row.name}」？`, '删除产品', { type: 'warning' })
   } catch {
     return
   }
+  removing.value = true
   try {
     await productApi.remove(row.productKey)
     ElMessage.success('已删除')
+    if (items.value.length === 1 && page.value > 1) {
+      page.value--
+    }
     await load()
   } catch (e) {
     ElMessage.error(problemMessage(e))
+  } finally {
+    removing.value = false
   }
 }
 
@@ -116,7 +125,12 @@ onMounted(load)
       @current-change="load"
     />
 
-    <el-dialog v-model="dialogVisible" :title="editingKey ? '编辑产品' : '新建产品'" width="480px">
+    <el-dialog
+      v-model="dialogVisible"
+      :title="editingKey ? '编辑产品' : '新建产品'"
+      width="480px"
+      :close-on-click-modal="false"
+    >
       <el-form label-width="80px" @submit.prevent="save">
         <el-form-item label="名称" required>
           <el-input v-model="form.name" maxlength="128" />
