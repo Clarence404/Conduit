@@ -1,0 +1,31 @@
+{
+  "name": "conduit-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "2.3.1",
+    "axios": "1.8.4",
+    "element-plus": "2.9.7",
+    "pinia": "2.3.1",
+    "vue": "3.5.13",
+    "vue-router": "4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.14.0",
+    "@vitejs/plugin-vue": "5.2.3",
+    "@vue/test-utils": "2.4.6",
+    "axios-mock-adapter": "2.1.0",
+    "jsdom": "26.0.0",
+    "typescript": "5.8.3",
+    "vite": "6.2.6",
+    "vitest": "3.1.1",
+    "vue-tsc": "2.2.8"
+  }
+}
