@@ -97,4 +97,13 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <profile>
+      <id>e2e</id>
+      <modules>
+        <module>conduit-e2e</module>
+      </modules>
+    </profile>
+  </profiles>
 </project>
