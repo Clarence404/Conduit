@@ -1,0 +1,17 @@
+conduit:
+  bootstrap:
+    admin-username: admin
+    admin-password: admin-pass-123
+  auth:
+    jwt-secret: test-jwt-secret-test-jwt-secret-0123456789
+  internal:
+    token: test-internal-token
+    connector-username: conduit-connector
+    connector-password: connector-pass
+  pipeline:
+    enabled: false
+    consumer: test-consumer
+    claim-min-idle: 0s
+  bus:
+    stream-key: test:up
+    dead-key: test:dead

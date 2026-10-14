@@ -1,0 +1,58 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: conduit-server
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:conduit}
+    username: ${POSTGRES_USER:conduit}
+    password: ${POSTGRES_PASSWORD:conduit}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  mvc:
+    problemdetails:
+      enabled: true
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    arg-name-based-constructor-auto-mapping: true
+  global-config:
+    banner: false
+
+conduit:
+  bootstrap:
+    admin-username: ${CONDUIT_ADMIN_USERNAME:admin}
+    admin-password: ${CONDUIT_ADMIN_PASSWORD:}
+  auth:
+    jwt-secret: ${CONDUIT_JWT_SECRET:}
+    access-ttl: 15m
+    refresh-ttl: 7d
+    cookie-secure: false
+  internal:
+    token: ${CONDUIT_INTERNAL_TOKEN:}
+    connector-username: ${CONNECTOR_MQTT_USERNAME:conduit-connector}
+    connector-password: ${CONNECTOR_MQTT_PASSWORD:}
+  influx:
+    url: ${INFLUX_URL:http://localhost:8086}
+    token: ${INFLUX_TOKEN:}
+    org: ${INFLUX_ORG:conduit}
+    bucket: ${INFLUX_BUCKET:telemetry}
+  pipeline:
+    enabled: true
+    group: conduit-server
+    consumer: ${PIPELINE_CONSUMER:server-${random.uuid}}
+    batch-size: 100
+    block: 1s
+    claim-min-idle: ${PIPELINE_CLAIM_MIN_IDLE:60s}
+    claim-interval: 10s
+    max-deliveries: 5
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
