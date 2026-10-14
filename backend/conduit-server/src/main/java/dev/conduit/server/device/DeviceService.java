@@ -17,6 +17,9 @@ import dev.conduit.server.security.SecretHasher;
 import dev.conduit.server.telemetry.LatestValueStore;
 import dev.conduit.server.web.ApiException;
 import dev.conduit.server.web.PageView;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -27,6 +30,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class DeviceService {
+
+    private static final Logger log = LoggerFactory.getLogger(DeviceService.class);
 
     private final DeviceMapper devices;
     private final ProductMapper products;
@@ -114,9 +119,17 @@ public class DeviceService {
     public void delete(String deviceKey) {
         Device d = require(deviceKey);
         devices.deleteById(d.getId());
-        identityCache.evict(deviceKey);
-        latest.delete(deviceKey);
-        presence.delete(deviceKey);
+        bestEffort(deviceKey, "auth", () -> identityCache.evict(deviceKey));
+        bestEffort(deviceKey, "latest", () -> latest.delete(deviceKey));
+        bestEffort(deviceKey, "presence", () -> presence.delete(deviceKey));
+    }
+
+    private void bestEffort(String deviceKey, String keyName, Runnable cleanup) {
+        try {
+            cleanup.run();
+        } catch (DataAccessException e) {
+            log.warn("Redis cleanup failed after device delete: deviceKey={}, key={}", deviceKey, keyName, e);
+        }
     }
 
     public Device require(String deviceKey) {
