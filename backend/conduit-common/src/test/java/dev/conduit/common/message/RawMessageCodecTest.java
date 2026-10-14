@@ -62,4 +62,44 @@ class RawMessageCodecTest {
         assertThatThrownBy(() -> RawMessageCodec.fromFields(fields))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    private static Map<String, String> validFields() {
+        return new HashMap<>(RawMessageCodec.toFields(
+                new RawMessage("pk", "dk", MessageType.PROPERTY, new byte[0], 1L, null)));
+    }
+
+    @Test
+    void rejectsMissingPayload() {
+        Map<String, String> fields = validFields();
+        fields.remove("payload");
+
+        assertThatThrownBy(() -> RawMessageCodec.fromFields(fields))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsNonNumericReceivedAt() {
+        Map<String, String> fields = validFields();
+        fields.put("receivedAt", "yesterday");
+
+        assertThatThrownBy(() -> RawMessageCodec.fromFields(fields))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void rejectsInvalidBase64Payload() {
+        Map<String, String> fields = validFields();
+        fields.put("payload", "!!not-base64!!");
+
+        assertThatThrownBy(() -> RawMessageCodec.fromFields(fields))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void toFieldsOmitsProductKeyWhenNull() {
+        Map<String, String> fields = RawMessageCodec.toFields(
+                new RawMessage(null, "dk", MessageType.PRESENCE_CONNECTED, new byte[0], 1L, null));
+
+        assertThat(fields).doesNotContainKey("pk");
+    }
 }

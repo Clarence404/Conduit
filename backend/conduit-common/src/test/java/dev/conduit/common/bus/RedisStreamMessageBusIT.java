@@ -49,7 +49,10 @@ class RedisStreamMessageBusIT {
 
     @BeforeEach
     void setUp() {
-        redis.getConnectionFactory().getConnection().serverCommands().flushAll();
+        redis.execute((org.springframework.data.redis.core.RedisCallback<Void>) c -> {
+            c.serverCommands().flushAll();
+            return null;
+        });
         bus = new RedisStreamMessageBus(redis,
                 new MessageBusProperties("test:up", "test:dead", 1000, 1000));
         bus.ensureGroup(GROUP);
@@ -122,6 +125,7 @@ class RedisStreamMessageBusIT {
             assertThat(r.getValue()).containsEntry("reason", "UNKNOWN_DEVICE");
             assertThat(r.getValue()).containsEntry("originalId", d.id());
             assertThat(r.getValue()).containsEntry("dk", "dk1");
+            assertThat(r.getValue()).containsEntry("deliveryCount", "1");
             assertThat(r.getValue()).containsKey("failedAt");
         });
         assertThat(bus.claimStale(GROUP, "c2", Duration.ZERO, 10)).isEmpty();

@@ -8,6 +8,15 @@ import java.util.List;
 /**
  * 接入与处理之间的消息总线。V0.1 由 Redis Streams 实现，后续可替换为 Kafka / RabbitMQ。
  * 语义为至少一次投递：消费者处理成功后必须 ack，否则消息会被重新认领。
+ *
+ * <p>契约：
+ * <ul>
+ *   <li>{@link #read} 首次投递的 deliveryCount 为 1；阻塞超时返回空列表。{@code block} 必须小于 Redis
+ *       客户端命令超时，否则阻塞读会被客户端当作超时报错。</li>
+ *   <li>{@link #claimStale} 在服务端按空闲时间过滤，返回的 deliveryCount 为此前投递次数 + 1。
+ *       已被 MAXLEN 裁剪掉的条目不会再出现在结果中（见设计文档 9.3 已知限制）。</li>
+ *   <li>{@link #deadLetter} 先写死信流再 ack 原消息；两步之间崩溃会产生重复死信，属于至少一次语义可接受。</li>
+ * </ul>
  */
 public interface MessageBus {
 
