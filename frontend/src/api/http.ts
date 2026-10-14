@@ -1,4 +1,4 @@
-import axios, { type AxiosError, type AxiosInstance } from 'axios'
+import axios, { isAxiosError, type AxiosError, type AxiosInstance } from 'axios'
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -16,6 +16,11 @@ export interface TokenHolder {
 export const REFRESH_URL = '/api/v1/auth/refresh'
 const AUTH_PREFIX = '/api/v1/auth/'
 
+function isAuthRejection(error: unknown): boolean {
+  const status = isAxiosError(error) ? error.response?.status : undefined
+  return status === 401 || status === 403
+}
+
 /**
  * 创建带鉴权的 Axios 实例：自动附带 access token；遇到 401 时用 refresh Cookie 换新 token 并重试一次，
  * 并发的多个 401 共享同一次刷新。刷新失败则清空 token 并通知调用方（跳转登录）。
@@ -30,6 +35,14 @@ export function createHttp(holder: TokenHolder): AxiosInstance {
       .then((res) => {
         holder.setToken(res.data.accessToken)
         return res.data.accessToken
+      })
+      .catch((refreshError: unknown) => {
+        // 只在共享刷新失败时处理一次；仅 401/403 视为登录失效，网络错误/5xx 不登出
+        if (isAuthRejection(refreshError)) {
+          holder.setToken(null)
+          holder.onAuthFailed()
+        }
+        throw refreshError
       })
       .finally(() => {
         refreshing = null
@@ -56,9 +69,7 @@ export function createHttp(holder: TokenHolder): AxiosInstance {
       config.headers.Authorization = `Bearer ${token}`
       return http(config)
     } catch (refreshError) {
-      holder.setToken(null)
-      holder.onAuthFailed()
-      return Promise.reject(refreshError)
+      return Promise.reject(isAuthRejection(refreshError) ? refreshError : error)
     }
   })
 

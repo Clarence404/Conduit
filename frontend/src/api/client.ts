@@ -9,6 +9,6 @@ export const http = createHttp({
   },
   onAuthFailed: () => {
     useAuthStore().clear()
-    void router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+    void router.replace({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
   },
 })

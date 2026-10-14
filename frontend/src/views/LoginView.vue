@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import { problemMessage } from '@/api/errors'
+import { safeRedirect } from '@/utils/redirect'
 
 const form = reactive({ username: '', password: '' })
 const loading = ref(false)
@@ -19,7 +20,7 @@ async function submit() {
   loading.value = true
   try {
     await auth.login(form.username, form.password)
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/devices'
+    const redirect = safeRedirect(route.query.redirect)
     await router.replace(redirect)
   } catch (e) {
     ElMessage.error(problemMessage(e))

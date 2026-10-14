@@ -83,4 +83,25 @@ describe('createHttp', () => {
     expect(refreshCalls).toBe(0)
     expect(tokens.onAuthFailed).not.toHaveBeenCalled()
   })
+
+  it('notifies only once when concurrent requests all fail to refresh', async () => {
+    mock.onGet(/\/api\/v1\/(a|b|c)/).reply(401)
+    mock.onPost(REFRESH_URL).reply(401)
+
+    const results = await Promise.allSettled([http.get('/api/v1/a'), http.get('/api/v1/b'), http.get('/api/v1/c')])
+
+    expect(results.every((r) => r.status === 'rejected')).toBe(true)
+    expect(tokens.onAuthFailed).toHaveBeenCalledOnce()
+    expect(tokens.getToken()).toBeNull()
+  })
+
+  it('rejects without logging out when refresh fails with a network error', async () => {
+    mock.onGet('/api/v1/x').reply(401)
+    mock.onPost(REFRESH_URL).networkError()
+
+    await expect(http.get('/api/v1/x')).rejects.toBeTruthy()
+
+    expect(tokens.onAuthFailed).not.toHaveBeenCalled()
+    expect(tokens.getToken()).toBe('old')
+  })
 })
