@@ -52,4 +52,15 @@ class DeviceIdentityLookupIT extends IntegrationTestBase {
 
         assertThat(cache.get(cached.deviceKey())).isEmpty();
     }
+
+    @Test
+    void corruptCacheEntryFallsBackToDatabaseAndIsRepaired() {
+        TestDevice device = createDevice(defaultTenantId(), "ENABLED");
+        redis.opsForValue().set(DeviceIdentityCache.key(device.deviceKey()), "{not json");
+
+        DeviceIdentity identity = lookup.find(device.deviceKey()).orElseThrow();
+
+        assertThat(identity.productKey()).isEqualTo(device.productKey());
+        assertThat(cache.get(device.deviceKey())).contains(identity);
+    }
 }

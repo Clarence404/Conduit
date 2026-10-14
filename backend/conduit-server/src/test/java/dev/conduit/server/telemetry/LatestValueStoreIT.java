@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class LatestValueStoreIT extends IntegrationTestBase {
 
@@ -71,5 +72,39 @@ class LatestValueStoreIT extends IntegrationTestBase {
 
         assertThat(store.get(dk)).isEmpty();
         assertThat(store.lastReportTimes(List.of(dk))).isEmpty();
+    }
+
+    @Test
+    void reservedFieldNameIsRejectedAndHashUnchanged() {
+        String dk = unique("dk");
+        store.update(dk, 1000, Map.of("Ua", 1.0));
+
+        assertThatThrownBy(() -> store.update(dk, 2000, Map.of("__last", 5.0)))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(store.get(dk)).containsExactly(Map.entry("Ua", new LatestValue(1.0, 1000)));
+        assertThat(store.lastReportTimes(List.of(dk))).containsEntry(dk, 1000L);
+    }
+
+    @Test
+    void nullValueIsRejected() {
+        String dk = unique("dk");
+        Map<String, Object> params = new java.util.HashMap<>();
+        params.put("Ua", null);
+
+        assertThatThrownBy(() -> store.update(dk, 1000, params))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Ua");
+    }
+
+    @Test
+    void ordersCorrectlyWithRealisticMillisecondTimestamps() {
+        String dk = unique("dk");
+        long t = 1_760_400_000_000L;
+
+        store.update(dk, t + 1, Map.of("Ua", 2.0));
+        store.update(dk, t, Map.of("Ua", 1.0));
+
+        assertThat(store.get(dk)).containsExactly(Map.entry("Ua", new LatestValue(2.0, t + 1)));
+        assertThat(store.lastReportTimes(List.of(dk))).containsEntry(dk, t + 1);
     }
 }

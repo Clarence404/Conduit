@@ -2,6 +2,8 @@ package dev.conduit.server.device;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -11,6 +13,8 @@ import java.util.Optional;
 
 @Component
 public class DeviceIdentityCache {
+
+    private static final Logger log = LoggerFactory.getLogger(DeviceIdentityCache.class);
 
     static final Duration TTL = Duration.ofMinutes(5);
 
@@ -34,7 +38,9 @@ public class DeviceIdentityCache {
         try {
             return Optional.of(objectMapper.readValue(json, DeviceIdentity.class));
         } catch (JsonProcessingException e) {
-            throw new UncheckedIOException(e);
+            log.warn("Corrupt identity cache entry for {}, evicting: {}", deviceKey, e.getOriginalMessage());
+            evict(deviceKey);
+            return Optional.empty();
         }
     }
 

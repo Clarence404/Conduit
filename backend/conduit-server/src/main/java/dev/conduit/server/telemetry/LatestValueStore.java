@@ -40,6 +40,12 @@ public class LatestValueStore {
         List<String> args = new ArrayList<>(1 + params.size() * 2);
         args.add(Long.toString(ts));
         params.forEach((name, value) -> {
+            if (name.startsWith("__")) {
+                throw new IllegalArgumentException("Reserved parameter name: " + name);
+            }
+            if (value == null) {
+                throw new IllegalArgumentException("Null value for parameter: " + name);
+            }
             args.add(name);
             args.add(toJson(Map.of("v", value, "ts", ts)));
         });
