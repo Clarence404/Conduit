@@ -11,6 +11,7 @@ import dev.conduit.server.pipeline.codec.DecodedPayload;
 import dev.conduit.server.pipeline.codec.DecoderRegistry;
 import dev.conduit.server.pipeline.codec.PayloadDecoder;
 import dev.conduit.server.presence.PresenceHandler;
+import dev.conduit.server.presence.PresenceStore;
 import dev.conduit.server.telemetry.LatestValueStore;
 import dev.conduit.server.telemetry.TelemetryUnavailableException;
 import dev.conduit.server.telemetry.TelemetryWriter;
@@ -44,6 +45,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -67,6 +69,7 @@ class PipelineProcessorTest {
     PresenceHandler presenceHandler = mock(PresenceHandler.class);
     TelemetryWriter writer = mock(TelemetryWriter.class);
     LatestValueStore latest = mock(LatestValueStore.class);
+    PresenceStore presence = mock(PresenceStore.class);
     PipelineProcessor processor;
 
     @BeforeEach
@@ -74,7 +77,7 @@ class PipelineProcessorTest {
         PipelineProperties props = new PipelineProperties(true, GROUP, "c", 100,
                 Duration.ofSeconds(1), Duration.ofSeconds(60), Duration.ofSeconds(10), 5);
         processor = new PipelineProcessor(bus, props, identities, thingModels, decoders, presenceHandler, writer,
-                latest, meters, Duration.ofMillis(1), Duration.ofMillis(5));
+                latest, presence, meters, Duration.ofMillis(1), Duration.ofMillis(5));
         when(thingModels.find("pk")).thenReturn(Optional.of(new ProductProfile("standard-json", Map.of())));
         when(decoders.find("standard-json")).thenReturn(Optional.of(decoder));
         when(decoder.decode(any(), any())).thenReturn(new DecodedPayload(1L, Map.of("Ua", 1.0)));
@@ -116,6 +119,55 @@ class PipelineProcessorTest {
     private Delivery delivery(String id, String dk) {
         RawMessage m = new RawMessage("pk", dk, MessageType.PROPERTY, "{}".getBytes(StandardCharsets.UTF_8), 1L, Map.of());
         return new Delivery(id, RawMessageCodec.toFields(m), 1);
+    }
+
+    private Delivery deliveryAt(String id, String dk, long receivedAt) {
+        RawMessage m = new RawMessage("pk", dk, MessageType.PROPERTY, "{}".getBytes(StandardCharsets.UTF_8),
+                receivedAt, Map.of());
+        return new Delivery(id, RawMessageCodec.toFields(m), 1);
+    }
+
+    @Test
+    void marksDevicesOnlineInOneBatchCallWithLatestReceivedAtPerDevice() {
+        when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
+        when(identities.find("d2")).thenReturn(Optional.of(identity("d2")));
+
+        processor.process(List.of(deliveryAt("1-0", "d1", 100), deliveryAt("2-0", "d1", 300),
+                deliveryAt("3-0", "d2", 200)));
+
+        verify(presence, times(1)).applyDataBatch(Map.of("d1", 300L, "d2", 200L));
+    }
+
+    @Test
+    void marksOnlineOnlyAfterAck() {
+        when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
+
+        processor.process(List.of(deliveryAt("1-0", "d1", 100)));
+
+        InOrder order = inOrder(bus, presence);
+        order.verify(bus).ack(GROUP, List.of("1-0"));
+        order.verify(presence).applyDataBatch(Map.of("d1", 100L));
+    }
+
+    @Test
+    void doesNotMarkOnlineWhenMessageIsDeadLettered() {
+        when(identities.find("d1")).thenReturn(Optional.empty());
+
+        processor.process(List.of(deliveryAt("1-0", "d1", 100)));
+
+        verify(presence, never()).applyDataBatch(any());
+    }
+
+    @Test
+    void presenceFailureDoesNotFailOrRetryProcessing() {
+        when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
+        doThrow(new RedisConnectionFailureException("down")).when(presence).applyDataBatch(any());
+
+        processor.process(List.of(deliveryAt("1-0", "d1", 100)));
+
+        verify(bus, times(1)).ack(GROUP, List.of("1-0"));
+        verify(presence, times(1)).applyDataBatch(any());
+        verify(bus, never()).recordDead(any(), anyString(), anyMap());
     }
 
     @Test

@@ -34,12 +34,23 @@ public class DeviceController {
         this.service = service;
     }
 
+    /**
+     * 分页列出设备。可选筛选：productKey、keyword（名称或 deviceKey）、status（ENABLED|DISABLED）、
+     * online（true|false）、reported（RECENT|STALE|NEVER，RECENT 为最近 1 小时内有上报）、
+     * createdFrom（毫秒，含）、createdTo（毫秒，不含）。非法参数返回 400；online / reported 依赖 Redis，Redis 不可用时返回 503。
+     */
     @GetMapping
     public PageView<DeviceView> list(@RequestParam(required = false) String productKey,
                                      @RequestParam(required = false) String keyword,
+                                     @RequestParam(required = false) String status,
+                                     @RequestParam(required = false) String online,
+                                     @RequestParam(required = false) String reported,
+                                     @RequestParam(required = false) String createdFrom,
+                                     @RequestParam(required = false) String createdTo,
                                      @RequestParam(defaultValue = "1") @Min(1) int page,
                                      @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size) {
-        return service.list(productKey, keyword, page, size);
+        return service.list(DeviceFilter.parse(productKey, keyword, status, online, reported, createdFrom, createdTo),
+                page, size);
     }
 
     @PostMapping

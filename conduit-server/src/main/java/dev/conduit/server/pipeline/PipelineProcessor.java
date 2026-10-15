@@ -10,6 +10,7 @@ import dev.conduit.server.pipeline.codec.DecodedPayload;
 import dev.conduit.server.pipeline.codec.DecoderRegistry;
 import dev.conduit.server.pipeline.codec.PayloadDecoder;
 import dev.conduit.server.presence.PresenceHandler;
+import dev.conduit.server.presence.PresenceStore;
 import dev.conduit.server.telemetry.LatestValueStore;
 import dev.conduit.server.telemetry.TelemetryPoint;
 import dev.conduit.server.telemetry.TelemetryUnavailableException;
@@ -28,6 +29,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -37,7 +39,7 @@ import java.util.stream.Collectors;
 /**
  * 处理一批投递。属性消息：身份检查 → 物模型缓存取产品配置 → 按 codec 解码 → 逐测点校验 → 写 InfluxDB 与最新值 → ACK；
  * 被剔除的测点另写一条 FIELD_REJECTED 死信记录。不可恢复的错误进死信（并 ACK）；下游不可用时原地退避重试，
- * 未处理的投递保持未 ACK，之后由认领机制重新投递。重复投递由 InfluxDB 同 ts 覆盖与最新值按 ts 比较吸收。
+ * 未处理的投递保持未 ACK，之后由认领机制重新投递。属性数据落库并 ACK 后，按数据来源批量把设备标记为在线（尽力而为，失败不影响 ACK；规则见 PresenceStore）。重复投递由 InfluxDB 同 ts 覆盖与最新值按 ts 比较吸收。
  */
 @Component
 public class PipelineProcessor {
@@ -56,6 +58,7 @@ public class PipelineProcessor {
     private final PresenceHandler presenceHandler;
     private final TelemetryWriter writer;
     private final LatestValueStore latest;
+    private final PresenceStore presence;
     private final MeterRegistry meters;
     private final Duration initialBackoff;
     private final Duration maxBackoff;
@@ -70,16 +73,17 @@ public class PipelineProcessor {
     @Autowired
     public PipelineProcessor(MessageBus bus, PipelineProperties props, DeviceIdentityLookup identities,
                              ThingModelCache thingModels, DecoderRegistry decoders, PresenceHandler presenceHandler,
-                             TelemetryWriter writer, LatestValueStore latest, MeterRegistry meters) {
-        this(bus, props, identities, thingModels, decoders, presenceHandler, writer, latest, meters,
+                             TelemetryWriter writer, LatestValueStore latest, PresenceStore presence,
+                             MeterRegistry meters) {
+        this(bus, props, identities, thingModels, decoders, presenceHandler, writer, latest, presence, meters,
                 Duration.ofSeconds(1), Duration.ofSeconds(30));
     }
 
     /** 可指定退避时间的构造器，测试用（避免真实等待）。 */
     PipelineProcessor(MessageBus bus, PipelineProperties props, DeviceIdentityLookup identities,
                       ThingModelCache thingModels, DecoderRegistry decoders, PresenceHandler presenceHandler,
-                      TelemetryWriter writer, LatestValueStore latest, MeterRegistry meters,
-                      Duration initialBackoff, Duration maxBackoff) {
+                      TelemetryWriter writer, LatestValueStore latest, PresenceStore presence,
+                      MeterRegistry meters, Duration initialBackoff, Duration maxBackoff) {
         this.bus = bus;
         this.props = props;
         this.identities = identities;
@@ -88,6 +92,7 @@ public class PipelineProcessor {
         this.presenceHandler = presenceHandler;
         this.writer = writer;
         this.latest = latest;
+        this.presence = presence;
         this.meters = meters;
         this.initialBackoff = initialBackoff;
         this.maxBackoff = maxBackoff;
@@ -196,6 +201,7 @@ public class PipelineProcessor {
                 .map(WriteResult.Rejected::index).collect(Collectors.toSet());
 
         List<String> acks = new ArrayList<>();
+        Map<String, Long> reportedAt = new LinkedHashMap<>();
         for (int i = 0; i < items.size(); i++) {
             PendingProperty item = items.get(i);
             if (rejected.contains(i)) {
@@ -217,6 +223,7 @@ public class PipelineProcessor {
                     });
                 }
                 acks.add(item.delivery().id());
+                reportedAt.merge(p.deviceKey(), item.delivery().message().receivedAt(), Math::max);
             } catch (ProcessingAbortedException e) {
                 throw e;
             } catch (RuntimeException e) {
@@ -225,7 +232,27 @@ public class PipelineProcessor {
             }
         }
         ack(acks);
+        markOnline(reportedAt);
         meters.counter("conduit.pipeline.processed", "type", "property").increment(acks.size());
+    }
+
+    /**
+     * 把本批成功落库并已 ACK 的设备按「数据」来源标记为在线（{@link PresenceStore#applyDataBatch}，一次 pipeline 往返）：
+     * 补偿「设备在 transport 订阅之前就已连接、没有收到连接事件」的情况。时间取该设备本批消息的最大 receivedAt
+     * （transport 主机时钟，与 EMQX 事件时钟不同源），因此数据<b>不会推进</b>乱序保护用的 since：已在线不变，
+     * 离线设备只有数据时间超过断连时间加宽限期才会复活，晚到的断连事件仍然生效。
+     * 必须在 ACK 之后执行；这是尽力而为的附带动作，Redis 失败只在每批记一次 WARN，不重试、不影响 ACK。
+     */
+    private void markOnline(Map<String, Long> reportedAt) {
+        if (reportedAt.isEmpty()) {
+            return;
+        }
+        try {
+            presence.applyDataBatch(reportedAt);
+        } catch (RuntimeException e) {
+            log.warn("Failed to mark {} device(s) online from data (best effort, ignored): {}", reportedAt.size(),
+                    e.getMessage());
+        }
     }
 
     /** 批量 ACK（空列表直接返回），暂时性故障原地重试。 */
