@@ -2,7 +2,7 @@
 
 个人研究性质的 IoT 平台。V0.1 跑通「设备 MQTT 直连 → 接入 → 总线 → 处理 → 时序存储 → Web 展示」主链路。
 
-设计文档：`docs/superpowers/specs/2026-10-14-conduit-v0.1-design.md`
+设计文档：`docs/superpowers/specs/2026-10-14-conduit-v0.1-design.md`（版本路线与 V0.1）、`docs/superpowers/specs/2026-10-15-conduit-v0.2a-thing-model-design.md`（V0.2-A 物模型与编解码）
 
 设备接入指南（流程、连接参数、上报格式、示例代码、排错）：[`docs/device-integration.md`](docs/device-integration.md)
 
@@ -21,6 +21,7 @@ flowchart TB
         API[REST 接口]
     end
     A --> PG[(PostgreSQL)]
+    P --> PG
     P --> IF[(InfluxDB)]
     P --> RD[(Redis 最新值 / 在线状态)]
     API --> PG
@@ -65,7 +66,9 @@ conduit/
 │   ├── tenant/                      租户上下文与租户隔离
 │   ├── product/  device/            产品、设备的增删改查和接口
 │   ├── mqttauth/                    EMQX 鉴权回调
-│   ├── pipeline/                    数据流水线：消费总线、解码校验、重试、死信
+│   ├── pipeline/                    数据流水线：消费总线、按物模型逐测点校验、重试、死信
+│   │   └── codec/                   可插拔解码器（标准 JSON、扁平 JSON）
+│   ├── thingmodel/                  物模型：属性增删改查、导入导出、按产品缓存
 │   ├── telemetry/                   InfluxDB 写入、最新值存储与查询
 │   ├── presence/                    设备上下线状态
 │   ├── security/  bootstrap/        密钥生成与哈希；启动时创建默认租户和管理员
@@ -73,7 +76,7 @@ conduit/
 ├── conduit-simulator/               dev.conduit.simulator：通过 REST 开通设备，再按周期上报
 ├── conduit-e2e/                     端到端测试（-Pe2e 时才参与构建）
 ├── conduit-ui/                      Vue 3 + TypeScript + Element Plus（独立 npm 工程，自带 Dockerfile）
-│   └── src/  api/  stores/  router/  views/  components/  composables/  utils/
+│   └── src/  api/  stores/  router/  layouts/  views/  components/  composables/  utils/
 ├── deploy/                          docker-compose.yml、.env.example、EMQX 鉴权与 ACL 配置
 ├── docs/                            设备接入指南、待办清单、设计文档与实现计划
 └── .run/                            IntelliJ IDEA 共享运行配置
@@ -95,7 +98,7 @@ cp deploy/.env.example deploy/.env   # 按需修改口令与端口
 docker compose -f deploy/docker-compose.yml --profile demo up -d --build
 ```
 
-浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录。模拟器会自动创建「Demo Meter」产品和设备，并在产品没有属性时导入演示物模型（docs/examples/demo-meter.thing-model.json）（默认 100 台，每 10 秒上报一次，见 `SIM_DEVICE_COUNT` / `SIM_INTERVAL_MS`；上报格式由 `SIM_PAYLOAD_FORMAT`（`standard` / `flat`）指定）。
+浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录。模拟器会自动创建「Demo Meter」产品和设备，并在产品没有属性时导入演示物模型（docs/examples/demo-meter.thing-model.json）（默认 100 台，每 10 秒上报一次，见 `SIM_DEVICE_COUNT` / `SIM_INTERVAL_MS`；上报格式由 `SIM_PAYLOAD_FORMAT`（`standard` / `flat`）指定，新建产品时按此选用解码器，已有产品的解码器不会被修改）。
 
 宿主机端口可在 `deploy/.env` 中配置，括号内为默认值：
 
@@ -106,8 +109,8 @@ docker compose -f deploy/docker-compose.yml --profile demo up -d --build
 | `MQTT_PORT`（1883） | MQTT |
 | `EMQX_DASHBOARD_PORT`（18083） | EMQX 控制台 |
 | `INFLUX_PORT`（8096） | InfluxDB 3 Core HTTP API（容器内 8181，需 token） |
-
-PostgreSQL 与 Redis 不对外暴露。
+| `POSTGRES_PORT`（15432） | PostgreSQL（供 IDE 中运行的服务直连） |
+| `REDIS_PORT`（16379） | Redis（同上） |
 
 ### InfluxDB 3 Core
 
@@ -215,7 +218,7 @@ server、connector、simulator 和前端都可以直接在 IDEA 里运行，连�
    SIM_INTERVAL_MS=5000
    ```
 
-5. 先启动 `Conduit Server (local)`，再按需启动 Connector、Simulator、Frontend。前端默认把 `/api` 代理到本机 8080；要直接连远程 server，可设置环境变量 `VITE_API_TARGET=http://<docker-host>:8091`。
+5. 先启动 `Conduit Server (local)`，再按需启动 Connector、Simulator、UI。前端默认把 `/api` 代理到本机 8080；要直接连远程 server，可设置环境变量 `VITE_API_TARGET=http://<docker-host>:8091`。
 
 说明：IDE 中的实例与容器中的实例同时运行时，会加入同一个消费组分担消息、加入同一个共享订阅分担上报，数据不会重复也不会丢；设备鉴权仍由容器里的 server 完成。本地 connector 的 `session-expiry-seconds` 必须设为 0：它加入了和容器 connector 相同的共享订阅组，如果使用持久会话，进程停止后 EMQX 仍会把一部分设备消息分给这个已离线的会话，这些消息要等会话过期（默认 1 小时）才会被丢弃，期间相当于丢数据。需要只让本地 connector 收消息时，可以 `docker compose -f deploy/docker-compose.yml stop conduit-connector`；不要停容器里的 `conduit-server`，否则 EMQX 的鉴权回调无处可去，新设备将无法连接。
 

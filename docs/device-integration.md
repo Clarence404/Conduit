@@ -56,7 +56,7 @@ API=http://<docker-host>:8090   # 经 nginx 代理；也可直连 API_PORT（默
 TOKEN=$(curl -s -X POST "$API/api/v1/auth/login" -H 'Content-Type: application/json' \
   -d '{"username":"<管理员用户名>","password":"<管理员密码>"}' | jq -r .accessToken)
 
-# 新建产品，记下返回的 productKey
+# 新建产品，记下返回的 productKey（可选 "codec":"flat-json"，缺省为 standard-json）
 curl -s -X POST "$API/api/v1/products" -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"name":"三相电表"}'
 
@@ -72,7 +72,7 @@ curl -s -X POST "$API/api/v1/devices" -H "Authorization: Bearer $TOKEN" \
 | 参数 | 取值 |
 |---|---|
 | 地址 | Docker 宿主机地址 |
-| 端口 | `MQTT_PORT`，默认 1883（V0.1 未启用 TLS） |
+| 端口 | `MQTT_PORT`，默认 1883（未启用 TLS） |
 | 协议 | MQTT 3.1.1 或 5 |
 | clientId | deviceKey |
 | 用户名 | deviceKey（必须与 clientId 相同） |
@@ -172,7 +172,7 @@ while True:
 ## 7. 核对结果
 
 - **Web**：「设备」页能看到设备「在线」，「最后上报」时间在更新；进入设备详情，最新值表格每 5 秒刷新一次。
-- **API**：`GET /api/v1/devices/{deviceKey}/latest` 返回各测点的最新值和采样时间。
+- **API**：`GET /api/v1/devices/{deviceKey}/latest` 返回 `{deviceKey, values}`，`values` 每项为一个测点：`identifier`（测点标识）、`name`（物模型中的名称）、`value`、`ts`（采样时间）、`unit`、`decimals`、`enumLabel`（枚举值对应的名称）；测点在物模型中未定义时 `name`、`unit`、`decimals`、`enumLabel` 为 null。V0.1 中测点标识放在 `name` 字段，V0.2-A 起改为 `identifier`。
 
 ## 8. 常见问题
 
@@ -196,13 +196,14 @@ docker compose -f deploy/docker-compose.yml exec redis \
 |---|---|
 | `MALFORMED_JSON` | payload 不是合法 JSON 对象，或有重复键 |
 | `INVALID_PARAMS` | `params` 为空（扁平 JSON 为没有测点）、值类型不支持、测点名非法、数值溢出（无物模型时） |
-| `TS_OUT_OF_RANGE` | 用了秒级时间戳，或设备时钟偏差过大 |
+| `TS_OUT_OF_RANGE` | 用了秒级时间戳、`ts` 不是整数，或设备时钟偏差过大 |
 | `PRODUCT_MISMATCH` | topic 里的 productKey 和设备所属产品不一致 |
 | `UNKNOWN_DEVICE` / `DEVICE_DISABLED` | 设备已删除或已禁用（禁用不会断开已有连接） |
 | `FIELD_TYPE_CONFLICT` | 同一测点前后报了不同类型 |
 | `FIELD_REJECTED` | 测点不符合物模型（部分剔除时原消息的合格测点已入库，见记录中的 `rejected`） |
 | `UNKNOWN_CODEC` | 产品配置的解码器不存在（例如部署回退后），整条消息未处理 |
-| `UNSUPPORTED_TYPE` | 发到了 `up/event`，V0.1 暂不支持事件 |
+| `UNSUPPORTED_TYPE` | 发到了 `up/event`，暂不支持事件 |
+| `MALFORMED_ENVELOPE` | 总线上的消息缺少必要字段（平台内部问题，与设备 payload 无关） |
 | `PROCESSING_ERROR` | 平台内部处理异常，只影响这一条消息 |
 | `MAX_DELIVERY_EXCEEDED` | 同一条消息投递超过 5 次仍未处理成功 |
 
