@@ -5,11 +5,14 @@
  */
 
 import { http } from './client'
+import type { DeviceFilterParams } from '@/utils/deviceFilters'
 import type { DeviceCreated, DeviceStatus, DeviceView, LatestView, PageView, SecretView } from './types'
 
-export interface DeviceQuery {
-  productKey?: string
-  keyword?: string
+/**
+ * 设备列表查询参数：分页 + 筛选（productKey、keyword、online、status、reported、createdFrom 含、createdTo 不含，均为可选）。
+ * 服务端无法获取在线状态时（带 online 筛选）返回 503，由调用方走统一错误提示。
+ */
+export interface DeviceQuery extends DeviceFilterParams {
   page: number
   size: number
 }

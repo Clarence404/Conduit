@@ -1,13 +1,15 @@
 <script setup lang="ts">
 /**
- * 设备列表页：筛选栏（产品、关键字，回车即查询）+ 服务端分页（useTable，默认每页 10 条）；在线状态用圆点，启用状态用标签，
+ * 设备列表页：筛选栏（主行：关键字、产品、在线状态、启用状态；「更多筛选」：最后上报、创建时间；回车即查询）+ 服务端分页（useTable，默认每页 10 条）；在线状态用圆点，启用状态用标签，
  * 最后上报显示相对时间。支持新建设备、启用/禁用、重置密钥、删除，行内可跳到设备详情与所属产品。
  * 创建设备和重置密钥的响应里有密钥明文，通过 SecretDialog 只展示一次。首次加载显示骨架屏，没有设备时引导新建，加载失败时改为「加载失败，点击重试」。
  * 查询只使用「已应用」的筛选条件（点查询/回车时才从输入框复制）：翻页、刷新、新建默认产品、空态判断都以它为准，不受尚未提交的输入影响。
+ * 已应用的筛选同步到路由 query（router.replace，键见 utils/deviceFilters），进入页面时从 query 还原（非法值忽略），
+ * 因此 /devices?online=true 之类的链接可直接打开筛选结果；「更多筛选」里有条件生效时保持展开，开关上显示个数。
  */
 
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { deviceApi } from '@/api/devices'
@@ -15,6 +17,16 @@ import { productApi } from '@/api/products'
 import { problemMessage } from '@/api/errors'
 import type { DeviceStatus, DeviceView, ProductView } from '@/api/types'
 import { PAGE_SIZES } from '@/utils/pagination'
+import {
+  dayRangeToMillis,
+  emptyDeviceFilters,
+  hasAnyFilter,
+  hiddenFilterCount,
+  millisToDayRange,
+  parseDeviceQuery,
+  toDeviceParams,
+  toDeviceQuery,
+} from '@/utils/deviceFilters'
 import { useTable } from '@/composables/useTable'
 import PageHeader from '@/components/PageHeader.vue'
 import FilterBar from '@/components/FilterBar.vue'
@@ -23,23 +35,38 @@ import RelativeTime from '@/components/RelativeTime.vue'
 import SecretDialog from '@/components/SecretDialog.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 const products = ref<ProductView[]>([])
 const productNames = computed(() => new Map(products.value.map((p) => [p.productKey, p.name])))
-// 筛选栏里正在编辑的输入；点「查询」才复制到 applied
-const filters = reactive({ productKey: '', keyword: '' })
+// 筛选栏里正在编辑的输入；点「查询」才复制到 applied。进入页面时从路由 query 还原（非法值忽略）
+const filters = reactive(parseDeviceQuery(route.query))
 // 最近一次查询所用的筛选条件：翻页、刷新、空态与新建默认产品都读它
-const applied = reactive({ productKey: '', keyword: '' })
-const filtered = computed(() => Boolean(applied.productKey || applied.keyword))
+const applied = reactive(parseDeviceQuery(route.query))
+const filtered = computed(() => hasAnyFilter(applied))
+
+// 「更多筛选」：用户手动展开标记；隐藏条件里有生效项时强制展开
+const moreOpen = ref(false)
+const moreCount = computed(() => hiddenFilterCount(filters))
+const moreExpanded = computed(() => moreOpen.value || moreCount.value > 0)
+
+/** 创建时间日期选择器的绑定值：与 filters 的毫秒区间互转（结束日含当天，所以 createdTo 取次日 0 点） */
+const createdRange = computed<[Date, Date] | null>({
+  get: () => (filters.createdFrom !== null && filters.createdTo !== null ? millisToDayRange(filters.createdFrom, filters.createdTo) : null),
+  set: (range) => {
+    if (range) {
+      const { from, to } = dayRangeToMillis(range[0], range[1])
+      filters.createdFrom = from
+      filters.createdTo = to
+    } else {
+      filters.createdFrom = null
+      filters.createdTo = null
+    }
+  },
+})
 
 const { items, total, page, size, loading, loaded, failed, load, search: searchPage, onSizeChange, onPageChange } = useTable<DeviceView>(
-  (p, s) =>
-    deviceApi.list({
-      productKey: applied.productKey || undefined,
-      keyword: applied.keyword || undefined,
-      page: p,
-      size: s,
-    }),
+  (p, s) => deviceApi.list({ ...toDeviceParams(applied), page: p, size: s }),
 )
 
 const createVisible = ref(false)
@@ -61,17 +88,17 @@ async function loadProducts() {
   }
 }
 
-/** 应用输入框里的筛选条件（关键字去首尾空格）并回到第 1 页查询。 */
+/** 应用输入框里的筛选条件（关键字去首尾空格），同步到路由 query，并回到第 1 页查询。 */
 function search() {
-  applied.productKey = filters.productKey
-  applied.keyword = filters.keyword.trim()
+  filters.keyword = filters.keyword.trim()
+  Object.assign(applied, filters)
+  void router.replace({ query: toDeviceQuery(applied) })
   return searchPage()
 }
 
-/** 清空筛选条件（输入与已应用的）并回到第 1 页查询。 */
+/** 清空筛选条件（输入、已应用的与路由 query）并回到第 1 页查询。 */
 function reset() {
-  filters.productKey = ''
-  filters.keyword = ''
+  Object.assign(filters, emptyDeviceFilters())
   void search()
 }
 
@@ -200,15 +227,49 @@ onMounted(() => {
     </PageHeader>
 
     <div class="cd-panel">
-      <FilterBar @search="search" @reset="reset">
+      <FilterBar :expanded="moreExpanded" :more-count="moreCount" @search="search" @reset="reset" @toggle="moreOpen = !moreOpen">
+        <el-form-item label="关键字">
+          <el-input v-model="filters.keyword" class="keyword" placeholder="名称或设备 Key" clearable />
+        </el-form-item>
         <el-form-item label="产品">
           <el-select v-model="filters.productKey" clearable placeholder="全部" class="product-select">
             <el-option v-for="p in products" :key="p.productKey" :label="p.name" :value="p.productKey" />
           </el-select>
         </el-form-item>
-        <el-form-item label="关键字">
-          <el-input v-model="filters.keyword" class="keyword" placeholder="名称或设备 Key" clearable />
+        <el-form-item label="在线状态">
+          <el-select v-model="filters.online" class="short-select" data-test="filter-online">
+            <el-option label="全部" value="" />
+            <el-option label="在线" value="true" />
+            <el-option label="离线" value="false" />
+          </el-select>
         </el-form-item>
+        <el-form-item label="启用状态">
+          <el-select v-model="filters.status" class="short-select" data-test="filter-status">
+            <el-option label="全部" value="" />
+            <el-option label="启用" value="ENABLED" />
+            <el-option label="禁用" value="DISABLED" />
+          </el-select>
+        </el-form-item>
+        <template #more>
+          <el-form-item label="最后上报">
+            <el-select v-model="filters.reported" class="reported-select" data-test="filter-reported">
+              <el-option label="全部" value="" />
+              <el-option label="1 小时内有上报" value="RECENT" />
+              <el-option label="超过 1 小时未上报" value="STALE" />
+              <el-option label="从未上报" value="NEVER" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="创建时间">
+            <el-date-picker
+              v-model="createdRange"
+              type="daterange"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              class="created-picker"
+            />
+          </el-form-item>
+        </template>
       </FilterBar>
 
       <el-skeleton v-if="!loaded" :rows="5" animated />
@@ -302,6 +363,15 @@ onMounted(() => {
 
 <style scoped>
 .product-select {
-  width: 200px;
+  width: 180px;
+}
+.short-select {
+  width: 100px;
+}
+.reported-select {
+  width: 180px;
+}
+.created-picker {
+  width: 260px;
 }
 </style>
