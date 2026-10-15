@@ -139,7 +139,7 @@ server、connector、simulator 和前端都可以直接在 IDEA 里运行，连�
    | `Conduit Server (local)` | `ServerApplication`，已带 `-Dspring.profiles.active=local` |
    | `Conduit Connector (local)` | `ConnectorApplication`，同上 |
    | `Conduit Simulator (local)` | `SimulatorApplication`，读取 `simulator-local.properties` |
-   | `Conduit Frontend (dev)` | 在 `conduit-ui/` 下执行 `npm run dev`（首次先 `npm install`） |
+   | `Conduit UI (local)` | 在 `conduit-ui/` 下执行 `npm run dev`（首次先 `npm install`） |
    | `Conduit (local all)` | 一次启动 Server、Connector、Frontend |
 
 2. 确认 `.env` 中 `BIND_ADDR`、`POSTGRES_PORT`（默认 15432）、`REDIS_PORT`（默认 16379）已按需设置，并执行过一次 `up -d`，让 PostgreSQL 和 Redis 端口对宿主机开放。
