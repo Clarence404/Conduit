@@ -21,6 +21,9 @@
     </encoder>
   </appender>
 
+  <!-- 级别可用系统属性或环境变量 CONDUIT_LOG_LEVEL 覆盖，本地运行配置设为 DEBUG -->
+  <logger name="dev.conduit" level="${CONDUIT_LOG_LEVEL:-INFO}"/>
+
   <root level="INFO">
     <appender-ref ref="CONSOLE"/>
     <appender-ref ref="FILE"/>

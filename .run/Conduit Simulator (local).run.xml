@@ -2,6 +2,7 @@
   <configuration default="false" name="Conduit Simulator (local)" type="Application" factoryName="Application">
     <option name="MAIN_CLASS_NAME" value="dev.conduit.simulator.SimulatorApplication" />
     <module name="conduit-simulator" />
+    <option name="VM_PARAMETERS" value="-DCONDUIT_LOG_LEVEL=DEBUG" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>

@@ -279,6 +279,9 @@ cd conduit-ui && npm install && npm test && npm run dev
 - Docker：三个服务设置 `CONDUIT_LOG_DIR=/var/log/conduit` 并共用命名卷 `conduit-logs`，可用 `docker run --rm -v conduit_conduit-logs:/logs alpine ls /logs` 查看，或挂载到其他容器读取。
 - 不在此列：前端开发服务器（Vite）的日志只在 IDE 控制台；`conduit-web` 的 nginx 日志走 `docker logs`。
 - 集成测试的日志写到 `conduit-server/target/test-logs/`，不污染工作目录。
+- 日志级别：默认 INFO。本地开发时调高：
+  - server / transport：在各自不入库的 `application-local.yml` 中加 `logging.level.dev.conduit: DEBUG`（server 再加 `org.springframework.web: DEBUG` 可看到请求映射；`dev.conduit` 为 DEBUG 时 MyBatis 会打印执行的 SQL 与参数）。
+  - simulator：`Conduit Simulator (local)` 运行配置已带 `-DCONDUIT_LOG_LEVEL=DEBUG`；也可用同名环境变量设置。
 
 ## 端到端测试：杀进程不丢数据
 
