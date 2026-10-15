@@ -1,4 +1,6 @@
 <script setup lang="ts">
+/** 登录后的整体布局：左侧导航（产品、设备）、顶部用户名与退出，页面内容渲染在 router-view。 */
+
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -7,8 +9,10 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
+/** 侧栏高亮项：产品列表和产品详情都归「产品」，其余归「设备」。 */
 const activeMenu = computed(() => (route.path.startsWith('/products') ? '/products' : '/devices'))
 
+/** 退出登录：无论登出请求是否成功，都回到登录页。 */
 async function logout() {
   try {
     await auth.logout()

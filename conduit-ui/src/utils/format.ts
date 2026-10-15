@@ -1,3 +1,9 @@
+/** 日期时间显示格式化。 */
+
+/**
+ * 格式化为本地时区的 yyyy-MM-dd HH:mm:ss。
+ * @param value ISO 字符串或毫秒时间戳；空值或无法解析时返回「—」
+ */
 export function formatDateTime(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === '') {
     return '—'

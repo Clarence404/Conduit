@@ -1,3 +1,8 @@
+/**
+ * Axios 实例工厂：统一附带 access token、401 时自动刷新并重试。
+ * 不直接依赖 store 与路由，token 的读写和登录失效处理由调用方通过 TokenHolder 注入。
+ */
+
 import axios, { isAxiosError, type AxiosError, type AxiosInstance } from 'axios'
 
 declare module 'axios' {
@@ -7,15 +12,18 @@ declare module 'axios' {
   }
 }
 
+/** token 的存取与登录失效回调，由使用方（api/client.ts）实现，使 http.ts 不依赖 store 和路由。 */
 export interface TokenHolder {
   getToken(): string | null
   setToken(token: string | null): void
   onAuthFailed(): void
 }
 
+/** 刷新 token 的接口地址；以 AUTH_PREFIX 开头的请求不带 token，也不会触发自动刷新。 */
 export const REFRESH_URL = '/api/v1/auth/refresh'
 const AUTH_PREFIX = '/api/v1/auth/'
 
+/** 是否为服务端明确拒绝登录态（401/403）。网络错误、5xx 不算，避免服务端抖动时把用户登出。 */
 function isAuthRejection(error: unknown): boolean {
   const status = isAxiosError(error) ? error.response?.status : undefined
   return status === 401 || status === 403

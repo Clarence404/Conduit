@@ -1,3 +1,5 @@
+/** 设备最新值（PointView）的显示文案：测点名称与带单位、小数位、枚举名称的取值。 */
+
 import type { PointView } from '@/api/types'
 import { formatValue } from './connection'
 

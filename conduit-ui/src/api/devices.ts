@@ -1,3 +1,9 @@
+/**
+ * 设备相关 REST 调用：分页查询、详情、创建、改名/启停、重置密钥、删除、最新值。
+ * 创建与重置密钥的响应里带有设备密钥明文，服务端只返回这一次，调用方需立即展示给用户。
+ * deviceKey 一律经 encodeURIComponent 拼进路径。
+ */
+
 import { http } from './client'
 import type { DeviceCreated, DeviceStatus, DeviceView, LatestView, PageView, SecretView } from './types'
 

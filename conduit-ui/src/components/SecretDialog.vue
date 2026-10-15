@@ -1,10 +1,16 @@
 <script setup lang="ts">
+/**
+ * 设备密钥展示对话框，用于创建设备和重置密钥之后。
+ * 密钥只显示这一次，关闭后服务端不再提供，所以提供复制按钮。显隐通过 modelValue / update:modelValue 由父组件控制。
+ */
+
 import { ElMessage } from 'element-plus'
 import { copyText } from '@/utils/clipboard'
 
 const props = defineProps<{ modelValue: boolean; deviceKey: string; secret: string }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
+/** 复制密钥到剪贴板，并提示结果；复制失败时提醒用户手动选择复制。 */
 async function copy() {
   if (await copyText(props.secret)) {
     ElMessage.success('已复制')

@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/**
+ * 物模型导入对话框：选择 JSON 文件，按「合并」或「替换」方式整体导入到产品。
+ * 文件在浏览器端只做 JSON 语法解析，内容校验由服务端完成；校验失败时在对话框内列出逐项错误，导入不生效。
+ * 导入成功后关闭并触发 imported 事件，由父组件刷新。
+ */
+
 import { ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { thingModelApi } from '@/api/thingModel'
@@ -15,6 +21,7 @@ const errors = ref<ProblemFieldError[]>([])
 const importing = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
+/** 每次打开对话框时清空上一次的文件、方式和错误。 */
 watch(visible, (open) => {
   if (open) {
     mode.value = 'merge'
@@ -24,6 +31,7 @@ watch(visible, (open) => {
   }
 })
 
+/** 读取所选文件并解析为 JSON 暂存；不是合法 JSON 时提示并清空，保持「导入」按钮不可用。 */
 async function onFileChange(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0]
   errors.value = []
@@ -36,6 +44,10 @@ async function onFileChange(event: Event) {
   }
 }
 
+/**
+ * 提交导入。替换模式会删除文件中没有的属性，先二次确认；用户取消则不发请求。
+ * 失败时把服务端返回的逐项错误显示在对话框中。
+ */
 async function confirmImport() {
   if (importing.value || parsed.value === null) return
   if (mode.value === 'replace') {

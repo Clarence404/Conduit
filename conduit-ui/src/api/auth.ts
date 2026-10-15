@@ -1,3 +1,8 @@
+/**
+ * 认证相关 REST 调用：登录、用 HttpOnly refresh Cookie 刷新 access token、登出。
+ * 登录与刷新返回 TokenResponse，由 stores/auth 写入内存；这些 /api/v1/auth/ 请求不附带 Authorization，也不触发 401 自动刷新。
+ */
+
 import { http } from './client'
 import type { TokenResponse } from './types'
 

@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/**
+ * 物模型属性的新增/编辑对话框。
+ * property 为 null 时新增，否则编辑（此时标识与数据类型不可改）。v-model 控制显隐，每次打开都重置表单；
+ * 保存成功后关闭并触发 saved 事件，由父组件刷新列表。
+ */
+
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { thingModelApi } from '@/api/thingModel'
@@ -23,6 +29,7 @@ const saving = ref(false)
 const editing = computed(() => props.property !== null)
 const visibility = computed(() => fieldVisibility(form.value.dataType))
 
+/** 每次打开对话框时重置表单：编辑用当前属性回填，新增用空表单，避免残留上一次的输入。 */
 watch(visible, (open) => {
   if (open) {
     form.value = props.property ? formFromProperty(props.property) : emptyForm()
@@ -37,6 +44,10 @@ function removeEnumItem(index: number) {
   form.value.enumItems.splice(index, 1)
 }
 
+/**
+ * 校验并保存：先把表单转成请求体（格式错误只做提示、不发请求），再按新增/编辑调用接口。
+ * 保存中忽略重复点击；接口失败时提示服务端给出的原因并保持对话框打开。
+ */
 async function save() {
   if (saving.value) return
   let request: PropertyRequest

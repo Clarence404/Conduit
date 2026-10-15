@@ -1,3 +1,5 @@
+/** 前端入口：创建应用并安装 Pinia、路由与 Element Plus（中文语言包），挂载到 #app。 */
+
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'

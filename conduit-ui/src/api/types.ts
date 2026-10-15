@@ -1,3 +1,5 @@
+/** 与服务端 REST 接口对应的数据类型（响应视图与请求体），字段含义以服务端 DTO 为准。 */
+
 export interface PageView<T> {
   items: T[]
   total: number

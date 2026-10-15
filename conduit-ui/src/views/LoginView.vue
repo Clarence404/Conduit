@@ -1,4 +1,6 @@
 <script setup lang="ts">
+/** 登录页。登录成功后跳到地址栏 redirect 参数指向的页面（经 safeRedirect 校验，防止开放重定向），没有则去设备列表。 */
+
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -12,6 +14,7 @@ const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 
+/** 提交登录：用户名或密码为空时只提示不请求；失败时提示服务端给出的原因。 */
 async function submit() {
   if (!form.username || !form.password) {
     ElMessage.warning('请输入用户名和密码')
