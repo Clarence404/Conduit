@@ -192,8 +192,8 @@ cd conduit-ui && npm install && npm test && npm run dev
 
    | 运行配置 | 作用 |
    |---|---|
-   | `Conduit Server (local)` | `ServerApplication`，已带 `-Dspring.profiles.active=local` |
-   | `Conduit Transport (local)` | `TransportApplication`，同上 |
+   | `Conduit Server (local)` | Spring Boot 运行配置，`ServerApplication`，Active profiles 已设为 `local` |
+   | `Conduit Transport (local)` | 同上，`TransportApplication`。请从这里或 `Conduit (local all)` 启动；IDEA 在 Services 面板自动生成的同名 Spring Boot 项不带 `local` profile，会去连 localhost 而卡住 |
    | `Conduit Simulator (local)` | `SimulatorApplication`，读取 `simulator-local.properties` |
    | `Conduit UI (local)` | 在 `conduit-ui/` 下执行 `npm run dev`（首次先 `npm install`） |
    | `Conduit (local all)` | 一次启动 Server、Transport、Simulator、UI |
