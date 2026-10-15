@@ -57,7 +57,7 @@ conduit-ui（Vue）──REST──> conduit-server
 
 - Java 21、Spring Boot 3.5、MyBatis-Plus、Flyway；包名 `dev.conduit.<模块>`；按业务分包（`device`、`product`、`thingmodel`、`telemetry`、`pipeline` …）。
 - 测试：先写失败测试（TDD）；集成测试用 Testcontainers；前端用 Vitest + `@vue/test-utils`。
-- 界面：中文文案；所有分页表格默认每页 10 条（可选 10/20/50/100）；功能入口要显眼（列表有「操作」列按钮、详情页有面包屑、产品与设备互相可跳转）。；详情页的标签页与路由 query `tab` 同步（`router.replace`）
+- 界面：中文文案；所有分页表格默认每页 10 条（可选 10/20/50/100）；功能入口要显眼（列表有「操作」列按钮、详情页有面包屑、产品与设备互相可跳转）；详情页的标签页与路由 query `tab` 同步（`router.replace`）。
 - 演示与测试数据：用有意义的中文名称（如「三相电表（演示）」「1号楼配电室 电表01」），测试结束清理自己创建的数据。
 - 提交：Conventional Commits；只署名不带邮箱；不加任何 AI 署名行。
 - 仓库公开：不要把 IP、本机路径、用户名、口令、token 写进受版本控制的文件；本地配置（`deploy/.env`、`application-local.yml`、`simulator-local.properties`）已在 `.gitignore`。
