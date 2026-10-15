@@ -97,8 +97,18 @@ class ConnectRetryTest {
                 (proxy, method, args) -> {
                     String name = method.getName();
                     if (name.equals("warn") || name.equals("error") || name.equals("info")) {
-                        boolean throwable = args != null && args.length > 0
-                                && args[args.length - 1] instanceof Throwable;
+                        // log.warn(fmt, a, b, c, d) 走可变参数重载：末尾是 Object[]，需要展开后再检查
+                        List<Object> flat = new ArrayList<>();
+                        if (args != null) {
+                            for (Object arg : args) {
+                                if (arg instanceof Object[] array) {
+                                    flat.addAll(java.util.Arrays.asList(array));
+                                } else {
+                                    flat.add(arg);
+                                }
+                            }
+                        }
+                        boolean throwable = flat.stream().anyMatch(a -> a instanceof Throwable);
                         events.add(new LogEvent(name, throwable));
                     }
                     Class<?> type = method.getReturnType();
