@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import dev.conduit.server.device.Device;
 import dev.conduit.server.device.DeviceMapper;
+import dev.conduit.server.device.DeviceStats;
+import dev.conduit.server.device.DeviceStats.ProductCounts;
 import dev.conduit.server.pipeline.codec.DecoderRegistry;
 import dev.conduit.server.pipeline.codec.StandardJsonDecoder;
 import dev.conduit.server.product.ProductDtos.ProductView;
@@ -17,27 +19,34 @@ import org.springframework.stereotype.Service;
 
 import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 
 /**
- * 产品的增删改查。产品属于当前租户（租户过滤由拦截器完成）；物模型缓存在产品变更、删除时同步清除。
+ * 产品的增删改查。产品属于当前租户（租户过滤由拦截器完成）；响应带属性数与设备数（在线/总数，见 DeviceStats）；
+ * 物模型缓存在产品变更、删除时同步清除。
  */
 @Service
 public class ProductService {
 
+    private static final ProductCounts NO_DEVICES = new ProductCounts(0, 0, 0);
+
     private final ProductMapper products;
     private final DeviceMapper devices;
     private final ProductPropertyMapper properties;
+    private final DeviceStats stats;
     private final DecoderRegistry decoders;
     private final ThingModelCache thingModels;
     private final KeyGenerator keys;
     private final Clock clock;
 
     public ProductService(ProductMapper products, DeviceMapper devices, ProductPropertyMapper properties,
-                          DecoderRegistry decoders, ThingModelCache thingModels, KeyGenerator keys, Clock clock) {
+                          DeviceStats stats, DecoderRegistry decoders, ThingModelCache thingModels, KeyGenerator keys,
+                          Clock clock) {
         this.products = products;
         this.devices = devices;
         this.properties = properties;
+        this.stats = stats;
         this.decoders = decoders;
         this.thingModels = thingModels;
         this.keys = keys;
@@ -45,7 +54,7 @@ public class ProductService {
     }
 
     /**
-     * 新建产品，productKey 由系统生成。codec 缺省为 standard-json；指定的解码器不存在抛 400。
+     * 新建产品，productKey 由系统生成。codec 缺省为 standard-json；指定的解码器不存在抛 400。新产品没有设备，计数直接为 0。
      */
     public ProductView create(SaveProductRequest request) {
         Product p = new Product();
@@ -54,28 +63,28 @@ public class ProductService {
         p.setDescription(request.description());
         p.setCodec(requireCodec(request.codec() == null ? StandardJsonDecoder.NAME : request.codec()));
         products.insert(p);
-        return ProductView.of(products.selectById(p.getId()), 0);
+        return ProductView.of(products.selectById(p.getId()), 0, NO_DEVICES);
     }
 
     /**
-     * 分页列出当前租户的产品，按 id 倒序（新的在前）；属性数一次批量查询取得，避免逐个产品查询。page 从 1 开始。
+     * 分页列出当前租户的产品，按 id 倒序（新的在前）。属性数与设备计数都对本页产品各做一次批量查询，避免逐个产品查询。page 从 1 开始。
      */
     public PageView<ProductView> list(int page, int size) {
         Page<Product> result = products.selectPage(new Page<>(page, size),
                 new LambdaQueryWrapper<Product>().orderByDesc(Product::getId));
-        Map<Long, Integer> counts = properties.countByProducts(
-                result.getRecords().stream().map(Product::getId).toList());
+        List<Long> ids = result.getRecords().stream().map(Product::getId).toList();
+        Map<Long, Integer> counts = properties.countByProducts(ids);
+        DeviceStats.Snapshot snapshot = stats.snapshot(ids);
         return new PageView<>(result.getRecords().stream()
-                .map(p -> ProductView.of(p, counts.getOrDefault(p.getId(), 0))).toList(),
+                .map(p -> ProductView.of(p, counts.getOrDefault(p.getId(), 0), snapshot.of(p.getId()))).toList(),
                 result.getTotal(), page, size);
     }
 
     /**
-     * 查询单个产品，不存在抛 404。
+     * 查询单个产品（含属性数与设备计数），不存在抛 404。
      */
     public ProductView get(String productKey) {
-        Product p = require(productKey);
-        return ProductView.of(p, (int) properties.countByProduct(p.getId()));
+        return view(require(productKey));
     }
 
     /**
@@ -91,7 +100,7 @@ public class ProductService {
         p.setUpdatedAt(OffsetDateTime.now(clock));
         products.updateById(p);
         thingModels.evict(productKey);
-        return ProductView.of(p, (int) properties.countByProduct(p.getId()));
+        return view(p);
     }
 
     /**
@@ -116,6 +125,12 @@ public class ProductService {
             throw ApiException.notFound("产品不存在: " + productKey);
         }
         return p;
+    }
+
+    /** 单个产品的响应视图：属性数与设备计数各查一次。 */
+    private ProductView view(Product p) {
+        return ProductView.of(p, (int) properties.countByProduct(p.getId()),
+                stats.snapshot(List.of(p.getId())).of(p.getId()));
     }
 
     /**

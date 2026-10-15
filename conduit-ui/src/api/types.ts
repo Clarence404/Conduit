@@ -7,9 +7,11 @@ export interface PageView<T> {
   size: number
 }
 
+/** 当前用户；tenantName 为所属租户名称（顶栏显示），租户不存在时为 null */
 export interface UserView {
   username: string
   role: string
+  tenantName: string | null
 }
 
 export interface TokenResponse {
@@ -18,12 +20,15 @@ export interface TokenResponse {
   user: UserView
 }
 
+/** 产品；deviceCount 为设备数，onlineCount 为在线设备数（服务端 Redis 不可用时为 null，显示「—」） */
 export interface ProductView {
   productKey: string
   name: string
   description: string | null
   codec: string
   propertyCount: number
+  deviceCount: number
+  onlineCount: number | null
   createdAt: string
 }
 
@@ -135,4 +140,40 @@ export interface HistoryView {
   /** 聚合桶宽（毫秒），原始模式为 null */
   bucketMs: number | null
   series: SeriesView[]
+}
+
+/** 死信统计：条数与按原因（服务端 DeadReason 名称）分组的条数 */
+export interface DeadSummary {
+  total: number
+  byReason: Record<string, number>
+}
+
+/** 最近上报的设备；lastReportAt 为毫秒 */
+export interface RecentDevice {
+  deviceKey: string
+  name: string
+  productKey: string | null
+  productName: string | null
+  lastReportAt: number
+}
+
+/** 单个产品的设备统计；onlineCount 在服务端 Redis 不可用时为 null */
+export interface ProductStat {
+  productKey: string
+  name: string
+  deviceCount: number
+  onlineCount: number | null
+}
+
+/** 首页总览（按当前租户）；onlineCount、deadLastHour 在服务端 Redis 不可用时为 null，recentDevices 此时为空 */
+export interface OverviewView {
+  productCount: number
+  propertyCount: number
+  deviceCount: number
+  enabledCount: number
+  disabledCount: number
+  onlineCount: number | null
+  deadLastHour: DeadSummary | null
+  recentDevices: RecentDevice[]
+  products: ProductStat[]
 }

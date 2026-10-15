@@ -12,8 +12,12 @@ public final class AuthDtos {
     public record LoginRequest(@NotBlank String username, @NotBlank String password) {
     }
 
-    /** 返回给 UI 的当前用户信息（不含任何敏感字段）。 */
-    public record UserView(String username, String role) {
+    /**
+     * 返回给 UI 的当前用户信息（不含任何敏感字段）。
+     *
+     * @param tenantName 所属租户名称，顶栏显示；租户不存在时为 null
+     */
+    public record UserView(String username, String role, String tenantName) {
     }
 
     /**

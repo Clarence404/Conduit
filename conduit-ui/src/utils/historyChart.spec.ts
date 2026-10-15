@@ -195,3 +195,11 @@ describe('zoomRangeFromEvent', () => {
     expect(zoomRangeFromEvent({ startValue: 2000, endValue: 1000 })).toBeNull()
   })
 })
+
+describe('chart background', () => {
+  it('is transparent so the ECharts dark theme blends with the page', () => {
+    const o = buildChartOption(series(), RAW_CTX) as { backgroundColor?: string }
+
+    expect(o.backgroundColor).toBe('transparent')
+  })
+})

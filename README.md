@@ -2,9 +2,9 @@
 
 个人研究性质的 IoT 平台。V0.1 跑通「设备 MQTT 直连 → 接入 → 总线 → 处理 → 时序存储 → Web 展示」主链路。
 
-功能：产品与设备管理、MQTT 接入与鉴权、物模型逐测点校验与可插拔解码（V0.2-A）、设备历史曲线（V0.2-B：设备详情「历史」标签页，按时间范围自动聚合，多测点联动缩放）。
+功能：产品与设备管理、MQTT 接入与鉴权、物模型逐测点校验与可插拔解码（V0.2-A）、设备历史曲线（V0.2-B：设备详情「历史」标签页，按时间范围自动聚合，多测点联动缩放）、前端体验优化（首页总览、分组侧栏与面包屑、设备指标卡片与迷你趋势线、暗色模式与侧栏风格切换）。
 
-设计文档：`docs/superpowers/specs/2026-10-14-conduit-v0.1-design.md`（版本路线与 V0.1）、`docs/superpowers/specs/2026-10-15-conduit-v0.2a-thing-model-design.md`（V0.2-A 物模型与编解码）、`docs/superpowers/specs/2026-10-15-conduit-v0.2b-history-design.md`（V0.2-B 历史查询与曲线）
+设计文档：`docs/superpowers/specs/2026-10-14-conduit-v0.1-design.md`（版本路线与 V0.1）、`docs/superpowers/specs/2026-10-15-conduit-v0.2a-thing-model-design.md`（V0.2-A 物模型与编解码）、`docs/superpowers/specs/2026-10-15-conduit-v0.2b-history-design.md`（V0.2-B 历史查询与曲线）、`docs/superpowers/specs/2026-10-15-conduit-ui-refresh-design.md`（前端体验优化）
 
 设备接入指南（流程、连接参数、上报格式、示例代码、排错）：[`docs/device-integration.md`](docs/device-integration.md)
 
@@ -73,12 +73,13 @@ conduit/
 │   ├── thingmodel/                  物模型：属性增删改查、导入导出、按产品缓存
 │   ├── telemetry/                   InfluxDB 写入与历史查询（原始 / 自动聚合）、最新值存储与查询
 │   ├── presence/                    设备上下线状态
+│   ├── overview/                    首页总览接口：按租户统计设备、在线与最近 1 小时死信
 │   ├── security/  bootstrap/        密钥生成与哈希；启动时创建默认租户和管理员
 │   └── config/  web/                框架配置；统一错误响应、分页
 ├── conduit-simulator/               dev.conduit.simulator：通过 REST 开通设备，再按周期上报
 ├── conduit-e2e/                     端到端测试（-Pe2e 时才参与构建）
 ├── conduit-ui/                      Vue 3 + TypeScript + Element Plus（独立 npm 工程，自带 Dockerfile）
-│   └── src/  api/  stores/  router/  layouts/  views/  components/  composables/  utils/
+│   └── src/  api/  stores/  router/  layouts/  views/  components/  composables/  utils/  styles/
 ├── deploy/                          docker-compose.yml、.env.example、EMQX 鉴权与 ACL 配置
 ├── docs/                            设备接入指南、待办清单、设计文档与实现计划
 └── .run/                            IntelliJ IDEA 共享运行配置

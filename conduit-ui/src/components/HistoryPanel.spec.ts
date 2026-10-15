@@ -7,6 +7,7 @@ import { historyApi } from '@/api/history'
 import { thingModelApi } from '@/api/thingModel'
 import { deviceApi } from '@/api/devices'
 import { echarts } from '@/utils/echarts'
+import { applyTheme } from '@/composables/useTheme'
 import type { DataType, HistoryPoint, HistoryView, PointView, PropertyView, SeriesView } from '@/api/types'
 import { settle } from '@/test/viewTestUtils'
 
@@ -26,7 +27,7 @@ const fake = vi.hoisted(() => ({ charts: [] as FakeChart[] }))
 
 vi.mock('@/utils/echarts', () => ({
   echarts: {
-    init: vi.fn((el: HTMLElement) => {
+    init: vi.fn((el: HTMLElement, _theme?: string) => {
       const chart: FakeChart = {
         group: '',
         handlers: {},
@@ -319,5 +320,47 @@ describe('HistoryPanel', () => {
 
     expect(historyApi.query).toHaveBeenCalledTimes(1)
     expect(chart.dispose).toHaveBeenCalled()
+  })
+
+  it('rebuilds the charts with the ECharts dark theme when the theme changes', async () => {
+    const wrapper = await mountPanel()
+    const first = fake.charts[0]
+    expect(vi.mocked(echarts.init).mock.calls[0][1]).toBeUndefined()
+
+    applyTheme(true)
+    await settle()
+
+    expect(first.dispose).toHaveBeenCalled()
+    expect(fake.charts).toHaveLength(2)
+    expect(vi.mocked(echarts.init).mock.calls[1][1]).toBe('dark')
+    expect(fake.charts[1].setOption).toHaveBeenCalled()
+
+    applyTheme(false)
+    await settle()
+    wrapper.unmount()
+  })
+
+  it('starts with the properties passed in initialProps and ignores unknown ones', async () => {
+    const wrapper = mount(HistoryPanel, {
+      props: { deviceKey: 'dk1', productKey: 'pk1', initialProps: ['Ub', 'nope'] },
+      global: { plugins: [ElementPlus] },
+      attachTo: document.body,
+    })
+    await settle()
+
+    expect(historyApi.query).toHaveBeenCalledWith('dk1', ['Ub'], NOW - HOUR, NOW)
+    wrapper.unmount()
+  })
+
+  it('falls back to the default selection when no initial property exists', async () => {
+    const wrapper = mount(HistoryPanel, {
+      props: { deviceKey: 'dk1', productKey: 'pk1', initialProps: ['nope'] },
+      global: { plugins: [ElementPlus] },
+      attachTo: document.body,
+    })
+    await settle()
+
+    expect(historyApi.query).toHaveBeenCalledWith('dk1', DEFAULT_IDS, NOW - HOUR, NOW)
+    wrapper.unmount()
   })
 })

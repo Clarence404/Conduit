@@ -1,4 +1,4 @@
-/** 历史页的测点候选与默认选中 */
+/** 历史页的测点候选、默认选中与初始选中（来自 ?props=） */
 import type { PointView, PropertyView } from '@/api/types'
 
 /** 可选测点：numeric 为 true 的画折线，否则画状态阶梯线 */
@@ -46,4 +46,14 @@ export function defaultSelection(candidates: PropertyCandidate[]): string[] {
     .filter((c) => c.numeric)
     .slice(0, DEFAULT_SELECTED)
     .map((c) => c.identifier)
+}
+
+/**
+ * 初始选中：给定的测点（来自 ?props=）中存在于候选里的部分，保持给定顺序，最多 MAX_SELECTED 个；
+ * 一个都不剩（或没有给定）时用默认选中。
+ */
+export function initialSelection(candidates: PropertyCandidate[], requested: readonly string[]): string[] {
+  const known = new Set(candidates.map((c) => c.identifier))
+  const picked = requested.filter((id) => known.has(id)).slice(0, MAX_SELECTED)
+  return picked.length > 0 ? picked : defaultSelection(candidates)
 }

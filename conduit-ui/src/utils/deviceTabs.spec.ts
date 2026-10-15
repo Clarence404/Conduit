@@ -1,6 +1,6 @@
-/** deviceTabs 的单元测试：?tab= 与设备详情标签互转 */
+/** deviceTabs 的单元测试：?tab= 与设备详情标签互转、离开历史标签去掉 ?props=、卡片跳转 query、?props= 解析 */
 import { describe, expect, it } from 'vitest'
-import { deviceTabFromQuery, deviceTabQuery } from './deviceTabs'
+import { deviceTabFromQuery, deviceTabQuery, historyQuery, propsFromQuery } from './deviceTabs'
 
 describe('deviceTabFromQuery', () => {
   it('accepts the known tabs', () => {
@@ -27,5 +27,24 @@ describe('deviceTabQuery', () => {
 
   it('drops the param for the default tab', () => {
     expect(deviceTabQuery({ tab: 'history', foo: 'bar' }, 'latest')).toEqual({ foo: 'bar' })
+  })
+})
+
+describe('props in the query', () => {
+  it('drops props when leaving the history tab and keeps them on it', () => {
+    expect(deviceTabQuery({ tab: 'history', props: 'Ua', foo: 'bar' }, 'latest')).toEqual({ foo: 'bar' })
+    expect(deviceTabQuery({ props: 'Ua' }, 'history')).toEqual({ tab: 'history', props: 'Ua' })
+  })
+
+  it('builds the history query for a clicked card', () => {
+    expect(historyQuery({ foo: 'bar' }, 'Ua')).toEqual({ foo: 'bar', tab: 'history', props: 'Ua' })
+  })
+
+  it('parses props: comma separated, trimmed, de-duplicated, first of a repeated param', () => {
+    expect(propsFromQuery('Ua, Ub,,Ua')).toEqual(['Ua', 'Ub'])
+    expect(propsFromQuery(['Ia', 'Ua'])).toEqual(['Ia'])
+    expect(propsFromQuery(undefined)).toEqual([])
+    expect(propsFromQuery(null)).toEqual([])
+    expect(propsFromQuery('')).toEqual([])
   })
 })

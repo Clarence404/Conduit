@@ -1,5 +1,6 @@
+/** format 的单元测试：日期时间格式化与计数显示 */
 import { describe, expect, it } from 'vitest'
-import { formatDateTime } from './format'
+import { formatCount, formatDateTime } from './format'
 
 describe('formatDateTime', () => {
   it('formats epoch millis in local time', () => {
@@ -17,5 +18,14 @@ describe('formatDateTime', () => {
     expect(formatDateTime(undefined)).toBe('—')
     expect(formatDateTime('')).toBe('—')
     expect(formatDateTime('not a date')).toBe('—')
+  })
+})
+
+describe('formatCount', () => {
+  it('shows numbers as they are and — for unknown values', () => {
+    expect(formatCount(0)).toBe('0')
+    expect(formatCount(100)).toBe('100')
+    expect(formatCount(null)).toBe('—')
+    expect(formatCount(undefined)).toBe('—')
   })
 })
