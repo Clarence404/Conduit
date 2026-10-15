@@ -2,6 +2,8 @@
  * AppLayout 组件测试：菜单分组与按路由归属高亮、禁用的 V0.2-C 菜单、折叠并保存偏好（点击与键盘 Enter/空格）、侧栏风格类名、
  * 面包屑、租户名称与退出登录、折叠按钮与用户菜单的无障碍名称、窄屏强制折叠且不改动已保存的折叠偏好。
  */
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
@@ -160,5 +162,38 @@ describe('AppLayout', () => {
       expect(JSON.parse(localStorage.getItem(UI_STORAGE_KEY)!).sidebarCollapsed).toBe(false)
       wrapper.unmount()
     })
+  })
+
+  it('renders the logo in the sidebar, with the dark-bg tone on the dark sidebar and also when collapsed', async () => {
+    const { wrapper } = await mountAt('/devices')
+
+    expect(wrapper.find('.brand svg.conduit-logo').exists()).toBe(true)
+    expect(wrapper.find('.brand svg.conduit-logo').attributes('data-tone')).toBe(useUiStore().sidebarStyle === 'dark' ? 'dark-bg' : 'auto')
+    expect(wrapper.find('.brand-name').text()).toBe('Conduit')
+    useUiStore().toggleSidebar()
+    await nextTick()
+    expect(wrapper.find('.brand svg.conduit-logo').exists()).toBe(true)
+    expect(wrapper.find('.brand-name').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('keeps the shell one screen tall: sidebar with the toggle inside it, header fixed, only el-main scrolls', async () => {
+    const { wrapper } = await mountAt('/devices')
+
+    const layout = wrapper.find('.layout')
+    expect(layout.classes()).toContain('el-container')
+    expect(wrapper.find('.sidebar .collapse-toggle').exists()).toBe(true)
+    expect(wrapper.find('.main > .header').exists()).toBe(true)
+    expect(wrapper.find('.main > .el-main.content').exists()).toBe(true)
+    // 页面里只有一个 el-main，它就是唯一的滚动区
+    expect(wrapper.findAll('.el-main')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('declares the one-screen and main-scroll styles in the component source', () => {
+    const source = readFileSync(resolve(__dirname, 'AppLayout.vue'), 'utf-8')
+    expect(source).toMatch(/\.layout\s*\{[^}]*height:\s*100vh;[^}]*height:\s*100dvh;[^}]*overflow:\s*hidden/)
+    expect(source).toMatch(/\.content\s*\{[^}]*overflow:\s*auto/)
+    expect(source).toMatch(/\.menu\s*\{[^}]*min-height:\s*0/)
   })
 })

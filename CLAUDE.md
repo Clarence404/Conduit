@@ -84,3 +84,4 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-15：所有类与重点方法必须写中文注释（见 2.1）；升级时同步更新本文件。
 - 2026-10-15 路线图调整：V0.3 改为「计算字段 → 告警」（计算字段先行，告警规则可引用）；新增 V0.4 资产与数据管理（资产层级/分组、历史导出 CSV、设备批量导入）；V1.0 加审计日志；V1.1 加网关与子设备；规则引擎留在 V2.0，由 V0.3 固定结构告警规则演进；可配置看板暂不纳入。
 - 2026-10-15 界面刷新：统一框架（分组可折叠侧栏 + 面包屑顶栏 + PageHeader + 404）、暗色模式与侧栏风格（偏好存 `localStorage` 的 `conduit.ui`）、列表套件（`useTable`/`FilterBar`/`OnlineDot`/`RelativeTime`）、设备信息卡与指标卡片迷你趋势线、首页总览 `GET /api/v1/overview`、`ProductView` 设备计数、`UserView` 租户名称（`2026-10-15-conduit-ui-refresh-design.md`）。
+- 2026-10-15 前端：品牌标志为「字母 C 信号」（`ConduitLogo`，`tone` auto/dark-bg，深色侧栏与登录品牌区用 dark-bg；favicon 为 `public/favicon.svg`，线宽加粗）；应用外壳恰好一屏高（100vh/100dvh），侧栏与顶栏固定，只有 el-main 滚动；表格行高约 44px、主内容内边距 16px，使 10 行列表页在 1080p 屏无需滚动。

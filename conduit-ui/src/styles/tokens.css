@@ -86,7 +86,7 @@ a:hover {
 
 /* 表格下方的分页器：右对齐 */
 .cd-pager {
-  margin-top: var(--cd-space-4);
+  margin-top: var(--cd-space-3);
   justify-content: flex-end;
 }
 
@@ -94,4 +94,21 @@ a:hover {
 .cd-muted {
   color: var(--cd-text-muted);
   font-size: 12px;
+}
+
+/*
+ * 紧凑表格：行高约 44px（单元格上下内边距 4px，行内文字行高 20px，次要说明行高 16px），
+ * 使 1920×1080 屏（视口约 950px 高）上 10 行的列表页（顶栏 + 页头 + 筛选 + 表头与 10 行 + 分页）无需滚动。
+ */
+.el-table .el-table__cell {
+  padding: 4px 0;
+}
+.el-table .cell {
+  line-height: 20px;
+}
+.el-table .el-table__row > .el-table__cell {
+  height: 44px;
+}
+.el-table .cd-muted {
+  line-height: 16px;
 }
