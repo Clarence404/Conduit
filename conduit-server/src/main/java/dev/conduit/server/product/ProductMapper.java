@@ -13,4 +13,9 @@ public interface ProductMapper extends BaseMapper<Product> {
     @InterceptorIgnore(tenantLine = "true")
     @Select("select * from product where product_key = #{productKey}")
     Product findByKeyAnyTenant(@Param("productKey") String productKey);
+
+    /** 在事务中锁定产品行，串行化同一产品的属性新增与导入（保证 200 个上限）。id 已经过租户校验。 */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("select id from product where id = #{id} for update")
+    Long lockById(@Param("id") long id);
 }

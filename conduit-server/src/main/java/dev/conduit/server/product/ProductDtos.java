@@ -10,13 +10,17 @@ public final class ProductDtos {
     private ProductDtos() {
     }
 
-    public record SaveProductRequest(@NotBlank @Size(max = 128) String name, @Size(max = 512) String description) {
+    /** codec 可选：新建时缺省为 standard-json，修改时缺省保持不变。 */
+    public record SaveProductRequest(@NotBlank @Size(max = 128) String name, @Size(max = 512) String description,
+                                     @Size(max = 32) String codec) {
     }
 
-    public record ProductView(String productKey, String name, String description, OffsetDateTime createdAt) {
+    public record ProductView(String productKey, String name, String description, String codec, int propertyCount,
+                              OffsetDateTime createdAt) {
 
-        static ProductView of(Product p) {
-            return new ProductView(p.getProductKey(), p.getName(), p.getDescription(), p.getCreatedAt());
+        static ProductView of(Product p, int propertyCount) {
+            return new ProductView(p.getProductKey(), p.getName(), p.getDescription(), p.getCodec(), propertyCount,
+                    p.getCreatedAt());
         }
     }
 }
