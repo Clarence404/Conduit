@@ -83,13 +83,38 @@ class NoDataLossE2EIT {
         String dead = composeOutput("exec", "-T", "redis", "redis-cli", "XRANGE", "conduit:stream:dead", "-", "+");
         assertThat(dead).as("no message of this run may be dead-lettered").doesNotContain(productKey);
 
-        await().atMost(Duration.ofSeconds(120)).pollInterval(Duration.ofSeconds(2))
-                .untilAsserted(() -> {
-                    String pending = composeOutput("exec", "-T", "redis", "redis-cli", "XPENDING",
-                            "conduit:stream:up", "conduit-server");
-                    assertThat(pending.lines().findFirst().orElse("").trim())
-                            .as("pending count of group conduit-server").isEqualTo("0");
-                });
+        // 被 kill 的消费者留下的待确认条目要等 PIPELINE_CLAIM_MIN_IDLE 之后才会被认领；
+        // 只检查本次运行的 productKey，避免被同时运行的演示模拟器流量干扰
+        Duration claimWait = claimMinIdle().plusSeconds(30);
+        await().atMost(claimWait).pollInterval(Duration.ofSeconds(3))
+                .untilAsserted(() -> assertThat(pendingEntriesOf(productKey))
+                        .as("pending stream entries of this run in group conduit-server").isEmpty());
+    }
+
+    /** 读取 deploy/.env 的 PIPELINE_CLAIM_MIN_IDLE（如 60s、2m），缺省 60s。 */
+    private Duration claimMinIdle() {
+        String value = env.getOrDefault("PIPELINE_CLAIM_MIN_IDLE", "").trim();
+        if (value.isEmpty()) {
+            return Duration.ofSeconds(60);
+        }
+        if (value.endsWith("ms")) {
+            return Duration.ofMillis(Long.parseLong(value.substring(0, value.length() - 2)));
+        }
+        long amount = Long.parseLong(value.substring(0, value.length() - 1));
+        return switch (value.charAt(value.length() - 1)) {
+            case 's' -> Duration.ofSeconds(amount);
+            case 'm' -> Duration.ofMinutes(amount);
+            case 'h' -> Duration.ofHours(amount);
+            default -> throw new IllegalStateException("Unsupported PIPELINE_CLAIM_MIN_IDLE: " + value);
+        };
+    }
+
+    /** 消费组 conduit-server 中仍待确认、且属于 productKey 的条目内容（空串表示没有）。 */
+    private String pendingEntriesOf(String productKey) throws Exception {
+        String script = "redis-cli XPENDING conduit:stream:up conduit-server - + 1000 | awk 'NR%4==1' "
+                + "| while read id; do redis-cli XRANGE conduit:stream:up \"$id\" \"$id\"; done";
+        String entries = composeOutput("exec", "-T", "redis", "sh", "-c", script);
+        return entries.contains(productKey) ? entries : "";
     }
 
     private static final ObjectMapper JSON = new ObjectMapper();
