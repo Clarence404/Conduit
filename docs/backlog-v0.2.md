@@ -110,3 +110,8 @@
 - 首页列表行是 role=button 而非真正的链接；首次加载失败时骨架屏不会消失。
 - 产品列表没有关键字筛选（`GET /api/v1/products` 无 keyword 参数），产品变多时再加。
 - 缺少产品计数（deviceCount/onlineCount）的跨租户测试。
+- `index.html` 内联的主题预渲染脚本：以后加严格 CSP（`script-src`）时需要给它配 nonce 或 hash。
+- `LatestValueStore` 解析最后上报时间用的 `Long.parseLong` 未做容错，某台设备的值损坏会让 `/overview` 返回 500。
+- 缺少测试：首页轮询在页面隐藏时暂停、`/` 重定向到 `/home`；设备列表"保留已应用筛选"的翻页测试偏弱（没有断言请求了第 2 页）。
+- `DeviceStats.Snapshot.onlineKeys` 是可变集合，应改为不可变。
+- 产品详情页在路由参数 `productKey` 变化时不重新加载（同组件复用时显示旧产品）。
