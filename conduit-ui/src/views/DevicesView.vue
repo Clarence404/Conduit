@@ -8,6 +8,7 @@ import { problemMessage } from '@/api/errors'
 import type { DeviceView, ProductView } from '@/api/types'
 import { formatDateTime } from '@/utils/format'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZES } from '@/utils/pagination'
+import { createRequestSeq } from '@/utils/requestSeq'
 import SecretDialog from '@/components/SecretDialog.vue'
 
 const router = useRouter()
@@ -37,7 +38,10 @@ async function loadProducts() {
   }
 }
 
+const loadSeq = createRequestSeq()
+
 async function load() {
+  const id = loadSeq.next()
   loading.value = true
   try {
     const res = await deviceApi.list({
@@ -46,12 +50,13 @@ async function load() {
       page: query.page,
       size: query.size,
     })
+    if (!loadSeq.isLatest(id)) return
     items.value = res.items
     total.value = res.total
   } catch (e) {
-    ElMessage.error(problemMessage(e))
+    if (loadSeq.isLatest(id)) ElMessage.error(problemMessage(e))
   } finally {
-    loading.value = false
+    if (loadSeq.isLatest(id)) loading.value = false
   }
 }
 

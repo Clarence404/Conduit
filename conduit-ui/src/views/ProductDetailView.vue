@@ -13,6 +13,7 @@ import { formatDateTime } from '@/utils/format'
 import { copyText } from '@/utils/clipboard'
 import { clampPage, DEFAULT_PAGE_SIZE, PAGE_SIZES, pageSlice } from '@/utils/pagination'
 import { tabFromQuery, tabQuery, type ProductTab } from '@/utils/productTabs'
+import { createRequestSeq } from '@/utils/requestSeq'
 import { downloadJson } from '@/utils/download'
 import PropertyDialog from '@/components/PropertyDialog.vue'
 import ThingModelImportDialog from '@/components/ThingModelImportDialog.vue'
@@ -85,16 +86,20 @@ async function copyProductKey() {
   }
 }
 
+const deviceSeq = createRequestSeq()
+
 async function loadDevices() {
+  const id = deviceSeq.next()
   loadingDevices.value = true
   try {
     const res = await deviceApi.list({ productKey: props.productKey, page: devicePage.value, size: deviceSize.value })
+    if (!deviceSeq.isLatest(id)) return
     devices.value = res.items
     deviceTotal.value = res.total
   } catch (e) {
-    ElMessage.error(problemMessage(e))
+    if (deviceSeq.isLatest(id)) ElMessage.error(problemMessage(e))
   } finally {
-    loadingDevices.value = false
+    if (deviceSeq.isLatest(id)) loadingDevices.value = false
   }
 }
 

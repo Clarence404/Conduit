@@ -9,6 +9,7 @@ import type { CodecView, ProductView } from '@/api/types'
 import { formatDateTime } from '@/utils/format'
 import { codecLabel } from '@/utils/thingModel'
 import { DEFAULT_PAGE_SIZE, PAGE_SIZES } from '@/utils/pagination'
+import { createRequestSeq } from '@/utils/requestSeq'
 import { tabQuery, type ProductTab } from '@/utils/productTabs'
 
 const router = useRouter()
@@ -26,16 +27,20 @@ const saving = ref(false)
 const removing = ref(false)
 const form = reactive({ name: '', description: '', codec: 'standard-json' })
 
+const loadSeq = createRequestSeq()
+
 async function load() {
+  const id = loadSeq.next()
   loading.value = true
   try {
     const res = await productApi.list(page.value, size.value)
+    if (!loadSeq.isLatest(id)) return
     items.value = res.items
     total.value = res.total
   } catch (e) {
-    ElMessage.error(problemMessage(e))
+    if (loadSeq.isLatest(id)) ElMessage.error(problemMessage(e))
   } finally {
-    loading.value = false
+    if (loadSeq.isLatest(id)) loading.value = false
   }
 }
 
