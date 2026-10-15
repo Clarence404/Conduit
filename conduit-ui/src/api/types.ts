@@ -7,9 +7,11 @@ export interface PageView<T> {
   size: number
 }
 
+/** 当前用户；tenantName 为所属租户名称（顶栏显示），租户不存在时为 null */
 export interface UserView {
   username: string
   role: string
+  tenantName: string | null
 }
 
 export interface TokenResponse {

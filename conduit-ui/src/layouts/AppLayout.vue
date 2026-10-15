@@ -1,16 +1,33 @@
 <script setup lang="ts">
-/** 登录后的整体布局：左侧导航（产品、设备）、顶部用户名与退出，页面内容渲染在 router-view。 */
-
+/**
+ * 登录后的整体布局。左侧侧栏：Logo、分组菜单（带图标，系统管理项为禁用的「V0.2-C」），按路由 meta.menu 高亮；
+ * 可折叠（偏好保存，窗口宽度 < 820px 时强制折叠），浅色/深色两种风格（偏好）。
+ * 顶栏：左侧全局面包屑（路由 meta + 详情页对象名称），右侧外观设置、租户名称、用户头像下拉（用户名、租户、退出登录）。
+ * 页面渲染在 router-view。
+ */
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ArrowDown, Brush, DataLine, Expand, Fold } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { useUiStore } from '@/stores/ui'
+import { useCurrentPage } from '@/composables/useBreadcrumb'
+import { useMediaQuery } from '@/composables/useMediaQuery'
+import AppearancePanel from '@/components/AppearancePanel.vue'
+import { MENU_GROUPS } from './menu'
 
 const auth = useAuthStore()
+const ui = useUiStore()
 const route = useRoute()
 const router = useRouter()
+const { breadcrumb } = useCurrentPage()
+const narrow = useMediaQuery('(max-width: 819px)')
 
-/** 侧栏高亮项：产品列表和产品详情都归「产品」，其余归「设备」。 */
-const activeMenu = computed(() => (route.path.startsWith('/products') ? '/products' : '/devices'))
+/** 是否折叠：窄屏强制折叠，否则按偏好 */
+const collapsed = computed(() => narrow.value || ui.sidebarCollapsed)
+/** 高亮的菜单：列表页与详情页通过 meta.menu 归到同一项 */
+const activeMenu = computed(() => route.meta.menu ?? '')
+/** 头像文字：用户名首字（大写） */
+const avatarText = computed(() => (auth.user?.username ?? '?').slice(0, 1).toUpperCase())
 
 /** 退出登录：无论登出请求是否成功，都回到登录页。 */
 async function logout() {
@@ -22,23 +39,81 @@ async function logout() {
     await router.replace({ name: 'login' })
   }
 }
+
+/** 用户下拉菜单的命令：目前只有退出登录 */
+function onCommand(command: string) {
+  if (command === 'logout') {
+    void logout()
+  }
+}
 </script>
 
 <template>
   <el-container class="layout">
-    <el-aside width="200px" class="aside">
-      <div class="brand">Conduit</div>
-      <el-menu :default-active="activeMenu" router>
-        <el-menu-item index="/products">产品</el-menu-item>
-        <el-menu-item index="/devices">设备</el-menu-item>
+    <el-aside :width="collapsed ? 'var(--cd-sidebar-collapsed-width)' : 'var(--cd-sidebar-width)'" :class="['sidebar', `cd-sidebar--${ui.sidebarStyle}`]">
+      <div class="brand">
+        <el-icon :size="22" class="brand-icon"><DataLine /></el-icon>
+        <span v-if="!collapsed" class="brand-name">Conduit</span>
+      </div>
+      <el-menu :default-active="activeMenu" :collapse="collapsed" :collapse-transition="false" router class="menu">
+        <el-menu-item-group v-for="group in MENU_GROUPS" :key="group.title" :title="group.title">
+          <el-menu-item
+            v-for="item in group.items"
+            :key="item.path"
+            :index="item.path"
+            :disabled="Boolean(item.disabledNote)"
+          >
+            <el-icon><component :is="item.icon" /></el-icon>
+            <template #title>
+              <span>{{ item.label }}</span>
+              <el-tag v-if="item.disabledNote" size="small" type="info" class="note">{{ item.disabledNote }}</el-tag>
+            </template>
+          </el-menu-item>
+        </el-menu-item-group>
       </el-menu>
+      <div
+        v-if="!narrow"
+        class="collapse-toggle"
+        role="button"
+        tabindex="0"
+        :title="collapsed ? '展开菜单' : '收起菜单'"
+        @click="ui.toggleSidebar()"
+        @keydown.enter="ui.toggleSidebar()"
+      >
+        <el-icon><Expand v-if="collapsed" /><Fold v-else /></el-icon>
+        <span v-if="!collapsed">收起菜单</span>
+      </div>
     </el-aside>
-    <el-container>
+
+    <el-container class="main">
       <el-header class="header">
-        <span>{{ auth.user?.username }}</span>
-        <el-button link type="primary" @click="logout">退出</el-button>
+        <el-breadcrumb separator="/" class="breadcrumb">
+          <el-breadcrumb-item v-for="(item, i) in breadcrumb" :key="i" :to="item.to">{{ item.label }}</el-breadcrumb-item>
+        </el-breadcrumb>
+        <div class="header-right">
+          <el-popover trigger="click" placement="bottom-end" :width="300">
+            <template #reference>
+              <el-button circle :icon="Brush" title="外观设置" aria-label="外观设置" />
+            </template>
+            <AppearancePanel />
+          </el-popover>
+          <el-tag v-if="auth.user?.tenantName" type="info" class="tenant">{{ auth.user.tenantName }}</el-tag>
+          <el-dropdown trigger="click" @command="onCommand">
+            <span class="user" role="button" tabindex="0">
+              <el-avatar :size="28">{{ avatarText }}</el-avatar>
+              <el-icon><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item disabled>{{ auth.user?.username }}</el-dropdown-item>
+                <el-dropdown-item disabled>租户：{{ auth.user?.tenantName ?? '—' }}</el-dropdown-item>
+                <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
       </el-header>
-      <el-main>
+      <el-main class="content">
         <router-view />
       </el-main>
     </el-container>
@@ -49,22 +124,125 @@ async function logout() {
 .layout {
   min-height: 100vh;
 }
-.aside {
-  border-right: 1px solid var(--el-border-color-light);
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--cd-sidebar-bg);
+  border-right: 1px solid var(--cd-sidebar-border);
+  transition: width 0.2s;
+}
+.cd-sidebar--dark {
+  --cd-sidebar-bg: var(--cd-sidebar-dark-bg);
+  --cd-sidebar-text: var(--cd-sidebar-dark-text);
+  --cd-sidebar-muted: var(--cd-sidebar-dark-muted);
+  --cd-sidebar-hover: var(--cd-sidebar-dark-hover);
+  --cd-sidebar-active-bg: var(--cd-sidebar-dark-active-bg);
+  --cd-sidebar-active-text: var(--cd-sidebar-dark-active-text);
+  --cd-sidebar-border: var(--cd-sidebar-dark-border);
+}
+.cd-sidebar--light {
+  --cd-sidebar-bg: var(--cd-sidebar-light-bg);
+  --cd-sidebar-text: var(--cd-sidebar-light-text);
+  --cd-sidebar-muted: var(--cd-sidebar-light-muted);
+  --cd-sidebar-hover: var(--cd-sidebar-light-hover);
+  --cd-sidebar-active-bg: var(--cd-sidebar-light-active-bg);
+  --cd-sidebar-active-text: var(--cd-sidebar-light-active-text);
+  --cd-sidebar-border: var(--cd-sidebar-light-border);
 }
 .brand {
-  height: 60px;
+  height: var(--cd-header-height);
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  padding-left: 20px;
+  gap: var(--cd-space-2);
+  padding: 0 var(--cd-space-5);
+  color: var(--cd-sidebar-text);
   font-size: 18px;
   font-weight: 600;
 }
-.header {
+.brand-icon {
+  color: var(--el-color-primary);
+}
+.menu {
+  flex: 1;
+  border-right: none;
+  overflow-y: auto;
+  --el-menu-bg-color: var(--cd-sidebar-bg);
+  --el-menu-text-color: var(--cd-sidebar-text);
+  --el-menu-hover-bg-color: var(--cd-sidebar-hover);
+  --el-menu-active-color: var(--cd-sidebar-active-text);
+  --el-menu-item-height: 44px;
+}
+.menu :deep(.el-menu-item.is-active) {
+  background: var(--cd-sidebar-active-bg);
+  color: var(--cd-sidebar-active-text);
+}
+.menu :deep(.el-menu-item-group__title) {
+  padding-top: var(--cd-space-3);
+  color: var(--cd-sidebar-muted);
+  font-size: 12px;
+}
+.menu.el-menu--collapse :deep(.el-menu-item-group__title) {
+  display: none;
+}
+.note {
+  margin-left: auto;
+}
+.collapse-toggle {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
+  gap: var(--cd-space-2);
+  padding: var(--cd-space-3) var(--cd-space-5);
+  color: var(--cd-sidebar-muted);
+  border-top: 1px solid var(--cd-sidebar-border);
+  cursor: pointer;
+}
+.collapse-toggle:hover {
+  color: var(--cd-sidebar-text);
+  background: var(--cd-sidebar-hover);
+}
+.main {
+  min-width: 0;
+}
+.header {
+  height: var(--cd-header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cd-space-3);
+  background: var(--cd-panel-bg);
   border-bottom: 1px solid var(--el-border-color-light);
+}
+.breadcrumb {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--cd-space-3);
+  flex-shrink: 0;
+}
+.user {
+  display: flex;
+  align-items: center;
+  gap: var(--cd-space-1);
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+}
+.content {
+  min-width: 0;
+  background: var(--cd-page-bg);
+}
+@media (max-width: 819px) {
+  .tenant {
+    display: none;
+  }
+  .content {
+    padding: var(--cd-space-3);
+  }
 }
 </style>
