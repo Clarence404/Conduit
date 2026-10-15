@@ -1,6 +1,6 @@
 # 设备接入指南
 
-本文说明一台设备从开通、连接到数据上报的完整流程，以及对接时需要遵守的约定。内容对应 V0.1 的实际实现。
+本文说明一台设备从开通、连接到数据上报的完整流程，以及对接时需要遵守的约定。内容对应 V0.2-A 的实际实现。
 
 ## 1. 整体流程
 
@@ -39,7 +39,7 @@ sequenceDiagram
     Conn-->>EMQX: PUBACK（写入成功后才确认）
     EMQX-->>Dev: PUBACK
     Server->>Bus: 消费组读取
-    Server->>Server: 解码、校验
+    Server->>Server: 按产品解码器解码，按物模型逐测点校验
     Server->>Store: 写 InfluxDB，更新最新值
     Server->>Bus: XACK
 ```
@@ -102,12 +102,39 @@ curl -s -X POST "$API/api/v1/devices" -H "Authorization: Bearer $TOKEN" \
 | `ts` | 采样时间，**毫秒**时间戳。可省略，省略时用平台接收时间。必须在 `[当前时间 − 30 天, 当前时间 + 5 分钟]` 之内，秒级时间戳会被当作超出范围 |
 | `params` | 非空对象，值只能是数字、字符串、布尔，不能是 null、数组或嵌套对象 |
 | 测点名 | 不能为空，不能以 `__` 开头（平台保留） |
-| 数字 | 一律按浮点数存储，`220` 和 `220.0` 等价 |
+| 数字 | 产品没有物模型时一律按浮点数存储（`220` 与 `220.0` 等价）；有物模型时按属性类型存储，见第 5 节 |
 | 类型一致 | 同一测点一旦以数字写入，之后就不能再报字符串，反之亦然 |
 
 同一设备、同一 `ts` 重复上报会覆盖为同样的值，因此设备重发是安全的。补传的旧数据会写入历史，但不会覆盖页面上的最新值。
 
-## 5. 对接示例
+### 4.1 扁平 JSON
+
+产品的解码器选「扁平 JSON」（`flat-json`）时，测点直接放在顶层：
+
+```json
+{ "id": "可选", "ts": 1760400000000, "Ua": 220.1, "Ia": 5.2 }
+```
+
+顶层 `ts` 为时间戳（规则同上），`id` 忽略，其余键都是测点，至少要有一个。解码器在「产品详情 → 基本信息」中选择，修改后立即生效。
+
+## 5. 物模型
+
+在「产品详情 → 物模型」中为产品定义属性（测点），也可以导入/导出 JSON（格式见 `docs/examples/demo-meter.thing-model.json`）。每个产品最多 200 个属性。
+
+| 类型 | 接受的值 | 存储 |
+|---|---|---|
+| 浮点数 `DOUBLE` | 有限数值 | float |
+| 整数 `INT` | 整数（`220.0` 也算），在 long 范围内 | integer |
+| 布尔 `BOOL` | `true` / `false` | boolean |
+| 文本 `TEXT` | 字符串，最长 1024 | string |
+| 枚举 `ENUM` | 已定义的整数枚举值 | integer |
+
+- 产品**没有**任何属性时，按 V0.1 规则接收（数值一律浮点）。
+- 有物模型时逐测点校验：合格的测点照常入库；不合格的测点被剔除，并写一条 `FIELD_REJECTED` 死信记录，字段 `rejected` 列出每个被剔除的测点、原值（最多 64 个字符）和原因：`UNDEFINED`（未定义）、`TYPE_MISMATCH`（类型不符）、`OUT_OF_RANGE`（超出范围）、`TOO_LONG`（文本超长）、`ENUM_VALUE`（不是定义的枚举值）。全部测点都被剔除时整条消息进死信。
+- 数据类型定义后不可修改；已经以浮点数写入过的测点请保持「浮点数」，定义为整数/枚举会与历史数据类型冲突（`FIELD_TYPE_CONFLICT`）。所有产品共用同一张时序表，同名测点在不同产品中也应使用相同类型。
+- 修改物模型立即生效（多实例部署时最多延迟 60 秒）。
+
+## 6. 对接示例
 
 **命令行（mosquitto_pub）**
 
@@ -142,12 +169,12 @@ while True:
 
 仓库里的设备模拟器 `conduit-simulator` 是一个完整的 Java 参考实现，使用 HiveMQ MQTT Client，支持断线重连和发送失败重试。
 
-## 6. 核对结果
+## 7. 核对结果
 
 - **Web**：「设备」页能看到设备「在线」，「最后上报」时间在更新；进入设备详情，最新值表格每 5 秒刷新一次。
 - **API**：`GET /api/v1/devices/{deviceKey}/latest` 返回各测点的最新值和采样时间。
 
-## 7. 常见问题
+## 8. 常见问题
 
 **连接被拒绝（CONNACK 返回未授权）**
 
@@ -168,11 +195,13 @@ docker compose -f deploy/docker-compose.yml exec redis \
 | 死信原因 | 常见原因 |
 |---|---|
 | `MALFORMED_JSON` | payload 不是合法 JSON 对象，或有重复键 |
-| `INVALID_PARAMS` | `params` 为空、值类型不支持、测点名非法、数值溢出 |
+| `INVALID_PARAMS` | `params` 为空（扁平 JSON 为没有测点）、值类型不支持、测点名非法、数值溢出（无物模型时） |
 | `TS_OUT_OF_RANGE` | 用了秒级时间戳，或设备时钟偏差过大 |
 | `PRODUCT_MISMATCH` | topic 里的 productKey 和设备所属产品不一致 |
 | `UNKNOWN_DEVICE` / `DEVICE_DISABLED` | 设备已删除或已禁用（禁用不会断开已有连接） |
 | `FIELD_TYPE_CONFLICT` | 同一测点前后报了不同类型 |
+| `FIELD_REJECTED` | 测点不符合物模型（部分剔除时原消息的合格测点已入库，见记录中的 `rejected`） |
+| `UNKNOWN_CODEC` | 产品配置的解码器不存在（例如部署回退后），整条消息未处理 |
 | `UNSUPPORTED_TYPE` | 发到了 `up/event`，V0.1 暂不支持事件 |
 | `PROCESSING_ERROR` | 平台内部处理异常，只影响这一条消息 |
 | `MAX_DELIVERY_EXCEEDED` | 同一条消息投递超过 5 次仍未处理成功 |
@@ -181,7 +210,7 @@ docker compose -f deploy/docker-compose.yml exec redis \
 
 平台下游（Redis）暂时不可用时，connector 会暂缓确认，设备侧表现为 PUBACK 变慢。恢复后会继续确认，消息不会丢失。设备应等待 PUBACK，不要因为超时就丢弃数据。
 
-## 8. V0.1 的限制
+## 9. 当前限制
 
 - 只支持属性上报（`up/property`）；事件上报、下行命令、设备影子在后续版本提供。
 - 未启用 TLS，凭证在网络中明文传输，只适合内网和演示环境。

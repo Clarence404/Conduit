@@ -95,7 +95,7 @@ cp deploy/.env.example deploy/.env   # 按需修改口令与端口
 docker compose -f deploy/docker-compose.yml --profile demo up -d --build
 ```
 
-浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录。模拟器会自动创建「Demo Meter」产品和设备（默认 100 台，每 10 秒上报一次，见 `SIM_DEVICE_COUNT` / `SIM_INTERVAL_MS`）。
+浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录。模拟器会自动创建「Demo Meter」产品和设备，并在产品没有属性时导入演示物模型（docs/examples/demo-meter.thing-model.json）（默认 100 台，每 10 秒上报一次，见 `SIM_DEVICE_COUNT` / `SIM_INTERVAL_MS`；上报格式由 `SIM_PAYLOAD_FORMAT`（`standard` / `flat`）指定）。
 
 宿主机端口可在 `deploy/.env` 中配置，括号内为默认值：
 
@@ -130,6 +130,8 @@ PostgreSQL 与 Redis 不对外暴露。
 ```json
 { "id": "可选", "ts": 1760400000000, "params": { "Ua": 220.1, "Ia": 5.2 } }
 ```
+
+- 产品可选解码器「标准 JSON」（上面的格式）或「扁平 JSON」（`{"ts":…,"Ua":220.1}`），并可定义物模型逐测点校验，详见 [设备接入指南](docs/device-integration.md)。
 
 ## 开发
 
@@ -241,8 +243,9 @@ docker compose -f deploy/docker-compose.yml exec redis redis-cli XRANGE conduit:
 docker compose -f deploy/docker-compose.yml exec redis redis-cli XPENDING conduit:stream:up conduit-server
 ```
 
-## 已知限制（V0.1）
+## 已知限制
 
+- 物模型缓存为进程内缓存：多实例部署时，修改物模型最多 60 秒后在其他实例生效。
 - 未启用 TLS；凭证均为演示用途。
 - Redis 长时间不可用时，EMQX 会话队列（`max_mqueue_len`）溢出会丢消息，V1.0 压测时量化。
 - 死信只能通过 `redis-cli XRANGE conduit:stream:dead - +` 查看。
