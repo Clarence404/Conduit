@@ -68,3 +68,20 @@
 - e2e 测试数据未清理
 - e2e 的 DEPLOY 路径依赖当前工作目录
 - Influx 同 ts 覆盖，重复写入无法检出
+
+## V0.2-A 遗留（评审后延后）
+
+- 无物模型时，设备上报名为 `time` / `tenant_id` / `product_key` / `device_key` 的测点会以误导性的 `FIELD_TYPE_CONFLICT` 进死信（应在解码时直接拒绝该名称）
+- 测点名含制表符时整行被 InfluxDB 拒绝，死信原因不够明确
+- 解码错误信息会带出报文中的个别 token / 测点名（仅 debug 日志）；可改为固定文案加行列号
+- `DecoderRegistry` 遇到空名称时抛 NPE，启动失败信息不清晰
+- INT 范围校验经 double 比较，超过 2^53 时有精度损失；TEXT 长度按 UTF-16 单元计算
+- 并发删除属性时修改同一属性返回 500 而非 404
+- `decimals` 传 `1.5` 被 Jackson 截断为 1 而非报错
+- 导入 `mode` 非法时先于租户校验返回 400
+- 物模型拒绝后又被 InfluxDB 拒绝（`FIELD_TYPE_CONFLICT`）时，死信不带 `rejected` 明细
+- `MessageBus.deadLetter` 已不再被流水线使用，注释需更新
+- 演示物模型导入失败会让模拟器退出（依赖 compose 重启）
+- 产品详情：增删改属性后会重新加载产品，覆盖「基本信息」页未保存的编辑；`productKey` 变化时不重新加载；导出下载同步 `revokeObjectURL`
+- `Dockerfile` / `.dockerignore` 头部注释未提及放行的 `docs/examples` 文件
+- 测试缺口：200 属性上限的并发测试、枚举标签的负例、null 值、缓存容量上限、模型标识与模拟器测点的一致性
