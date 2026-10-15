@@ -6,6 +6,7 @@
     {"identifier": "Ia", "name": "A 相电流", "dataType": "DOUBLE", "unit": "A", "minValue": null, "maxValue": null, "decimals": 1, "enumItems": null, "description": null},
     {"identifier": "Ib", "name": "B 相电流", "dataType": "DOUBLE", "unit": "A", "minValue": null, "maxValue": null, "decimals": 1, "enumItems": null, "description": null},
     {"identifier": "Ic", "name": "C 相电流", "dataType": "DOUBLE", "unit": "A", "minValue": null, "maxValue": null, "decimals": 1, "enumItems": null, "description": null},
-    {"identifier": "EPimp", "name": "正向有功电能", "dataType": "DOUBLE", "unit": "kWh", "minValue": null, "maxValue": null, "decimals": 3, "enumItems": null, "description": null}
+    {"identifier": "EPimp", "name": "正向有功电能", "dataType": "DOUBLE", "unit": "kWh", "minValue": null, "maxValue": null, "decimals": 3, "enumItems": null, "description": null},
+    {"identifier": "st", "name": "运行状态", "dataType": "ENUM", "unit": null, "minValue": null, "maxValue": null, "decimals": null, "enumItems": [{"value": 0, "label": "停机"}, {"value": 1, "label": "运行"}, {"value": 2, "label": "检修"}], "description": null}
   ]
 }

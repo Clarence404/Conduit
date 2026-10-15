@@ -35,7 +35,7 @@ public final class SimulatorApplication {
     }
 
     /**
-     * 主流程：读配置、登录（等待 server 就绪）、准备设备、产品无属性时导入演示物模型，然后开始模拟上报。
+     * 主流程：读配置、登录（等待 server 就绪）、准备设备、缺少演示属性时合并导入演示物模型，然后开始模拟上报。
      * 有限模式下返回即表示全部发送成功。
      */
     private static void run() throws InterruptedException {
@@ -51,8 +51,9 @@ public final class SimulatorApplication {
             log.info("Imported demo thing model into product '{}'", config.productName());
         }
 
+        // 演示产品的物模型含枚举 st，附带运行状态；e2e 等无物模型的产品不能发 st（见 DeviceSimulator 构造器说明）
         new DeviceSimulator(config.mqttHost(), config.mqttPort(), config.interval(), config.messagesPerDevice(),
-                DeviceSimulator.DEFAULT_COMPLETION_TIMEOUT, format).run(devices);
+                DeviceSimulator.DEFAULT_COMPLETION_TIMEOUT, format, true).run(devices);
     }
 
     /** 一键启动时 server 可能还没就绪，最多等 2 分钟。 */
