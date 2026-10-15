@@ -94,3 +94,4 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-15 设备列表筛选与数据驱动在线：列表新增 online / status / reported / createdFrom / createdTo 筛选（online、reported 走内存分页）；上报数据可把设备标记为在线，但数据不推进 `since`、离线后需超过 10 秒宽限期才复活，EMQX 事件仍是权威。
 - 2026-10-15：Java 服务日志统一写入 `CONDUIT_LOG_DIR`（默认 `logs`）下的每服务一个滚动文件（50MB/14 天/1GB）；simulator 由 slf4j-simple 换为 logback-classic；Docker 共用卷 `conduit-logs`。
 - 2026-10-15：编排可同步到 Docker 宿主机 `/opt/conduit`（`deploy/sync-to-host.sh`，借临时容器 + docker cp 写入），供宿主机面板（1Panel）管理；仓库 `deploy/` 仍是唯一来源。
+- 2026-10-15：基础设施加入 InfluxDB 3 Explorer（`influxdata/influxdb3-ui:1.11.0`，端口 `INFLUX_EXPLORER_PORT` 默认 8888，admin 模式，预置连接 compose 内的 InfluxDB 与 `telemetry` 库，数据卷 `influx-explorer-data`）。

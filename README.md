@@ -128,6 +128,7 @@ deploy/build-local.sh
 | `API_PORT`（8091） | REST API（app profile） |
 | `MQTT_PORT`（1883） | MQTT |
 | `EMQX_DASHBOARD_PORT`（18083） | EMQX 控制台 |
+| `INFLUX_EXPLORER_PORT`（8888） | InfluxDB 3 Explorer（时序数据图形界面，已预置连接与 `telemetry` 库；admin 模式、无登录，仅在可信网络暴露） |
 | `INFLUX_PORT`（8096） | InfluxDB 3 Core HTTP API（容器内 8181，需 token） |
 | `POSTGRES_PORT`（15432） | PostgreSQL（供 IDE 中运行的服务直连） |
 | `REDIS_PORT`（16379） | Redis（同上） |

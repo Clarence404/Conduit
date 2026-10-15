@@ -53,6 +53,27 @@ services:
       retries: 30
     restart: unless-stopped
 
+  influxdb-explorer:
+    # InfluxDB 3 官方图形界面（InfluxDB 3 Explorer），预置连接到本编排的 InfluxDB 与 telemetry 库。
+    # admin 模式可管理库与 token；它本身没有登录，只应在可信网络中暴露（端口按 BIND_ADDR 绑定）。
+    image: influxdata/influxdb3-ui:1.11.0
+    environment:
+      DEFAULT_SERVER_NAME: conduit
+      DEFAULT_INFLUX_SERVER: http://influxdb:8181
+      DEFAULT_API_TOKEN: ${INFLUX_TOKEN:?INFLUX_TOKEN is required}
+      DEFAULT_INFLUX_DATABASE: telemetry
+      UI_MODE: admin
+      # 会话签名密钥；不设置时每次重启都会生成新密钥，已打开的页面需要重新进入
+      SESSION_SECRET_KEY: ${INFLUX_EXPLORER_SESSION_KEY:?INFLUX_EXPLORER_SESSION_KEY is required}
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${INFLUX_EXPLORER_PORT:-8888}:8080"
+    volumes:
+      - influx-explorer-data:/db
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    restart: unless-stopped
+
   emqx:
     build:
       context: ./emqx
@@ -207,5 +228,6 @@ volumes:
   pg-data:
   redis-data:
   influx3-data:
+  influx-explorer-data:
   emqx-data:
   conduit-logs:
