@@ -25,7 +25,7 @@ class SimulatorConfigTest {
         SimulatorConfig config = SimulatorConfig.fromEnv(Map.of("CONDUIT_ADMIN_PASSWORD", "pw"));
 
         assertThat(config.apiUrl()).hasToString("http://localhost:8080");
-        assertThat(config.productName()).isEqualTo("Demo Meter");
+        assertThat(config.productName()).isEqualTo("三相电表（演示）");
         assertThat(config.deviceCount()).isEqualTo(100);
     }
 

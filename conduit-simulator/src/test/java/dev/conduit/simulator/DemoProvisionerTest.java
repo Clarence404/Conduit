@@ -53,7 +53,7 @@ class DemoProvisionerTest {
         switch (call) {
             case "POST /api/v1/auth/login" -> body = "{\"accessToken\":\"tok\"}";
             case "GET /api/v1/products" -> body = """
-                    {"items":[{"productKey":"pk-demo","name":"Demo Meter","codec":"standard-json"}],
+                    {"items":[{"productKey":"pk-demo","name":"三相电表（演示）","codec":"standard-json"}],
                      "total":1,"page":1,"size":100}""";
             case "POST /api/v1/products" -> {
                 status = 201;
@@ -63,7 +63,10 @@ class DemoProvisionerTest {
                     + propertyCount + "}";
             case "PUT /api/v1/products/pk-demo/thing-model" -> body = "[]";
             case "GET /api/v1/devices" -> body = """
-                    {"items":[{"deviceKey":"dk-b"},{"deviceKey":"dk-a"}],"total":2,"page":1,"size":100}""";
+                    {"items":[{"deviceKey":"dk-b","name":"1号楼配电室 电表02","status":"ENABLED"},
+                              {"deviceKey":"dk-a","name":"sim-001","status":"DISABLED"}],
+                     "total":2,"page":1,"size":100}""";
+            case "PUT /api/v1/devices/dk-a" -> body = "{\"deviceKey\":\"dk-a\"}";
             case "POST /api/v1/devices/dk-a/reset-secret" -> body = "{\"deviceKey\":\"dk-a\",\"deviceSecret\":\"sa\"}";
             case "POST /api/v1/devices/dk-b/reset-secret" -> body = "{\"deviceKey\":\"dk-b\",\"deviceSecret\":\"sb\"}";
             case "POST /api/v1/devices" -> {
@@ -71,10 +74,19 @@ class DemoProvisionerTest {
                 int n = created.incrementAndGet();
                 body = "{\"device\":{\"deviceKey\":\"dk-new" + n + "\"},\"deviceSecret\":\"s" + n + "\"}";
             }
+            case "DELETE /api/v1/devices/dk-a", "DELETE /api/v1/products/pk-demo" -> {
+                status = 204;
+                body = "";
+            }
             default -> {
                 status = 404;
                 body = "{}";
             }
+        }
+        if (status == 204) {
+            ex.sendResponseHeaders(204, -1);
+            ex.close();
+            return;
         }
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         ex.getResponseHeaders().add("Content-Type", "application/json");
@@ -91,7 +103,7 @@ class DemoProvisionerTest {
 
     @Test
     void reusesExistingProductResetsExistingDevicesAndCreatesTheRest() {
-        List<DeviceCredentials> devices = DemoProvisioner.provision(client(), "Demo Meter", 4);
+        List<DeviceCredentials> devices = DemoProvisioner.provision(client(), "三相电表（演示）", 4);
 
         assertThat(devices).extracting(DeviceCredentials::deviceKey)
                 .containsExactly("dk-a", "dk-b", "dk-new1", "dk-new2");
@@ -103,10 +115,40 @@ class DemoProvisionerTest {
 
     @Test
     void usesOnlyAsManyExistingDevicesAsRequested() {
-        List<DeviceCredentials> devices = DemoProvisioner.provision(client(), "Demo Meter", 1);
+        List<DeviceCredentials> devices = DemoProvisioner.provision(client(), "三相电表（演示）", 1);
 
         assertThat(devices).extracting(DeviceCredentials::deviceKey).containsExactly("dk-a");
         assertThat(created).hasValue(0);
+    }
+
+    @Test
+    void renamesLegacyDevicesKeepingKeyAndStatus() {
+        DemoProvisioner.provision(client(), "三相电表（演示）", 2);
+
+        assertThat(requestBodies).filteredOn(b -> b.startsWith("PUT /api/v1/devices/")).singleElement()
+                .satisfies(b -> assertThat(b).startsWith("PUT /api/v1/devices/dk-a ")
+                        .contains("\"name\":\"1号楼配电室 电表01\"")
+                        .contains("\"status\":\"DISABLED\""));
+        assertThat(calls).doesNotContain("PUT /api/v1/devices/dk-b");
+        assertThat(created).hasValue(0);
+    }
+
+    @Test
+    void createsNewDevicesWithRealisticNames() {
+        DemoProvisioner.provision(client(), "三相电表（演示）", 4);
+
+        assertThat(requestBodies).filteredOn(b -> b.startsWith("POST /api/v1/devices "))
+                .satisfiesExactly(
+                        b -> assertThat(b).contains("\"name\":\"1号楼配电室 电表03\""),
+                        b -> assertThat(b).contains("\"name\":\"1号楼配电室 电表04\""));
+    }
+
+    @Test
+    void deviceNamesGroupTenMetersPerBuilding() {
+        assertThat(DemoProvisioner.deviceName(0)).isEqualTo("1号楼配电室 电表01");
+        assertThat(DemoProvisioner.deviceName(9)).isEqualTo("1号楼配电室 电表10");
+        assertThat(DemoProvisioner.deviceName(10)).isEqualTo("2号楼配电室 电表01");
+        assertThat(DemoProvisioner.deviceName(25)).isEqualTo("3号楼配电室 电表06");
     }
 
     @Test
@@ -136,6 +178,16 @@ class DemoProvisionerTest {
         assertThat(DemoProvisioner.ensureThingModel(client(), "pk-demo")).isFalse();
 
         assertThat(calls).doesNotContain("PUT /api/v1/products/pk-demo/thing-model");
+    }
+
+    @Test
+    void deletesDevicesAndProducts() {
+        ConduitApiClient api = client();
+
+        api.deleteDevice("dk-a");
+        api.deleteProduct("pk-demo");
+
+        assertThat(calls).contains("DELETE /api/v1/devices/dk-a", "DELETE /api/v1/products/pk-demo");
     }
 
     @Test
