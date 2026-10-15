@@ -98,6 +98,14 @@ cp deploy/.env.example deploy/.env   # 按需修改口令与端口
 docker compose -f deploy/docker-compose.yml --profile demo up -d --build
 ```
 
+Docker 宿主机无法访问外网时（镜像内的 `mvn` / `npm ci` 下载不了依赖），改用本机构建：
+
+```bash
+deploy/build-local.sh
+```
+
+脚本从当前提交的干净检出构建 jar 和前端（未提交的修改与 `application-local.yml` 等本地配置不会进入镜像），在宿主机上只打复制产物的薄镜像，再执行 `up -d --no-build`。需要本机有 JDK 21 上的 Maven 和 Node.js 22，宿主机上已有 compose 用到的基础镜像（`eclipse-temurin:21.0.6_7-jre`、`nginx:1.27.4-alpine` 以及 postgres、redis、influxdb、emqx）。`--no-up` 只构建不启动；docker / compose 命令可用环境变量 `DOCKER`、`COMPOSE` 覆盖。
+
 浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录。模拟器会自动创建「Demo Meter」产品和设备，并在产品没有属性时导入演示物模型（docs/examples/demo-meter.thing-model.json）（默认 100 台，每 10 秒上报一次，见 `SIM_DEVICE_COUNT` / `SIM_INTERVAL_MS`；上报格式由 `SIM_PAYLOAD_FORMAT`（`standard` / `flat`）指定，新建产品时按此选用解码器，已有产品的解码器不会被修改）。
 
 宿主机端口可在 `deploy/.env` 中配置，括号内为默认值：
