@@ -172,6 +172,7 @@ services:
       MQTT_HOST: emqx
       SIM_DEVICE_COUNT: ${SIM_DEVICE_COUNT:-100}
       SIM_INTERVAL_MS: ${SIM_INTERVAL_MS:-10000}
+      SIM_PAYLOAD_FORMAT: ${SIM_PAYLOAD_FORMAT:-standard}
     depends_on:
       emqx:
         condition: service_healthy

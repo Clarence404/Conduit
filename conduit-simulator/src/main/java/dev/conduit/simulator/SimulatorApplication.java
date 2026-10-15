@@ -35,11 +35,16 @@ public final class SimulatorApplication {
         ConduitApiClient api = new ConduitApiClient(config.apiUrl());
         loginWithRetry(api, config);
 
-        List<DeviceCredentials> devices = DemoProvisioner.provision(api, config.productName(), config.deviceCount());
+        PayloadFormat format = config.payloadFormat();
+        List<DeviceCredentials> devices = DemoProvisioner.provision(api, config.productName(), config.deviceCount(),
+                format.codec());
         log.info("Provisioned {} devices under product '{}'", devices.size(), config.productName());
+        if (!devices.isEmpty() && DemoProvisioner.ensureThingModel(api, devices.getFirst().productKey())) {
+            log.info("Imported demo thing model into product '{}'", config.productName());
+        }
 
-        new DeviceSimulator(config.mqttHost(), config.mqttPort(), config.interval(), config.messagesPerDevice())
-                .run(devices);
+        new DeviceSimulator(config.mqttHost(), config.mqttPort(), config.interval(), config.messagesPerDevice(),
+                DeviceSimulator.DEFAULT_COMPLETION_TIMEOUT, format).run(devices);
     }
 
     /** 一键启动时 server 可能还没就绪，最多等 2 分钟。 */

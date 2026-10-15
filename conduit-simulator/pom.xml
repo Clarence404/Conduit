@@ -40,6 +40,18 @@
 
   <build>
     <finalName>${project.artifactId}</finalName>
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+      </resource>
+      <resource>
+        <!-- 唯一来源在 docs/examples，打包进 jar 供模拟器自动导入 -->
+        <directory>${project.basedir}/../docs/examples</directory>
+        <includes>
+          <include>demo-meter.thing-model.json</include>
+        </includes>
+      </resource>
+    </resources>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
