@@ -70,6 +70,14 @@ class ProductApiIT extends IntegrationTestBase {
     }
 
     @Test
+    void listDefaultsToTenPerPage() throws Exception {
+        mvc.perform(get("/api/v1/products").header(HttpHeaders.AUTHORIZATION, auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(10));
+    }
+
+    @Test
     void deleteWithDevicesIsConflict() throws Exception {
         TestDevice device = createDevice(defaultTenantId(), "ENABLED");
 

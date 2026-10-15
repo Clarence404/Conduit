@@ -104,6 +104,14 @@ class DeviceApiIT extends IntegrationTestBase {
     }
 
     @Test
+    void listDefaultsToTenPerPage() throws Exception {
+        mvc.perform(get("/api/v1/devices").header(HttpHeaders.AUTHORIZATION, auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(10));
+    }
+
+    @Test
     void disablingEvictsIdentityCache() throws Exception {
         String dk = create("d");
         String hashBefore = jdbc.queryForObject("select secret_hash from device where device_key = ?", String.class, dk);
