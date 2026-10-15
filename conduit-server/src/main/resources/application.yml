@@ -60,3 +60,14 @@ management:
     web:
       exposure:
         include: health,metrics
+
+# 日志写入文件：目录由 CONDUIT_LOG_DIR 指定（默认工作目录下 logs），按天 + 按大小滚动，控制台输出保持不变
+logging:
+  file:
+    name: ${CONDUIT_LOG_DIR:logs}/${spring.application.name}.log
+  logback:
+    rollingpolicy:
+      max-file-size: 50MB
+      max-history: 14
+      total-size-cap: 1GB
+      file-name-pattern: ${CONDUIT_LOG_DIR:logs}/${spring.application.name}.%d{yyyy-MM-dd}.%i.log.gz

@@ -260,6 +260,16 @@ cd conduit-ui && npm install && npm test && npm run dev
 
 如果同时还部署了完整的 Docker 应用栈（`app` profile），容器里的 server / transport 会和 IDE 中的实例加入同一个消费组与共享订阅分担消息，数据不会重复也不会丢；但 EMQX 的鉴权回调只指向 `CONDUIT_AUTH_URL` 一处。一般不建议两套同时运行。
 
+## 日志
+
+所有 Java 服务（server、transport、simulator）除控制台外，还把日志写到文件：
+
+- 位置：环境变量 `CONDUIT_LOG_DIR` 指定目录，默认 `logs`（相对进程工作目录）。IDEA 运行配置的工作目录是仓库根目录，所以本地日志在 `<仓库>/logs/`（已加入 `.gitignore`）；每个服务一个文件：`conduit-server.log`、`conduit-transport.log`、`conduit-simulator.log`。
+- 滚动：按天并按大小（单文件 50MB）滚动，保留 14 天，总量上限 1GB；归档文件名形如 `conduit-server.2026-10-15.0.log.gz`。
+- Docker：三个服务设置 `CONDUIT_LOG_DIR=/var/log/conduit` 并共用命名卷 `conduit-logs`，可用 `docker run --rm -v conduit_conduit-logs:/logs alpine ls /logs` 查看，或挂载到其他容器读取。
+- 不在此列：前端开发服务器（Vite）的日志只在 IDE 控制台；`conduit-web` 的 nginx 日志走 `docker logs`。
+- 集成测试的日志写到 `conduit-server/target/test-logs/`，不污染工作目录。
+
 ## 端到端测试：杀进程不丢数据
 
 10 台设备各发 50 条消息，发送中途 kill 并重启 `conduit-server`，最终 InfluxDB 中应恰好 500 条。需要完整应用栈已部署（`--profile app`，测试会 kill / start 容器里的 `conduit-server`，所以日常只起基础设施时无法运行；可不带 demo profile）。不要同时运行两个 e2e：它们共用同一个 conduit-server，一个 kill 它会让另一个连接失败。

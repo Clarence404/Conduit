@@ -17,13 +17,6 @@
       <groupId>dev.conduit</groupId>
       <artifactId>conduit-simulator</artifactId>
       <scope>test</scope>
-      <exclusions>
-        <!-- 与 spring-boot-starter-test 自带的 logback 冲突 -->
-        <exclusion>
-          <groupId>org.slf4j</groupId>
-          <artifactId>slf4j-simple</artifactId>
-        </exclusion>
-      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.springframework.boot</groupId>

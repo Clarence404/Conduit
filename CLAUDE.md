@@ -42,6 +42,7 @@ conduit-ui（Vue）──REST──> conduit-server
 - **前端框架与外观**（界面刷新）：分组侧栏（概览 / 设备接入 / 系统管理，V0.2-C 的用户、租户为禁用项）可折叠、宽度 < 820px 自动折叠，侧栏有浅色/深色两种风格（默认深色）；顶栏为全局面包屑（路由 `meta.breadcrumb`，详情页用 `useBreadcrumb` 设置对象名称）、外观设置、租户名称与用户菜单；浏览器标题「<页面名或对象名称> · Conduit」；`/` 重定向到 `/home`，未知地址显示 404。暗色模式用 Element Plus 暗色变量（`<html>` 的 `dark` 类），主题 浅色/深色/跟随系统（默认跟随系统）；外观偏好（主题、侧栏风格、侧栏折叠、最新值视图）存 `localStorage` 键 `conduit.ui`，读写失败用默认值。ECharts 图表随主题销毁重建（内置 `dark` 主题，背景透明）。设备详情为信息卡 + 指标卡片：前 8 个数值测点一次历史查询画最近 1 小时迷你趋势线（60 秒刷新，数值 5 秒刷新），布尔/枚举显示文字标签；点击卡片进入 `?tab=history&props=<标识>`，历史页从 `props` 读取初始选中。
 - **在线状态**：Redis hash `conduit:presence:{deviceKey}`（online / since / clientIp / source / lastSeen），由 Lua 脚本 `presence-apply.lua` 原子写入。两个来源：①EMQX 上下线事件（权威，时间为 EMQX 时钟，只接受 `eventTime >= since` 的事件，`since` 是唯一的乱序保护）；②设备上报数据（补偿设备在 transport 订阅之前就已连接、没有连接事件），在数据落库并 ACK 后由流水线每批按设备 pipeline 一次写入（尽力而为，失败只记 WARN）。数据时间是 transport 的接收时间 `receivedAt`，与 EMQX 时钟不同源，所以**数据永远不推进 `since`**：无记录 → 置在线；已在线 → 不改（只刷新 lastSeen）；已离线 → 仅当 `ts > since + 10 秒宽限期`（`PresenceStore.DATA_ONLINE_GRACE_MILLIS`）才复活。记录由数据产生（source=data）时 `since` 不可信，EMQX 事件总是生效。上线事件无 IP 时保留原 IP。
 - **设备列表筛选**：`GET /api/v1/devices` 在 productKey / keyword 之外支持 `online`（true|false）、`status`（ENABLED|DISABLED，不区分大小写）、`reported`（RECENT=最近 1 小时内有上报 | STALE=有上报但更久 | NEVER=从未上报）、`createdFrom`（毫秒，含）、`createdTo`（毫秒，不含），范围 0～253402300799999，非法值 400。status / 创建时间 / 产品 / 关键字在 SQL 过滤；`online` 与 `reported` 依赖 Redis，走「SQL 取全部匹配设备 → 批量读 Redis → 内存过滤 → 内存分页」，`total` 为过滤后数量，Redis 不可用返回 503「在线状态暂不可用」，开销 O(设备数)（见 backlog）。`reported` 依据设备时间戳（最新值 `__last`），`online` 依据 receivedAt / 事件时间，两者可能不一致。
+- **日志**：所有 Java 服务写文件日志，目录由环境变量 `CONDUIT_LOG_DIR` 指定（默认 `logs`，相对工作目录），每服务一个文件 `<服务名>.log`；按天 + 按大小滚动（单文件 50MB、保留 14 天、总量 1GB，归档 `<名>.%d{yyyy-MM-dd}.%i.log.gz`），控制台输出不变。server / transport 通过 `application.yml` 的 `logging.file.name` 与 `logging.logback.rollingpolicy.*` 配置；simulator 用 logback-classic + 自带 `logback.xml`（不再用 slf4j-simple）；测试 profile 写 `target/test-logs`，e2e 用 `logback-test.xml` 只输出控制台。Docker 中三个服务共用命名卷 `conduit-logs`（`/var/log/conduit`）。
 - **部署**：Compose 默认只起基础设施（PostgreSQL、Redis、InfluxDB、EMQX）；conduit-server / transport / web 属于 `app` profile，模拟器属于 `demo` profile，完整部署需 `--profile app --profile demo`，只通过 `deploy/build-local.sh` 按需进行。Docker 宿主机无外网，该脚本在本机从干净检出构建 jar 与前端，宿主机只打复制产物的薄镜像。EMQX 鉴权回调地址由 `deploy/.env` 的 `CONDUIT_AUTH_URL` 配置（默认容器内 `http://conduit-server:8080`，server 在 IDE 中运行时改为 `http://<dev-host>:8080`）。
 
 ### 1.3 版本路线
@@ -68,7 +69,7 @@ conduit-ui（Vue）──REST──> conduit-server
 
 ## 3. 本地开发
 
-见 README「开发」：开发模式是 Docker 宿主机只跑基础设施（`docker compose -f deploy/docker-compose.yml up -d`），server、transport、simulator、UI 在 IDEA 中运行（运行配置 `Conduit (local all)`），`deploy/.env` 的 `CONDUIT_AUTH_URL` 指向开发机。本地 transport 必须 `session-expiry-seconds: 0`；本地模拟器默认使用「三相电表（演示）」。实施计划不再包含部署步骤，验收用测试和对本地运行的整套服务做 API 检查；只有所有者要求时才用 `deploy/build-local.sh` 部署完整应用栈。
+见 README「开发」：开发模式是 Docker 宿主机只跑基础设施（`docker compose -f deploy/docker-compose.yml up -d`），server、transport、simulator、UI 在 IDEA 中运行（运行配置 `Conduit (local all)`），`deploy/.env` 的 `CONDUIT_AUTH_URL` 指向开发机。本地 transport 必须 `session-expiry-seconds: 0`；本地模拟器默认使用「三相电表（演示）」。实施计划不再包含部署步骤，本地日志在仓库根目录 `logs/`（`CONDUIT_LOG_DIR`），排查问题先看这里。验收用测试和对本地运行的整套服务做 API 检查；只有所有者要求时才用 `deploy/build-local.sh` 部署完整应用栈。
 
 ## 4. 决定记录
 
@@ -91,3 +92,4 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-15：设备列表筛选——主行关键字/产品/在线状态/启用状态，「更多筛选」含最后上报与创建时间（本地日界、左闭右开毫秒）；已应用筛选经 router.replace 同步到 query（productKey、keyword、online、status、reported、createdFrom、createdTo），非法值忽略；首页「设备」「在线设备」卡片链接到列表。
 - 2026-10-15：设备列表筛选修正——路由 query 在页面内变化时重新应用；「更多筛选」角标与强制展开只看已应用条件；useTable 加载失败清空数据（各列表显示「加载失败」而非旧数据）；非法 query 值用 replace 改写掉。
 - 2026-10-15 设备列表筛选与数据驱动在线：列表新增 online / status / reported / createdFrom / createdTo 筛选（online、reported 走内存分页）；上报数据可把设备标记为在线，但数据不推进 `since`、离线后需超过 10 秒宽限期才复活，EMQX 事件仍是权威。
+- 2026-10-15：Java 服务日志统一写入 `CONDUIT_LOG_DIR`（默认 `logs`）下的每服务一个滚动文件（50MB/14 天/1GB）；simulator 由 slf4j-simple 换为 logback-classic；Docker 共用卷 `conduit-logs`。

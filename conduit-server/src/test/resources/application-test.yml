@@ -15,3 +15,10 @@ conduit:
   bus:
     stream-key: test:up
     dead-key: test:dead
+logging:
+  # 测试日志写到 target，不污染工作目录
+  file:
+    name: target/test-logs/${spring.application.name}.log
+  logback:
+    rollingpolicy:
+      file-name-pattern: target/test-logs/${spring.application.name}.%d{yyyy-MM-dd}.%i.log.gz

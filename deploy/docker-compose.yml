@@ -107,6 +107,10 @@ services:
       TRANSPORT_MQTT_USERNAME: ${TRANSPORT_MQTT_USERNAME:-conduit-transport}
       TRANSPORT_MQTT_PASSWORD: ${TRANSPORT_MQTT_PASSWORD:?TRANSPORT_MQTT_PASSWORD is required}
       PIPELINE_CLAIM_MIN_IDLE: ${PIPELINE_CLAIM_MIN_IDLE:-60s}
+      CONDUIT_LOG_DIR: /var/log/conduit
+    # 三个 Java 服务共用命名卷 conduit-logs 存放日志（JRE 镜像默认以 root 运行，可直接写入）
+    volumes:
+      - conduit-logs:/var/log/conduit
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${API_PORT:-8091}:8080"
     depends_on:
@@ -146,6 +150,9 @@ services:
       TRANSPORT_CLIENT_ID: conduit-transport-1
       TRANSPORT_MQTT_USERNAME: ${TRANSPORT_MQTT_USERNAME:-conduit-transport}
       TRANSPORT_MQTT_PASSWORD: ${TRANSPORT_MQTT_PASSWORD}
+      CONDUIT_LOG_DIR: /var/log/conduit
+    volumes:
+      - conduit-logs:/var/log/conduit
     depends_on:
       redis:
         condition: service_healthy
@@ -184,6 +191,9 @@ services:
       SIM_DEVICE_COUNT: ${SIM_DEVICE_COUNT:-100}
       SIM_INTERVAL_MS: ${SIM_INTERVAL_MS:-10000}
       SIM_PAYLOAD_FORMAT: ${SIM_PAYLOAD_FORMAT:-standard}
+      CONDUIT_LOG_DIR: /var/log/conduit
+    volumes:
+      - conduit-logs:/var/log/conduit
     depends_on:
       emqx:
         condition: service_healthy
@@ -198,3 +208,4 @@ volumes:
   redis-data:
   influx3-data:
   emqx-data:
+  conduit-logs:
