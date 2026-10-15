@@ -35,11 +35,11 @@ public class MqttAuthService {
         if (clientId == null || username == null || password == null) {
             return Decision.DENY;
         }
-        if (username.equals(props.connectorUsername())) {
-            boolean ok = props.connectorPassword() != null && !props.connectorPassword().isBlank()
-                    && constantEquals(password, props.connectorPassword())
+        if (username.equals(props.transportUsername())) {
+            boolean ok = props.transportPassword() != null && !props.transportPassword().isBlank()
+                    && constantEquals(password, props.transportPassword())
                     && clientId.startsWith(INTERNAL_CLIENT_PREFIX);
-            return ok ? new Decision(true, true) : deny("connector credentials rejected", clientId);
+            return ok ? new Decision(true, true) : deny("transport credentials rejected", clientId);
         }
         if (!clientId.equals(username)) {
             return deny("clientId does not match username", clientId);

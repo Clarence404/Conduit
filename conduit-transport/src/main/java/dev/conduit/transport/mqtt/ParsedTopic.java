@@ -1,4 +1,4 @@
-package dev.conduit.connector.mqtt;
+package dev.conduit.transport.mqtt;
 
 import dev.conduit.common.message.MessageType;
 

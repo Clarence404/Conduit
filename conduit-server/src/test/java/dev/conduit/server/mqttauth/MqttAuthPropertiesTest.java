@@ -21,8 +21,8 @@ class MqttAuthPropertiesTest {
     }
 
     @Test
-    void rejectsBlankConnectorPassword() {
+    void rejectsBlankTransportPassword() {
         assertThatThrownBy(() -> new MqttAuthProperties("tok", "conn", "  "))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("CONNECTOR_MQTT_PASSWORD");
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("TRANSPORT_MQTT_PASSWORD");
     }
 }

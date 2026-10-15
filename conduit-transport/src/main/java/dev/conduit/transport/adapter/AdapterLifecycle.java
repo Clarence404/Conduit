@@ -1,4 +1,4 @@
-package dev.conduit.connector.adapter;
+package dev.conduit.transport.adapter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

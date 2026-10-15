@@ -69,7 +69,7 @@ services:
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${MQTT_PORT:-1883}:1883"
       - "${BIND_ADDR:-127.0.0.1}:${EMQX_DASHBOARD_PORT:-18083}:18083"
-    # 设备/connector 的连接鉴权回调 conduit-server：server 就绪后再起 EMQX，
+    # 设备/transport 的连接鉴权回调 conduit-server：server 就绪后再起 EMQX，
     # 否则 HTTP 鉴权资源启动时解析不到主机，早到的连接会被拒绝
     depends_on:
       conduit-server:
@@ -96,8 +96,8 @@ services:
       CONDUIT_ADMIN_PASSWORD: ${CONDUIT_ADMIN_PASSWORD:?CONDUIT_ADMIN_PASSWORD is required}
       CONDUIT_JWT_SECRET: ${CONDUIT_JWT_SECRET:?CONDUIT_JWT_SECRET is required}
       CONDUIT_INTERNAL_TOKEN: ${CONDUIT_INTERNAL_TOKEN}
-      CONNECTOR_MQTT_USERNAME: ${CONNECTOR_MQTT_USERNAME:-conduit-connector}
-      CONNECTOR_MQTT_PASSWORD: ${CONNECTOR_MQTT_PASSWORD:?CONNECTOR_MQTT_PASSWORD is required}
+      TRANSPORT_MQTT_USERNAME: ${TRANSPORT_MQTT_USERNAME:-conduit-transport}
+      TRANSPORT_MQTT_PASSWORD: ${TRANSPORT_MQTT_PASSWORD:?TRANSPORT_MQTT_PASSWORD is required}
       PIPELINE_CLAIM_MIN_IDLE: ${PIPELINE_CLAIM_MIN_IDLE:-60s}
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${API_PORT:-8091}:8080"
@@ -125,18 +125,18 @@ services:
       retries: 30
     restart: unless-stopped
 
-  conduit-connector:
+  conduit-transport:
     build:
       context: ..
       dockerfile: Dockerfile
       args:
-        MODULE: conduit-connector
+        MODULE: conduit-transport
     environment:
       REDIS_HOST: redis
       EMQX_HOST: emqx
-      CONNECTOR_CLIENT_ID: conduit-connector-1
-      CONNECTOR_MQTT_USERNAME: ${CONNECTOR_MQTT_USERNAME:-conduit-connector}
-      CONNECTOR_MQTT_PASSWORD: ${CONNECTOR_MQTT_PASSWORD}
+      TRANSPORT_CLIENT_ID: conduit-transport-1
+      TRANSPORT_MQTT_USERNAME: ${TRANSPORT_MQTT_USERNAME:-conduit-transport}
+      TRANSPORT_MQTT_PASSWORD: ${TRANSPORT_MQTT_PASSWORD}
     depends_on:
       redis:
         condition: service_healthy
@@ -178,7 +178,7 @@ services:
         condition: service_healthy
       conduit-server:
         condition: service_healthy
-      conduit-connector:
+      conduit-transport:
         condition: service_started
     restart: on-failure
 

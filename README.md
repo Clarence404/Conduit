@@ -12,7 +12,7 @@
 flowchart TB
     D[设备] -->|MQTT| E[EMQX]
     E -->|"① 连接时同步鉴权"| A
-    E -->|共享订阅| C[conduit-connector]
+    E -->|共享订阅| C[conduit-transport]
     C -->|写入| R[(Redis Streams)]
     R -->|"② 消费组拉取"| P
     subgraph S["conduit-server（同一个进程）"]
@@ -32,9 +32,9 @@ flowchart TB
 `conduit-server` 只有一个进程，但有两个入口：
 
 - **① 鉴权回调（控制面）**：设备建立 MQTT 连接时，EMQX 同步调用它，拿到 allow / deny 才放行。频率低，每次连接一次。server 不可用时新设备连不上，已连接的设备不受影响。
-- **② 数据流水线（数据面）**：设备每条上报都先经 connector 写入 Redis Streams，server 以消费组身份异步拉取、处理、入库后再确认。server 重启期间消息在 Redis 中排队，恢复后继续处理，不丢数据。
+- **② 数据流水线（数据面）**：设备每条上报都先经 transport 写入 Redis Streams，server 以消费组身份异步拉取、处理、入库后再确认。server 重启期间消息在 Redis 中排队，恢复后继续处理，不丢数据。
 
-设备数据从不直连 server，所以 server 重启或变慢不会堵住 EMQX；新增协议也只需在 connector 侧加适配器。完整接入流程见[设备接入指南](docs/device-integration.md)。
+设备数据从不直连 server，所以 server 重启或变慢不会堵住 EMQX；新增协议也只需在 transport 侧加适配器。完整接入流程见[设备接入指南](docs/device-integration.md)。
 
 ## 代码结构
 
@@ -43,13 +43,13 @@ flowchart TB
 ```mermaid
 flowchart LR
     common[conduit-common<br/>消息模型 + 总线]
-    connector[conduit-connector<br/>协议接入] --> common
+    transport[conduit-transport<br/>协议接入] --> common
     server[conduit-server<br/>平台服务] --> common
     simulator[conduit-simulator<br/>设备模拟器]
     e2e[conduit-e2e<br/>端到端测试] --> simulator
 ```
 
-`connector` 和 `server` 之间没有代码依赖，只通过 `common` 里定义的消息格式和 Redis Streams 通信。
+`transport` 和 `server` 之间没有代码依赖，只通过 `common` 里定义的消息格式和 Redis Streams 通信。
 
 ```
 conduit/
@@ -58,7 +58,7 @@ conduit/
 ├── conduit-common/                  dev.conduit.common
 │   ├── message/                     RawMessage：协议无关的统一消息，及其与 Stream 字段的编解码
 │   └── bus/                         MessageBus 接口和 Redis Streams 实现（投递、消费组、认领、死信）
-├── conduit-connector/               dev.conduit.connector（端口 8081）
+├── conduit-transport/               dev.conduit.transport（端口 8081）
 │   ├── adapter/                     ProtocolAdapter 接口；新增协议就是新增一个实现
 │   └── mqtt/                        MQTT 适配器：共享订阅、写入总线成功后才确认、topic 解析
 ├── conduit-server/                  dev.conduit.server（端口 8080），按业务领域分包
@@ -156,20 +156,22 @@ cd conduit-ui && npm install && npm test && npm run dev
 
 ### 在 IDE 中运行（连接已部署的 Compose 环境）
 
-server、connector、simulator 和前端都可以直接在 IDEA 里运行，连接「一键演示」起来的 PostgreSQL、Redis、InfluxDB、EMQX。
+server、transport、simulator 和前端都可以直接在 IDEA 里运行，连接「一键演示」起来的 PostgreSQL、Redis、InfluxDB、EMQX。
 
 1. 用 IDEA 打开仓库根目录，把根目录的 `pom.xml` 作为 Maven 工程导入，Project SDK 选 **JDK 21**。仓库自带的运行配置（`.run/`）会自动出现：
 
    | 运行配置 | 作用 |
    |---|---|
    | `Conduit Server (local)` | `ServerApplication`，已带 `-Dspring.profiles.active=local` |
-   | `Conduit Connector (local)` | `ConnectorApplication`，同上 |
+   | `Conduit Transport (local)` | `TransportApplication`，同上 |
    | `Conduit Simulator (local)` | `SimulatorApplication`，读取 `simulator-local.properties` |
    | `Conduit UI (local)` | 在 `conduit-ui/` 下执行 `npm run dev`（首次先 `npm install`） |
-   | `Conduit (local all)` | 一次启动 Server、Connector、UI |
+   | `Conduit (local all)` | 一次启动 Server、Transport、UI |
 
 2. 确认 `.env` 中 `BIND_ADDR`、`POSTGRES_PORT`（默认 15432）、`REDIS_PORT`（默认 16379）已按需设置，并执行过一次 `up -d`，让 PostgreSQL 和 Redis 端口对宿主机开放。
-3. 在 `conduit-server/src/main/resources/` 和 `conduit-connector/src/main/resources/` 下各新建一个 `application-local.yml`，写入 Docker 宿主机地址、端口和 `.env` 中的口令。这个文件已在 `.gitignore` 中，不会被提交。
+3. 在 `conduit-server/src/main/resources/` 和 `conduit-transport/src/main/resources/` 下各新建一个 `application-local.yml`，写入 Docker 宿主机地址、端口和 `.env` 中的口令。这个文件已在 `.gitignore` 中，不会被提交。
+
+   > 注意：本版本起模块已由 `conduit-connector` 改名为 `conduit-transport`。已有的本地 `application-local.yml` 需要移到 `conduit-transport/src/main/resources/`，并把配置前缀改为 `conduit.transport.mqtt`；server 侧的 `conduit.internal.connector-password` 也已改为 `transport-password`。
 
    ```yaml
    # conduit-server/application-local.yml
@@ -188,28 +190,28 @@ server、connector、simulator 和前端都可以直接在 IDEA 里运行，连�
        jwt-secret: <CONDUIT_JWT_SECRET>
      internal:
        token: <CONDUIT_INTERNAL_TOKEN>
-       connector-password: <CONNECTOR_MQTT_PASSWORD>
+       transport-password: <TRANSPORT_MQTT_PASSWORD>
      influx:
        url: http://<docker-host>:8096
        token: <INFLUX_TOKEN>   # apiv3_ 开头
    ```
 
    ```yaml
-   # conduit-connector/application-local.yml
+   # conduit-transport/application-local.yml
    spring:
      data:
        redis:
          host: <docker-host>
          port: 16379
    conduit:
-     connector:
+     transport:
        mqtt:
          host: <docker-host>
          port: 1883
-         client-id: conduit-connector-idea   # 必须以 conduit- 开头
+         client-id: conduit-transport-idea   # 必须以 conduit- 开头
          session-expiry-seconds: 0           # 必须为 0，见下方说明
-         username: <CONNECTOR_MQTT_USERNAME>
-         password: <CONNECTOR_MQTT_PASSWORD>
+         username: <TRANSPORT_MQTT_USERNAME>
+         password: <TRANSPORT_MQTT_PASSWORD>
    ```
 
 4. 模拟器不是 Spring 应用，在 `conduit-simulator/src/main/resources/` 下新建 `simulator-local.properties`（同样不入库），键名与环境变量相同，环境变量优先：
@@ -226,9 +228,9 @@ server、connector、simulator 和前端都可以直接在 IDEA 里运行，连�
    SIM_INTERVAL_MS=5000
    ```
 
-5. 先启动 `Conduit Server (local)`，再按需启动 Connector、Simulator、UI。前端默认把 `/api` 代理到本机 8080；要直接连远程 server，可设置环境变量 `VITE_API_TARGET=http://<docker-host>:8091`。
+5. 先启动 `Conduit Server (local)`，再按需启动 Transport、Simulator、UI。前端默认把 `/api` 代理到本机 8080；要直接连远程 server，可设置环境变量 `VITE_API_TARGET=http://<docker-host>:8091`。
 
-说明：IDE 中的实例与容器中的实例同时运行时，会加入同一个消费组分担消息、加入同一个共享订阅分担上报，数据不会重复也不会丢；设备鉴权仍由容器里的 server 完成。本地 connector 的 `session-expiry-seconds` 必须设为 0：它加入了和容器 connector 相同的共享订阅组，如果使用持久会话，进程停止后 EMQX 仍会把一部分设备消息分给这个已离线的会话，这些消息要等会话过期（默认 1 小时）才会被丢弃，期间相当于丢数据。需要只让本地 connector 收消息时，可以 `docker compose -f deploy/docker-compose.yml stop conduit-connector`；不要停容器里的 `conduit-server`，否则 EMQX 的鉴权回调无处可去，新设备将无法连接。
+说明：IDE 中的实例与容器中的实例同时运行时，会加入同一个消费组分担消息、加入同一个共享订阅分担上报，数据不会重复也不会丢；设备鉴权仍由容器里的 server 完成。本地 transport 的 `session-expiry-seconds` 必须设为 0：它加入了和容器 transport 相同的共享订阅组，如果使用持久会话，进程停止后 EMQX 仍会把一部分设备消息分给这个已离线的会话，这些消息要等会话过期（默认 1 小时）才会被丢弃，期间相当于丢数据。需要只让本地 transport 收消息时，可以 `docker compose -f deploy/docker-compose.yml stop conduit-transport`；不要停容器里的 `conduit-server`，否则 EMQX 的鉴权回调无处可去，新设备将无法连接。
 
 ## 端到端测试：杀进程不丢数据
 

@@ -4,7 +4,7 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 协议无关的原始消息。connector 只负责组装它，业务解析在 server 完成。
+ * 协议无关的原始消息。transport 只负责组装它，业务解析在 server 完成。
  *
  * @param productKey 产品 Key；上下线事件拿不到时为 null
  * @param deviceKey  设备 Key（等于 MQTT clientId）

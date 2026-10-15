@@ -1,4 +1,4 @@
-package dev.conduit.connector.mqtt;
+package dev.conduit.transport.mqtt;
 
 import com.hivemq.client.mqtt.MqttClient;
 import com.hivemq.client.mqtt.datatypes.MqttQos;
@@ -82,8 +82,8 @@ class MqttProtocolAdapterIT {
         bus = new RedisStreamMessageBus(redis, new MessageBusProperties("it:up", "it:dead", 1000, 1000));
         bus.ensureGroup(GROUP);
 
-        var props = new MqttConnectorProperties(EMQX.getHost(), EMQX.getMappedPort(1883),
-                "conduit-connector-it-" + UUID.randomUUID(), null, null, "it-" + UUID.randomUUID(), 300, "conduit-");
+        var props = new MqttTransportProperties(EMQX.getHost(), EMQX.getMappedPort(1883),
+                "conduit-transport-it-" + UUID.randomUUID(), null, null, "it-" + UUID.randomUUID(), 300, "conduit-");
         adapter = new MqttProtocolAdapter(props, bus, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
         adapter.start();
     }
