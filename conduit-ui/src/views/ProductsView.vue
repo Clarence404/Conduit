@@ -2,11 +2,14 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { productApi } from '@/api/products'
+import { codecApi } from '@/api/codecs'
 import { problemMessage } from '@/api/errors'
-import type { ProductView } from '@/api/types'
+import type { CodecView, ProductView } from '@/api/types'
 import { formatDateTime } from '@/utils/format'
+import { codecLabel } from '@/utils/thingModel'
 
 const items = ref<ProductView[]>([])
+const codecs = ref<CodecView[]>([])
 const total = ref(0)
 const page = ref(1)
 const size = ref(20)
@@ -16,7 +19,7 @@ const dialogVisible = ref(false)
 const editingKey = ref<string | null>(null)
 const saving = ref(false)
 const removing = ref(false)
-const form = reactive({ name: '', description: '' })
+const form = reactive({ name: '', description: '', codec: 'standard-json' })
 
 async function load() {
   loading.value = true
@@ -31,10 +34,19 @@ async function load() {
   }
 }
 
+async function loadCodecs() {
+  try {
+    codecs.value = await codecApi.list()
+  } catch (e) {
+    ElMessage.error(problemMessage(e))
+  }
+}
+
 function openCreate() {
   editingKey.value = null
   form.name = ''
   form.description = ''
+  form.codec = 'standard-json'
   dialogVisible.value = true
 }
 
@@ -42,6 +54,7 @@ function openEdit(row: ProductView) {
   editingKey.value = row.productKey
   form.name = row.name
   form.description = row.description ?? ''
+  form.codec = row.codec
   dialogVisible.value = true
 }
 
@@ -57,7 +70,7 @@ async function save() {
     if (editingKey.value) {
       await productApi.update(editingKey.value, req)
     } else {
-      await productApi.create(req)
+      await productApi.create({ ...req, codec: form.codec })
     }
     dialogVisible.value = false
     ElMessage.success('已保存')
@@ -91,7 +104,10 @@ async function remove(row: ProductView) {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadCodecs()
+})
 </script>
 
 <template>
@@ -103,8 +119,16 @@ onMounted(load)
 
     <el-table v-loading="loading" :data="items" border>
       <el-table-column prop="productKey" label="产品 Key" width="200" />
-      <el-table-column prop="name" label="名称" />
+      <el-table-column label="名称">
+        <template #default="{ row }">
+          <router-link :to="{ name: 'product-detail', params: { productKey: row.productKey } }">{{ row.name }}</router-link>
+        </template>
+      </el-table-column>
       <el-table-column prop="description" label="描述" />
+      <el-table-column label="解码器" width="120">
+        <template #default="{ row }">{{ codecLabel(codecs, row.codec) }}</template>
+      </el-table-column>
+      <el-table-column prop="propertyCount" label="属性数" width="90" />
       <el-table-column label="创建时间" width="180">
         <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
       </el-table-column>
@@ -137,6 +161,11 @@ onMounted(load)
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" maxlength="512" />
+        </el-form-item>
+        <el-form-item v-if="!editingKey" label="解码器">
+          <el-select v-model="form.codec">
+            <el-option v-for="c in codecs" :key="c.name" :label="c.displayName" :value="c.name" />
+          </el-select>
         </el-form-item>
       </el-form>
       <template #footer>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AxiosError, type AxiosResponse } from 'axios'
-import { problemMessage } from './errors'
+import { problemErrors, problemMessage } from './errors'
 
 function axiosError(response?: Partial<AxiosResponse>) {
   const error = new AxiosError('boom')
@@ -26,5 +26,23 @@ describe('problemMessage', () => {
   it('handles plain errors', () => {
     expect(problemMessage(new Error('x'))).toBe('x')
     expect(problemMessage('weird')).toBe('未知错误')
+  })
+})
+
+describe('problemErrors', () => {
+  it('extracts the errors list of a ProblemDetail', () => {
+    const error = axiosError({
+      status: 400,
+      data: { detail: '导入失败', errors: [{ identifier: 'Ua', message: '数据类型不可修改' }, { identifier: null, message: '超过上限' }] },
+    })
+    expect(problemErrors(error)).toEqual([
+      { identifier: 'Ua', message: '数据类型不可修改' },
+      { identifier: null, message: '超过上限' },
+    ])
+  })
+
+  it('returns an empty list when there is no errors array', () => {
+    expect(problemErrors(axiosError({ status: 400, data: { detail: 'x' } }))).toEqual([])
+    expect(problemErrors(new Error('x'))).toEqual([])
   })
 })

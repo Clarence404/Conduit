@@ -14,3 +14,25 @@ export function problemMessage(error: unknown): string {
   }
   return error instanceof Error ? error.message : '未知错误'
 }
+
+export interface ProblemFieldError {
+  identifier: string | null
+  message: string
+}
+
+/** ProblemDetail 中的 errors 列表（如物模型导入的逐项错误）；没有时返回空数组。 */
+export function problemErrors(error: unknown): ProblemFieldError[] {
+  if (!isAxiosError(error)) {
+    return []
+  }
+  const errors = (error.response?.data as { errors?: unknown } | undefined)?.errors
+  if (!Array.isArray(errors)) {
+    return []
+  }
+  return errors
+    .filter((e): e is { identifier?: unknown; message?: unknown } => typeof e === 'object' && e !== null)
+    .map((e) => ({
+      identifier: typeof e.identifier === 'string' ? e.identifier : null,
+      message: typeof e.message === 'string' ? e.message : '',
+    }))
+}

@@ -14,6 +14,12 @@ export const routes: RouteRecordRaw[] = [
     redirect: '/devices',
     children: [
       { path: 'products', name: 'products', component: () => import('@/views/ProductsView.vue') },
+      {
+        path: 'products/:productKey',
+        name: 'product-detail',
+        component: () => import('@/views/ProductDetailView.vue'),
+        props: true,
+      },
       { path: 'devices', name: 'devices', component: () => import('@/views/DevicesView.vue') },
       {
         path: 'devices/:deviceKey',
