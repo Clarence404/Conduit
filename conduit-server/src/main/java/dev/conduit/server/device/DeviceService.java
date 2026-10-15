@@ -21,12 +21,16 @@ import dev.conduit.server.web.PageView;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -83,19 +87,95 @@ public class DeviceService {
         return new DeviceCreated(toViews(List.of(saved)).getFirst(), secret);
     }
 
+    /** 「最近上报」的时间窗口：一小时。 */
+    private static final long RECENT_WINDOW_MILLIS = 3_600_000L;
+
     /**
-     * 分页列出设备，按 id 倒序。productKey 非空时限定产品（不存在抛 404）；keyword 非空时模糊匹配名称或 deviceKey。page 从 1 开始。
+     * 分页列出设备，按 id 倒序，支持 {@link DeviceFilter} 的全部筛选。page 从 1 开始。
+     * <p>
+     * 产品、关键字、状态、创建时间在 SQL 中过滤（仍受租户拦截器限定）；productKey 指向不存在的产品抛 404。
+     * 没有 online / reported 时走数据库分页。带 online 或 reported 时，它们依赖 Redis，只能：先从 SQL 取出全部匹配设备
+     * （仅 id 与 deviceKey，不分页），批量读取在线状态与最近上报时间，内存中过滤再分页，因此 total 是过滤后的数量，
+     * 视图只为当前页构建。Redis 不可用时抛 503「在线状态暂不可用」。
+     * <p>
+     * 注意：内存路径的开销是 O(设备数)（每次请求读取全部匹配设备的 Redis 状态）。设备规模到万级时，
+     * 应改为维护在线集合（如 Redis Set / ZSet）后直接分页，不再逐设备读取。
      */
-    public PageView<DeviceView> list(String productKey, String keyword, int page, int size) {
+    public PageView<DeviceView> list(DeviceFilter filter, int page, int size) {
         LambdaQueryWrapper<Device> query = new LambdaQueryWrapper<Device>().orderByDesc(Device::getId);
-        if (productKey != null && !productKey.isBlank()) {
-            query.eq(Device::getProductId, productService.require(productKey).getId());
+        if (filter.productKey() != null) {
+            query.eq(Device::getProductId, productService.require(filter.productKey()).getId());
         }
-        if (keyword != null && !keyword.isBlank()) {
+        if (filter.keyword() != null) {
+            String keyword = filter.keyword();
             query.and(q -> q.like(Device::getName, keyword).or().like(Device::getDeviceKey, keyword));
         }
-        Page<Device> result = devices.selectPage(new Page<>(page, size), query);
-        return new PageView<>(toViews(result.getRecords()), result.getTotal(), page, size);
+        if (filter.status() != null) {
+            query.eq(Device::getStatus, filter.status());
+        }
+        if (filter.createdFrom() != null) {
+            query.ge(Device::getCreatedAt, utc(filter.createdFrom()));
+        }
+        if (filter.createdTo() != null) {
+            query.lt(Device::getCreatedAt, utc(filter.createdTo()));
+        }
+        if (!filter.needsRedis()) {
+            Page<Device> result = devices.selectPage(new Page<>(page, size), query);
+            return new PageView<>(toViews(result.getRecords()), result.getTotal(), page, size);
+        }
+        return listWithRedisFilters(filter, query, page, size);
+    }
+
+    private static OffsetDateTime utc(long epochMillis) {
+        return OffsetDateTime.ofInstant(Instant.ofEpochMilli(epochMillis), ZoneOffset.UTC);
+    }
+
+    /**
+     * online / reported 筛选的内存路径：SQL 取全部匹配的 id 与 deviceKey，批量读 Redis，过滤后分页，只为当前页构建视图。
+     * Redis 不可用时抛 503。
+     */
+    private PageView<DeviceView> listWithRedisFilters(DeviceFilter filter, LambdaQueryWrapper<Device> query,
+                                                      int page, int size) {
+        query.select(Device::getId, Device::getDeviceKey);
+        List<Device> rows = devices.selectList(query);
+        List<String> deviceKeys = rows.stream().map(Device::getDeviceKey).toList();
+
+        Map<String, Presence> presenceByDevice;
+        Map<String, Long> lastReports;
+        try {
+            presenceByDevice = filter.online() != null ? presence.getAll(deviceKeys) : Map.of();
+            lastReports = filter.reported() != null ? latest.lastReportTimes(deviceKeys) : Map.of();
+        } catch (DataAccessException e) {
+            log.warn("Redis unavailable for device list filters", e);
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "在线状态暂不可用");
+        }
+
+        long recentSince = clock.millis() - RECENT_WINDOW_MILLIS;
+        List<Device> matched = rows.stream().filter(d -> {
+            if (filter.online() != null) {
+                Presence p = presenceByDevice.get(d.getDeviceKey());
+                if ((p != null && p.online()) != filter.online()) {
+                    return false;
+                }
+            }
+            if (filter.reported() != null) {
+                Long last = lastReports.get(d.getDeviceKey());
+                return switch (filter.reported()) {
+                    case NEVER -> last == null;
+                    case RECENT -> last != null && last >= recentSince;
+                    case STALE -> last != null && last < recentSince;
+                };
+            }
+            return true;
+        }).toList();
+
+        int from = (int) Math.min((long) (page - 1) * size, matched.size());
+        int to = (int) Math.min((long) from + size, matched.size());
+        List<Long> pageIds = matched.subList(from, to).stream().map(Device::getId).toList();
+        Map<Long, Device> full = pageIds.isEmpty() ? Map.of()
+                : devices.selectBatchIds(pageIds).stream().collect(Collectors.toMap(Device::getId, d -> d));
+        List<Device> pageRows = pageIds.stream().map(full::get).filter(Objects::nonNull).toList();
+        return new PageView<>(toViews(pageRows), matched.size(), page, size);
     }
 
     /**
