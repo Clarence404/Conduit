@@ -216,12 +216,29 @@ public class PipelineProcessor {
         });
     }
 
-    /** 仅暂时性故障值得原地重试；其余（语法错误、完整性冲突、WRONGTYPE 等）重试也不会成功。 */
+    private static final int MAX_CAUSE_DEPTH = 16;
+
+    /**
+     * 仅暂时性故障值得原地重试；其余（语法错误、完整性冲突、WRONGTYPE 等）重试也不会成功。
+     * 沿 cause 链查找：MyBatis 会把取连接失败（CannotGetJdbcConnectionException）包装成
+     * MyBatisSystemException（UncategorizedDataAccessException），只看顶层会把数据库宕机误判为不可恢复。
+     */
     private static boolean isRecoverable(Throwable e) {
-        return e instanceof TelemetryUnavailableException
-                || e instanceof DataAccessResourceFailureException
-                || e instanceof TransientDataAccessException
-                || e instanceof RecoverableDataAccessException;
+        Throwable current = e;
+        for (int depth = 0; current != null && depth < MAX_CAUSE_DEPTH; depth++) {
+            if (current instanceof TelemetryUnavailableException
+                    || current instanceof DataAccessResourceFailureException
+                    || current instanceof TransientDataAccessException
+                    || current instanceof RecoverableDataAccessException) {
+                return true;
+            }
+            Throwable cause = current.getCause();
+            if (cause == current) {
+                break;
+            }
+            current = cause;
+        }
+        return false;
     }
 
     /** 下游暂时不可用时原地指数退避重试，不重新读取，因此不消耗投递次数。 */
@@ -251,19 +268,12 @@ public class PipelineProcessor {
     }
 
     private void dead(Delivery delivery, DeadReason reason, Map<String, String> details) {
-        if (details.isEmpty()) {
-            retry("dead letter", () -> {
-                bus.deadLetter(props.group(), delivery, reason.name());
-                return null;
-            });
-        } else {
-            // 分两步各自重试：ACK 暂时失败时不会重复写死信记录
-            retry("dead letter", () -> {
-                bus.recordDead(delivery, reason.name(), details);
-                return null;
-            });
-            ack(List.of(delivery.id()));
-        }
+        // 先留痕再 ACK，分两步各自重试：ACK 暂时失败时不会重复写死信记录
+        retry("dead letter", () -> {
+            bus.recordDead(delivery, reason.name(), details);
+            return null;
+        });
+        ack(List.of(delivery.id()));
         meters.counter("conduit.pipeline.dead", "reason", reason.name()).increment();
     }
 }

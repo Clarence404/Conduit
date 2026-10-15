@@ -20,13 +20,16 @@ import dev.conduit.server.thingmodel.ProductProfile;
 import dev.conduit.server.thingmodel.PropertySpec;
 import dev.conduit.server.thingmodel.ThingModelCache;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.apache.ibatis.exceptions.PersistenceException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.mybatis.spring.MyBatisSystemException;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.RedisSystemException;
 import org.springframework.jdbc.BadSqlGrammarException;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -38,6 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -93,6 +97,13 @@ class PipelineProcessorTest {
         when(decoder.decode(any(), any())).thenReturn(new DecodedPayload(1L, values));
     }
 
+    /** 整条消息进死信：先写死信记录（无 details）再 ACK。 */
+    private void verifyDeadLettered(Delivery d, String reason) {
+        InOrder order = inOrder(bus);
+        order.verify(bus).recordDead(d, reason, Map.of());
+        order.verify(bus).ack(GROUP, List.of(d.id()));
+    }
+
     private double counter(String name, String reason) {
         var c = meters.find(name).tag("reason", reason).counter();
         return c == null ? 0 : c.count();
@@ -119,7 +130,7 @@ class PipelineProcessorTest {
 
         verify(writer, times(3)).write(anyList());
         verify(bus, times(1)).ack(GROUP, List.of("1-0"));
-        verify(bus, never()).deadLetter(anyString(), any(), anyString());
+        verify(bus, never()).recordDead(any(), anyString(), anyMap());
     }
 
     @Test
@@ -132,7 +143,7 @@ class PipelineProcessorTest {
         verify(latest, times(2)).update(eq("d1"), anyLong(), any());
         verify(writer, times(1)).write(anyList());
         verify(bus, times(1)).ack(GROUP, List.of("1-0"));
-        verify(bus, never()).deadLetter(anyString(), any(), anyString());
+        verify(bus, never()).recordDead(any(), anyString(), anyMap());
     }
 
     @Test
@@ -145,8 +156,8 @@ class PipelineProcessorTest {
 
         processor.process(List.of(a, bad, c));
 
-        verify(bus).deadLetter(GROUP, bad, "PROCESSING_ERROR");
-        verify(bus, times(1)).deadLetter(anyString(), any(), anyString());
+        verifyDeadLettered(bad, "PROCESSING_ERROR");
+        verify(bus, times(1)).recordDead(any(), anyString(), anyMap());
         verify(writer, times(1)).write(anyList());
         verify(bus).ack(GROUP, List.of("1-0", "3-0"));
     }
@@ -166,7 +177,7 @@ class PipelineProcessorTest {
         }
 
         verify(bus, never()).ack(anyString(), anyList());
-        verify(bus, never()).deadLetter(anyString(), any(), anyString());
+        verify(bus, never()).recordDead(any(), anyString(), anyMap());
     }
 
     @Test
@@ -178,8 +189,8 @@ class PipelineProcessorTest {
         processor.process(List.of(delivery("1-0", "good"), bad, delivery("3-0", "good")));
 
         verify(identities, times(1)).find("bad");
-        verify(bus).deadLetter(GROUP, bad, "PROCESSING_ERROR");
-        verify(bus, times(1)).deadLetter(anyString(), any(), anyString());
+        verifyDeadLettered(bad, "PROCESSING_ERROR");
+        verify(bus, times(1)).recordDead(any(), anyString(), anyMap());
         verify(bus).ack(GROUP, List.of("1-0", "3-0"));
     }
 
@@ -193,7 +204,7 @@ class PipelineProcessorTest {
         processor.process(List.of(delivery("1-0", "good"), bad, delivery("3-0", "good")));
 
         verify(latest, times(1)).update(eq("bad"), anyLong(), any());
-        verify(bus).deadLetter(GROUP, bad, "PROCESSING_ERROR");
+        verifyDeadLettered(bad, "PROCESSING_ERROR");
         verify(bus).ack(GROUP, List.of("1-0", "3-0"));
     }
 
@@ -207,7 +218,7 @@ class PipelineProcessorTest {
 
         verify(writer, times(1)).write(anyList());
         verify(bus, never()).ack(anyString(), anyList());
-        verify(bus, never()).deadLetter(anyString(), any(), anyString());
+        verify(bus, never()).recordDead(any(), anyString(), anyMap());
     }
 
     @Test
@@ -218,7 +229,7 @@ class PipelineProcessorTest {
 
         processor.process(List.of(d));
 
-        verify(bus).deadLetter(GROUP, d, "UNKNOWN_CODEC");
+        verifyDeadLettered(d, "UNKNOWN_CODEC");
         verify(writer, never()).write(anyList());
     }
 
@@ -230,7 +241,7 @@ class PipelineProcessorTest {
 
         processor.process(List.of(d));
 
-        verify(bus).deadLetter(GROUP, d, "UNKNOWN_DEVICE");
+        verifyDeadLettered(d, "UNKNOWN_DEVICE");
     }
 
     @Test
@@ -259,7 +270,7 @@ class PipelineProcessorTest {
         order.verify(bus).recordDead(eq(d), eq("FIELD_REJECTED"),
                 argThat(m -> m.get("rejected").contains("\"field\":\"Zz\"") && m.get("rejected").contains("UNDEFINED")));
         order.verify(bus).ack(GROUP, List.of("1-0"));
-        verify(bus, never()).deadLetter(anyString(), any(), anyString());
+        verify(bus, times(1)).recordDead(any(), anyString(), anyMap());
         assertThat(counter("conduit.pipeline.rejected_fields", "UNDEFINED")).isEqualTo(1.0);
         assertThat(counter("conduit.pipeline.dead", "FIELD_REJECTED")).isZero();
     }
@@ -291,5 +302,34 @@ class PipelineProcessorTest {
 
         verify(thingModels, times(2)).find("pk");
         verify(bus).ack(GROUP, List.of("1-0"));
+    }
+
+    @Test
+    void dbOutageWrappedByMyBatisIsRetriedInPlace() {
+        when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
+        when(thingModels.find("pk"))
+                .thenThrow(new MyBatisSystemException(
+                        new PersistenceException(new CannotGetJdbcConnectionException("down"))))
+                .thenReturn(Optional.of(new ProductProfile("standard-json", Map.of())));
+
+        processor.process(List.of(delivery("1-0", "d1")));
+
+        verify(thingModels, times(2)).find("pk");
+        verify(writer).write(anyList());
+        verify(bus).ack(GROUP, List.of("1-0"));
+        verify(bus, never()).recordDead(any(), anyString(), anyMap());
+        verify(bus, never()).deadLetter(anyString(), any(), anyString());
+    }
+
+    @Test
+    void transientAckFailureAfterDeadRecordDoesNotDuplicateTheRecord() {
+        Delivery d = delivery("1-0", "ghost");
+        when(identities.find("ghost")).thenReturn(Optional.empty());
+        doThrow(new RedisConnectionFailureException("down")).doNothing().when(bus).ack(GROUP, List.of("1-0"));
+
+        processor.process(List.of(d));
+
+        verify(bus, times(1)).recordDead(d, "UNKNOWN_DEVICE", Map.of());
+        verify(bus, times(2)).ack(GROUP, List.of("1-0"));
     }
 }
