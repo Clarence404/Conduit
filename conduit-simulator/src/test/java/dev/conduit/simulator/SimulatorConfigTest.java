@@ -35,4 +35,16 @@ class SimulatorConfigTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("CONDUIT_ADMIN_PASSWORD");
     }
+
+    @Test
+    void payloadFormatDefaultsToStandardAndAcceptsFlat() {
+        assertThat(SimulatorConfig.fromEnv(Map.of("CONDUIT_ADMIN_PASSWORD", "pw")).payloadFormat())
+                .isEqualTo(PayloadFormat.STANDARD);
+        assertThat(SimulatorConfig.fromEnv(Map.of("CONDUIT_ADMIN_PASSWORD", "pw", "SIM_PAYLOAD_FORMAT", "FLAT"))
+                .payloadFormat()).isEqualTo(PayloadFormat.FLAT);
+        assertThatThrownBy(() -> SimulatorConfig.fromEnv(Map.of("CONDUIT_ADMIN_PASSWORD", "pw",
+                "SIM_PAYLOAD_FORMAT", "xml")))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("SIM_PAYLOAD_FORMAT");
+    }
 }

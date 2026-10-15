@@ -132,6 +132,24 @@ class RedisStreamMessageBusIT {
     }
 
     @Test
+    void recordDeadWritesDetailsButDoesNotAck() {
+        bus.publish(message("dk1"));
+        Delivery d = bus.read(GROUP, "c1", 10, Duration.ofMillis(100)).getFirst();
+
+        bus.recordDead(d, "FIELD_REJECTED", Map.of("rejected", "[{\"field\":\"Ua\"}]", "reason", "spoofed"));
+
+        var dead = redis.opsForStream().range("test:dead", org.springframework.data.domain.Range.unbounded());
+        assertThat(dead).singleElement().satisfies(r -> {
+            assertThat(r.getValue()).containsEntry("reason", "FIELD_REJECTED");
+            assertThat(r.getValue()).containsEntry("rejected", "[{\"field\":\"Ua\"}]");
+            assertThat(r.getValue()).containsEntry("originalId", d.id());
+            assertThat(r.getValue()).containsEntry("dk", "dk1");
+        });
+        assertThat(bus.claimStale(GROUP, "c2", Duration.ZERO, 10)).singleElement()
+                .satisfies(c -> assertThat(c.id()).isEqualTo(d.id()));
+    }
+
+    @Test
     void readReturnsEmptyListWhenNothingArrives() {
         assertThat(bus.read(GROUP, "c1", 10, Duration.ofMillis(50))).isEmpty();
     }

@@ -4,7 +4,8 @@ import { ElMessage } from 'element-plus'
 import { deviceApi } from '@/api/devices'
 import { problemMessage } from '@/api/errors'
 import type { DeviceView, PointView } from '@/api/types'
-import { buildConnectionInfo, formatValue } from '@/utils/connection'
+import { buildConnectionInfo } from '@/utils/connection'
+import { formatPointValue, pointLabel } from '@/utils/pointValue'
 import { formatDateTime } from '@/utils/format'
 import { usePolling } from '@/composables/usePolling'
 
@@ -77,9 +78,11 @@ usePolling(loadLatest, 5000)
         </div>
       </template>
       <el-table :data="values" border empty-text="暂无数据">
-        <el-table-column prop="name" label="测点" width="200" />
+        <el-table-column label="测点" width="240">
+          <template #default="{ row }">{{ pointLabel(row) }}</template>
+        </el-table-column>
         <el-table-column label="值">
-          <template #default="{ row }">{{ formatValue(row.value) }}</template>
+          <template #default="{ row }">{{ formatPointValue(row) }}</template>
         </el-table-column>
         <el-table-column label="采样时间" width="200">
           <template #default="{ row }">{{ formatDateTime(row.ts) }}</template>

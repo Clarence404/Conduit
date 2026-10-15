@@ -110,4 +110,46 @@ class ProductApiIT extends IntegrationTestBase {
     void requiresAuthentication() throws Exception {
         mvc.perform(get("/api/v1/products")).andExpect(status().isUnauthorized());
     }
+
+    @Test
+    void codecDefaultsIsValidatedAndIsKeptWhenOmittedOnUpdate() throws Exception {
+        String pk = createProduct("Codec A");
+        mvc.perform(get("/api/v1/products/{pk}", pk).header(HttpHeaders.AUTHORIZATION, auth))
+                .andExpect(jsonPath("$.codec").value("standard-json"))
+                .andExpect(jsonPath("$.propertyCount").value(0));
+
+        mvc.perform(post("/api/v1/products").header(HttpHeaders.AUTHORIZATION, auth)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"bad\",\"codec\":\"nope\"}"))
+                .andExpect(status().isBadRequest());
+
+        mvc.perform(put("/api/v1/products/{pk}", pk).header(HttpHeaders.AUTHORIZATION, auth)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Codec A\",\"codec\":\"flat-json\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.codec").value("flat-json"));
+        mvc.perform(put("/api/v1/products/{pk}", pk).header(HttpHeaders.AUTHORIZATION, auth)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Codec A2\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.codec").value("flat-json"));
+        mvc.perform(put("/api/v1/products/{pk}", pk).header(HttpHeaders.AUTHORIZATION, auth)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Codec A\",\"codec\":\"nope\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createWithFlatJsonCodec() throws Exception {
+        mvc.perform(post("/api/v1/products").header(HttpHeaders.AUTHORIZATION, auth)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Flat\",\"codec\":\"flat-json\"}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.codec").value("flat-json"));
+    }
+
+    @Test
+    void propertyCountIsReportedInGetAndList() throws Exception {
+        String pk = createProduct("Counted");
+        defineProperty(pk, "Ua", "DOUBLE", null, null);
+        defineProperty(pk, "Ub", "DOUBLE", null, null);
+
+        mvc.perform(get("/api/v1/products/{pk}", pk).header(HttpHeaders.AUTHORIZATION, auth))
+                .andExpect(jsonPath("$.propertyCount").value(2));
+        mvc.perform(get("/api/v1/products").param("size", "100").header(HttpHeaders.AUTHORIZATION, auth))
+                .andExpect(jsonPath("$.items[?(@.productKey == '" + pk + "')].propertyCount",
+                        org.hamcrest.Matchers.contains(2)));
+    }
 }

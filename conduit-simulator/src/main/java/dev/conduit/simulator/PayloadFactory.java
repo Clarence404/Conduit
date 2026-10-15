@@ -19,6 +19,19 @@ public final class PayloadFactory {
         body.put("id", id);
         body.put("ts", ts);
         body.put("params", params);
+        return write(body);
+    }
+
+    /** 扁平格式：{"id":..., "ts":..., 测点: 值, ...}。 */
+    public static byte[] flat(String id, long ts, Map<String, Object> params) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("id", id);
+        body.put("ts", ts);
+        body.putAll(params);
+        return write(body);
+    }
+
+    private static byte[] write(Map<String, Object> body) {
         try {
             return MAPPER.writeValueAsBytes(body);
         } catch (JsonProcessingException e) {

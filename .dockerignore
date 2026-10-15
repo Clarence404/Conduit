@@ -3,6 +3,7 @@
 *
 !pom.xml
 !conduit-*
+!docs/examples/demo-meter.thing-model.json
 
 # 前端有自己的 Dockerfile 和构建上下文（conduit-ui/）
 conduit-ui

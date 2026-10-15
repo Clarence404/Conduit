@@ -2,6 +2,8 @@ package dev.conduit.simulator;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -19,6 +21,7 @@ import java.util.Map;
 /** Conduit REST 的最小客户端，只覆盖模拟器与端到端测试需要的接口。 */
 public class ConduitApiClient {
 
+    private static final Logger log = LoggerFactory.getLogger(ConduitApiClient.class);
     private static final int PAGE_SIZE = 100;
 
     private final URI baseUrl;
@@ -36,10 +39,19 @@ public class ConduitApiClient {
     }
 
     public String findOrCreateProduct(String name) {
+        return findOrCreateProduct(name, "standard-json");
+    }
+
+    /** 按名称复用产品；新建时使用给定解码器。已有产品的解码器不同时只告警，不修改。 */
+    public String findOrCreateProduct(String name, String codec) {
         for (int page = 1; ; page++) {
             JsonNode result = send("GET", "/api/v1/products?page=" + page + "&size=" + PAGE_SIZE, null, 200);
             for (JsonNode item : result.get("items")) {
                 if (name.equals(item.get("name").asText())) {
+                    String existing = item.path("codec").asText("");
+                    if (!existing.isEmpty() && !existing.equals(codec)) {
+                        log.warn("Product '{}' uses codec {} but the simulator sends {}", name, existing, codec);
+                    }
                     return item.get("productKey").asText();
                 }
             }
@@ -47,7 +59,16 @@ public class ConduitApiClient {
                 break;
             }
         }
-        return send("POST", "/api/v1/products", Map.of("name", name), 201).get("productKey").asText();
+        return send("POST", "/api/v1/products", Map.of("name", name, "codec", codec), 201)
+                .get("productKey").asText();
+    }
+
+    public int propertyCount(String productKey) {
+        return send("GET", "/api/v1/products/" + encode(productKey), null, 200).path("propertyCount").asInt();
+    }
+
+    public void importThingModel(String productKey, JsonNode document, String mode) {
+        send("PUT", "/api/v1/products/" + encode(productKey) + "/thing-model?mode=" + encode(mode), document, 200);
     }
 
     public List<String> listDeviceKeys(String productKey) {

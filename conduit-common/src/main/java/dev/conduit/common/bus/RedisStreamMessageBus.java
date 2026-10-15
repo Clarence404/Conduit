@@ -116,13 +116,20 @@ public class RedisStreamMessageBus implements MessageBus {
 
     @Override
     public void deadLetter(String group, Delivery delivery, String reason) {
+        recordDead(delivery, reason, Map.of());
+        ack(group, List.of(delivery.id()));
+    }
+
+    @Override
+    public void recordDead(Delivery delivery, String reason, Map<String, String> details) {
         Map<String, String> fields = new LinkedHashMap<>(delivery.fields());
+        fields.putAll(details);
+        // 标准字段最后写入，details 不能覆盖
         fields.put("reason", reason);
         fields.put("originalId", delivery.id());
         fields.put("deliveryCount", Long.toString(delivery.deliveryCount()));
         fields.put("failedAt", Long.toString(System.currentTimeMillis()));
         xadd(props.deadKey(), fields, props.deadMaxLen());
-        ack(group, List.of(delivery.id()));
     }
 
     private String xadd(String key, Map<String, String> fields, long maxLen) {

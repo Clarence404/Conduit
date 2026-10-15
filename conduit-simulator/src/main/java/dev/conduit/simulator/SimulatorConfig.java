@@ -13,7 +13,8 @@ import java.util.Properties;
 
 public record SimulatorConfig(URI apiUrl, String adminUsername, String adminPassword,
                               String mqttHost, int mqttPort, String productName,
-                              int deviceCount, Duration interval, int messagesPerDevice) {
+                              int deviceCount, Duration interval, int messagesPerDevice,
+                              PayloadFormat payloadFormat) {
 
     /** 本地联调用的配置文件（classpath 根目录，不入库），键名与环境变量相同。 */
     static final String LOCAL_PROPERTIES = "simulator-local.properties";
@@ -39,7 +40,8 @@ public record SimulatorConfig(URI apiUrl, String adminUsername, String adminPass
                 env.getOrDefault("SIM_PRODUCT_NAME", "Demo Meter"),
                 Integer.parseInt(env.getOrDefault("SIM_DEVICE_COUNT", "100")),
                 Duration.ofMillis(Long.parseLong(env.getOrDefault("SIM_INTERVAL_MS", "10000"))),
-                Integer.parseInt(env.getOrDefault("SIM_MESSAGES_PER_DEVICE", "0")));
+                Integer.parseInt(env.getOrDefault("SIM_MESSAGES_PER_DEVICE", "0")),
+                PayloadFormat.parse(env.getOrDefault("SIM_PAYLOAD_FORMAT", "standard")));
     }
 
     private static Map<String, String> readLocalProperties() {

@@ -20,13 +20,52 @@ export interface ProductView {
   productKey: string
   name: string
   description: string | null
+  codec: string
+  propertyCount: number
   createdAt: string
 }
 
 export interface SaveProductRequest {
   name: string
   description: string | null
+  /** 新建时缺省为 standard-json；修改时不传则保持不变 */
+  codec?: string
 }
+
+export interface CodecView {
+  name: string
+  displayName: string
+}
+
+export type DataType = 'DOUBLE' | 'INT' | 'BOOL' | 'TEXT' | 'ENUM'
+
+export interface EnumItem {
+  value: number
+  label: string
+}
+
+export interface PropertyRequest {
+  identifier: string
+  name: string
+  dataType: DataType
+  unit: string | null
+  minValue: number | null
+  maxValue: number | null
+  decimals: number | null
+  enumItems: EnumItem[] | null
+  description: string | null
+}
+
+export interface PropertyView extends PropertyRequest {
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ThingModelDocument {
+  properties: PropertyRequest[]
+}
+
+export type ImportMode = 'merge' | 'replace'
 
 export type DeviceStatus = 'ENABLED' | 'DISABLED'
 
@@ -51,9 +90,15 @@ export interface SecretView {
 }
 
 export interface PointView {
-  name: string
+  identifier: string
+  /** 物模型中的显示名称；未定义时为 null */
+  name: string | null
   value: number | string | boolean
   ts: number
+  unit: string | null
+  decimals: number | null
+  /** 枚举值对应的名称；非枚举或未定义时为 null */
+  enumLabel: string | null
 }
 
 export interface LatestView {

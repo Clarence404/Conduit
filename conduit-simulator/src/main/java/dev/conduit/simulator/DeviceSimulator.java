@@ -28,24 +28,32 @@ public class DeviceSimulator {
     private static final int MAX_PUBLISH_ATTEMPTS = 10;
     private static final long RETRY_DELAY_MS = 1_000;
     private static final long CONNECT_TIMEOUT_MS = 5_000;
+    static final Duration DEFAULT_COMPLETION_TIMEOUT = Duration.ofMinutes(10);
 
     private final String host;
     private final int port;
     private final Duration interval;
     private final int messagesPerDevice;
     private final Duration completionTimeout;
+    private final PayloadFormat format;
 
     public DeviceSimulator(String host, int port, Duration interval, int messagesPerDevice) {
-        this(host, port, interval, messagesPerDevice, Duration.ofMinutes(10));
+        this(host, port, interval, messagesPerDevice, DEFAULT_COMPLETION_TIMEOUT, PayloadFormat.STANDARD);
     }
 
     public DeviceSimulator(String host, int port, Duration interval, int messagesPerDevice,
                            Duration completionTimeout) {
+        this(host, port, interval, messagesPerDevice, completionTimeout, PayloadFormat.STANDARD);
+    }
+
+    public DeviceSimulator(String host, int port, Duration interval, int messagesPerDevice,
+                           Duration completionTimeout, PayloadFormat format) {
         this.host = host;
         this.port = port;
         this.interval = interval;
         this.messagesPerDevice = messagesPerDevice;
         this.completionTimeout = completionTimeout;
+        this.format = format;
     }
 
     public void run(List<DeviceCredentials> devices) throws InterruptedException {
@@ -107,7 +115,7 @@ public class DeviceSimulator {
                         int seq = sent.incrementAndGet();
                         long ts = Math.max(System.currentTimeMillis(), lastTs.get() + 1);
                         lastTs.set(ts);
-                        byte[] payload = PayloadFactory.property(d.deviceKey() + "-" + seq, ts,
+                        byte[] payload = format.encode(d.deviceKey() + "-" + seq, ts,
                                 generator.next(intervalMs / 1000.0));
                         publish(scheduler, client, d.deviceKey(), topic, payload, 1, onMessageDone, failedMessages);
                     } catch (RuntimeException e) {

@@ -4,6 +4,7 @@ import dev.conduit.common.message.RawMessage;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 接入与处理之间的消息总线。V0.1 由 Redis Streams 实现，后续可替换为 Kafka / RabbitMQ。
@@ -16,6 +17,7 @@ import java.util.List;
  *   <li>{@link #claimStale} 在服务端按空闲时间过滤，返回的 deliveryCount 为此前投递次数 + 1。
  *       已被 MAXLEN 裁剪掉的条目不会再出现在结果中（见设计文档 9.3 已知限制）。</li>
  *   <li>{@link #deadLetter} 先写死信流再 ack 原消息；两步之间崩溃会产生重复死信，属于至少一次语义可接受。</li>
+ *   <li>{@link #recordDead} 只写死信流、不确认原消息，用于原消息已部分处理成功、仍需留痕的情况。</li>
  * </ul>
  */
 public interface MessageBus {
@@ -31,4 +33,7 @@ public interface MessageBus {
     void ack(String group, List<String> ids);
 
     void deadLetter(String group, Delivery delivery, String reason);
+
+    /** 写一条死信记录（原始字段 + details + reason/originalId/deliveryCount/failedAt），不 ack。 */
+    void recordDead(Delivery delivery, String reason, Map<String, String> details);
 }

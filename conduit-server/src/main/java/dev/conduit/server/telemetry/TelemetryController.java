@@ -1,16 +1,23 @@
 package dev.conduit.server.telemetry;
 
 import dev.conduit.server.device.DeviceService;
+import dev.conduit.server.thingmodel.DataType;
+import dev.conduit.server.thingmodel.ProductProfile;
+import dev.conduit.server.thingmodel.PropertySpec;
+import dev.conduit.server.thingmodel.ThingModelCache;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 public class TelemetryController {
 
-    public record PointView(String name, Object value, long ts) {
+    /** name/unit/decimals 在物模型中无定义时为 null；enumLabel 仅枚举且值已定义时有值。 */
+    public record PointView(String identifier, String name, Object value, long ts, String unit, Integer decimals,
+                            String enumLabel) {
     }
 
     public record LatestView(String deviceKey, List<PointView> values) {
@@ -18,18 +25,41 @@ public class TelemetryController {
 
     private final DeviceService devices;
     private final LatestValueStore latest;
+    private final ThingModelCache thingModels;
 
-    public TelemetryController(DeviceService devices, LatestValueStore latest) {
+    public TelemetryController(DeviceService devices, LatestValueStore latest, ThingModelCache thingModels) {
         this.devices = devices;
         this.latest = latest;
+        this.thingModels = thingModels;
     }
 
     @GetMapping("/api/v1/devices/{deviceKey}/latest")
     public LatestView latest(@PathVariable String deviceKey) {
-        devices.require(deviceKey);
+        String productKey = devices.get(deviceKey).productKey();
+        Map<String, PropertySpec> model = thingModels.find(productKey)
+                .map(ProductProfile::properties).orElse(Map.of());
         List<PointView> values = latest.get(deviceKey).entrySet().stream()
-                .map(e -> new PointView(e.getKey(), e.getValue().value(), e.getValue().ts()))
+                .map(e -> view(e.getKey(), e.getValue(), model.get(e.getKey())))
                 .toList();
         return new LatestView(deviceKey, values);
+    }
+
+    static PointView view(String identifier, LatestValue v, PropertySpec spec) {
+        if (spec == null) {
+            return new PointView(identifier, null, v.value(), v.ts(), null, null, null);
+        }
+        return new PointView(identifier, spec.name(), v.value(), v.ts(), spec.unit(), spec.decimals(),
+                enumLabel(spec, v.value()));
+    }
+
+    static String enumLabel(PropertySpec spec, Object value) {
+        if (spec.dataType() != DataType.ENUM || !(value instanceof Number n)) {
+            return null;
+        }
+        double d = n.doubleValue();
+        if (d != Math.rint(d)) {
+            return null;
+        }
+        return spec.enumLabels().get(n.longValue());
     }
 }
