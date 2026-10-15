@@ -159,4 +159,17 @@ class PipelineProcessorTest {
         verify(bus).deadLetter(GROUP, bad, "PROCESSING_ERROR");
         verify(bus).ack(GROUP, List.of("1-0", "3-0"));
     }
+
+    @Test
+    void nonRecoverableWriteFailureLeavesPropertiesUnackedForRedelivery() {
+        when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
+        when(writer.write(anyList())).thenThrow(new IllegalStateException("InfluxDB rejected the write request itself"));
+
+        assertThatThrownBy(() -> processor.process(List.of(delivery("1-0", "d1"))))
+                .isInstanceOf(IllegalStateException.class);
+
+        verify(writer, times(1)).write(anyList());
+        verify(bus, never()).ack(anyString(), anyList());
+        verify(bus, never()).deadLetter(anyString(), any(), anyString());
+    }
 }

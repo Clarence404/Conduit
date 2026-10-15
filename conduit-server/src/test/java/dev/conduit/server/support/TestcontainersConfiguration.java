@@ -5,14 +5,13 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.context.annotation.Bean;
 import org.springframework.test.context.DynamicPropertyRegistrar;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.InfluxDBContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 @TestConfiguration(proxyBeanMethods = false)
 public class TestcontainersConfiguration {
 
-    public static final String INFLUX_TOKEN = "test-influx-token";
+    public static final String INFLUX_TOKEN = "apiv3_test-influx-token";
 
     @Bean
     @ServiceConnection
@@ -27,20 +26,16 @@ public class TestcontainersConfiguration {
     }
 
     @Bean
-    InfluxDBContainer<?> influx() {
-        return new InfluxDBContainer<>(DockerImageName.parse("influxdb:2.7.11"))
-                .withAdminToken(INFLUX_TOKEN)
-                .withOrganization("conduit")
-                .withBucket("telemetry");
+    InfluxDb3Container influx() {
+        return new InfluxDb3Container(INFLUX_TOKEN);
     }
 
     @Bean
-    DynamicPropertyRegistrar influxProperties(InfluxDBContainer<?> influx) {
+    DynamicPropertyRegistrar influxProperties(InfluxDb3Container influx) {
         return registry -> {
             registry.add("conduit.influx.url", influx::getUrl);
             registry.add("conduit.influx.token", () -> INFLUX_TOKEN);
-            registry.add("conduit.influx.org", () -> "conduit");
-            registry.add("conduit.influx.bucket", () -> "telemetry");
+            registry.add("conduit.influx.database", () -> InfluxTestSupport.DATABASE);
         };
     }
 }

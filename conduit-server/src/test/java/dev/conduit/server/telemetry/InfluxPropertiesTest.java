@@ -8,9 +8,9 @@ class InfluxPropertiesTest {
 
     @Test
     void rejectsBlankToken() {
-        assertThatThrownBy(() -> new InfluxProperties("http://x", "", "org", "b"))
+        assertThatThrownBy(() -> new InfluxProperties("http://x", "", "telemetry", "30d"))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("INFLUX_TOKEN");
-        assertThatThrownBy(() -> new InfluxProperties("http://x", null, "org", "b"))
+        assertThatThrownBy(() -> new InfluxProperties("http://x", null, "telemetry", "30d"))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("INFLUX_TOKEN");
     }
 }

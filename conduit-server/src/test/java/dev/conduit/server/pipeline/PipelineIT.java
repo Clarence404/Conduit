@@ -1,12 +1,12 @@
 package dev.conduit.server.pipeline;
 
-import com.influxdb.client.InfluxDBClient;
 import dev.conduit.common.bus.MessageBus;
 import dev.conduit.common.message.MessageType;
 import dev.conduit.common.message.RawMessage;
 import dev.conduit.server.presence.Presence;
 import dev.conduit.server.presence.PresenceStore;
 import dev.conduit.server.support.IntegrationTestBase;
+import dev.conduit.server.telemetry.InfluxClient;
 import dev.conduit.server.telemetry.LatestValue;
 import dev.conduit.server.telemetry.LatestValueStore;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static dev.conduit.server.support.InfluxTestSupport.awaitCount;
 import static dev.conduit.server.support.InfluxTestSupport.count;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -39,7 +40,7 @@ class PipelineIT extends IntegrationTestBase {
     PresenceStore presence;
 
     @Autowired
-    InfluxDBClient influx;
+    InfluxClient influx;
 
     TestDevice device;
     long now;
@@ -81,7 +82,7 @@ class PipelineIT extends IntegrationTestBase {
 
         assertThat(runner.pollOnce()).isEqualTo(1);
 
-        assertThat(count(influx, device.deviceKey(), "Ua")).isEqualTo(1);
+        awaitCount(influx, device.deviceKey(), "Ua", 1);
         assertThat(latest.get(device.deviceKey()))
                 .containsEntry("Ua", new LatestValue(220.5, now))
                 .containsEntry("Ia", new LatestValue(5.0, now));
@@ -98,7 +99,7 @@ class PipelineIT extends IntegrationTestBase {
         runner.pollOnce();
 
         assertThat(latest.get(device.deviceKey())).containsEntry("Ua", new LatestValue(2.0, now));
-        assertThat(count(influx, device.deviceKey(), "Ua")).isEqualTo(2);
+        awaitCount(influx, device.deviceKey(), "Ua", 2);
     }
 
     @Test
@@ -186,7 +187,7 @@ class PipelineIT extends IntegrationTestBase {
 
         assertThat(runner.claimOnce()).isEqualTo(1);
 
-        assertThat(count(influx, device.deviceKey(), "Ua")).isEqualTo(1);
+        awaitCount(influx, device.deviceKey(), "Ua", 1);
     }
 
     @Test
@@ -218,8 +219,8 @@ class PipelineIT extends IntegrationTestBase {
         assertThat(runner.pollOnce()).isEqualTo(2);
 
         assertThat(deadReason(conflict)).contains("FIELD_TYPE_CONFLICT");
-        assertThat(count(influx, device.deviceKey(), "Ia")).isEqualTo(1);
-        assertThat(count(influx, device.deviceKey(), "Ua")).isEqualTo(1);
+        awaitCount(influx, device.deviceKey(), "Ia", 1);
+        awaitCount(influx, device.deviceKey(), "Ua", 1);
         assertThat(latest.get(device.deviceKey())).containsKey("Ia");
         assertThat(runner.claimOnce()).isZero();
     }

@@ -1,97 +1,79 @@
 package dev.conduit.server.telemetry;
 
-import com.influxdb.client.InfluxDBClient;
-import com.influxdb.client.WriteApiBlocking;
-import com.influxdb.client.domain.WritePrecision;
-import com.influxdb.client.write.Point;
-import com.influxdb.exceptions.InfluxException;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class TelemetryWriter {
 
     static final String MEASUREMENT = "property";
 
-    private final InfluxDBClient client;
+    private final InfluxClient client;
     private final InfluxProperties props;
 
-    public TelemetryWriter(InfluxDBClient client, InfluxProperties props) {
+    public TelemetryWriter(InfluxClient client, InfluxProperties props) {
         this.client = client;
         this.props = props;
     }
 
+    /**
+     * 一次请求写入整批。无法转换的点（不支持的类型、null 等）在写入前拒绝；InfluxDB 逐行拒绝的点（通常是字段类型冲突）
+     * 按 line_number 映射回原始下标；其余行已写入。下游不可用抛 TelemetryUnavailableException（可原地重试）；
+     * 非逐行拒绝的 400 说明请求本身有问题，抛 IllegalStateException（不可原地重试，见实施计划 Task 1 的决定）。
+     */
     public WriteResult write(List<TelemetryPoint> points) {
         if (points.isEmpty()) {
             return WriteResult.ok();
         }
-        // 先全部转换：无法转换的点（不支持的类型、null 等）直接拒绝，不能让它导致整批无限重试。
         List<WriteResult.Rejected> rejected = new ArrayList<>();
         List<Integer> indexes = new ArrayList<>();
-        List<Point> converted = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
         for (int i = 0; i < points.size(); i++) {
             try {
-                converted.add(toPoint(points.get(i)));
+                lines.add(toLine(points.get(i)));
                 indexes.add(i);
             } catch (RuntimeException e) {
                 rejected.add(new WriteResult.Rejected(i, String.valueOf(e.getMessage())));
             }
         }
-        if (converted.isEmpty()) {
+        if (lines.isEmpty()) {
             return new WriteResult(rejected);
         }
-
-        WriteApiBlocking api = client.getWriteApiBlocking();
-        try {
-            api.writePoints(props.bucket(), props.org(), converted);
-            return new WriteResult(rejected);
-        } catch (InfluxException e) {
-            if (!isDataRejection(e)) {
-                throw new TelemetryUnavailableException(e);
+        for (InfluxClient.LineError error : send(lines)) {
+            int line = error.lineNumber() - 1;
+            if (line < 0 || line >= indexes.size()) {
+                throw new IllegalStateException("InfluxDB reported rejected line " + error.lineNumber()
+                        + " outside the batch of " + lines.size());
             }
-        } catch (RuntimeException e) {
-            throw new TelemetryUnavailableException(e);
-        }
-
-        // 整批被拒（通常是字段类型冲突）：逐条重写，找出真正有问题的点。重写成功的点是幂等的。
-        for (int i = 0; i < converted.size(); i++) {
-            try {
-                api.writePoint(props.bucket(), props.org(), converted.get(i));
-            } catch (InfluxException e) {
-                if (!isDataRejection(e)) {
-                    throw new TelemetryUnavailableException(e);
-                }
-                rejected.add(new WriteResult.Rejected(indexes.get(i), e.getMessage()));
-            } catch (RuntimeException e) {
-                throw new TelemetryUnavailableException(e);
-            }
+            rejected.add(new WriteResult.Rejected(indexes.get(line), error.message()));
         }
         rejected.sort(Comparator.comparingInt(WriteResult.Rejected::index));
         return new WriteResult(rejected);
     }
 
-    /** 只有 400/422 视为数据问题；401/403/404 是配置问题，按不可用处理以免整批进死信。 */
-    private static boolean isDataRejection(InfluxException e) {
-        return e.status() == 400 || e.status() == 422;
+    private List<InfluxClient.LineError> send(List<String> lines) {
+        try {
+            return client.writeLines(props.database(), lines);
+        } catch (InfluxHttpException e) {
+            if (e.status() == 400) {
+                throw new IllegalStateException("InfluxDB rejected the write request itself: " + e.getMessage(), e);
+            }
+            throw new TelemetryUnavailableException(e);
+        } catch (RuntimeException e) {
+            throw new TelemetryUnavailableException(e);
+        }
     }
 
-    static Point toPoint(TelemetryPoint p) {
-        Point point = Point.measurement(MEASUREMENT)
-                .addTag("tenant_id", Long.toString(p.tenantId()))
-                .addTag("product_key", p.productKey())
-                .addTag("device_key", p.deviceKey())
-                .time(p.ts(), WritePrecision.MS);
-        p.fields().forEach((name, value) -> {
-            switch (value) {
-                case Number n -> point.addField(name, n.doubleValue());
-                case Boolean b -> point.addField(name, b);
-                case String s -> point.addField(name, s);
-                default -> throw new IllegalArgumentException("Unsupported field type for " + name);
-            }
-        });
-        return point;
+    static String toLine(TelemetryPoint p) {
+        Map<String, String> tags = new LinkedHashMap<>();
+        tags.put("tenant_id", Long.toString(p.tenantId()));
+        tags.put("product_key", p.productKey());
+        tags.put("device_key", p.deviceKey());
+        return LineProtocol.line(MEASUREMENT, tags, p.fields(), p.ts());
     }
 }
