@@ -42,7 +42,7 @@ conduit-ui（Vue）──REST──> conduit-server
 
 ### 1.3 版本路线
 
-见 `docs/superpowers/specs/2026-10-14-conduit-v0.1-design.md` 第 2 节路线图（V0.1 → V0.2 A/B/C → V0.3 告警 → V1.0 → … → V2.1 AI 能力）。每个子项目都有 spec（`docs/superpowers/specs/`）和实施计划（`docs/superpowers/plans/`）；延后事项在 `docs/backlog-v0.2.md`。
+见 `docs/superpowers/specs/2026-10-14-conduit-v0.1-design.md` 第 2 节路线图（V0.1 → V0.2 A/B/C → V0.3 计算字段与告警 → V0.4 资产与数据管理 → V1.0 → … → V2.1 AI 能力）。每个子项目都有 spec（`docs/superpowers/specs/`）和实施计划（`docs/superpowers/plans/`）；延后事项在 `docs/backlog-v0.2.md`。
 
 ## 2. 编码约定
 
@@ -80,3 +80,4 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-15 V0.2-B：历史曲线在设备详情「历史」标签页；服务端自动聚合（≤1000 点/曲线，固定桶档位，数值 avg/min/max、状态取桶内最后值）；ECharts 6.1.0 按需引入（原定 5.6.0，因 XSS 公告 GHSA-fgmj-fm8m-jvvx 升级）；SQL 参数化（`2026-10-15-conduit-v0.2b-history-design.md`）。
 - 2026-10-15 路线图：V2.1 AI 能力（自然语言查数、异常检测、物模型草稿生成、告警摘要）。
 - 2026-10-15：所有类与重点方法必须写中文注释（见 2.1）；升级时同步更新本文件。
+- 2026-10-15 路线图调整：V0.3 改为「计算字段 → 告警」（计算字段先行，告警规则可引用）；新增 V0.4 资产与数据管理（资产层级/分组、历史导出 CSV、设备批量导入）；V1.0 加审计日志；V1.1 加网关与子设备；规则引擎留在 V2.0，由 V0.3 固定结构告警规则演进；可配置看板暂不纳入。
