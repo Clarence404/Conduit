@@ -1,4 +1,9 @@
 <script setup lang="ts">
+/**
+ * 设备列表页：按产品、关键字筛选，服务端分页；支持新建设备、启停、重置密钥、删除，行内可跳转到设备详情。
+ * 创建设备和重置密钥的响应里有密钥明文，通过 SecretDialog 只展示一次。
+ */
+
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -30,6 +35,7 @@ const secret = reactive({ deviceKey: '', value: '' })
 // 行级操作进行中的设备 Key，防止重复触发
 const busy = reactive(new Set<string>())
 
+/** 加载产品列表，供筛选下拉和新建表单使用（最多取 100 个）。 */
 async function loadProducts() {
   try {
     products.value = (await productApi.list(1, 100)).items
@@ -40,6 +46,10 @@ async function loadProducts() {
 
 const loadSeq = createRequestSeq()
 
+/**
+ * 按当前筛选和分页加载设备。用请求序号保证只有最后一次请求写入结果，
+ * 先发后到的旧响应（以及它的错误提示、loading 复位）都被丢弃。
+ */
 async function load() {
   const id = loadSeq.next()
   loading.value = true
@@ -60,22 +70,26 @@ async function load() {
   }
 }
 
+/** 筛选条件变化后回到第 1 页重新查询。 */
 function search() {
   query.page = 1
   void load()
 }
 
+/** 每页条数变化后回到第 1 页重新查询。 */
 function onSizeChange() {
   query.page = 1
   void load()
 }
 
+/** 打开新建对话框：产品默认取当前筛选的产品，没有筛选则取第一个产品。 */
 function openCreate() {
   createForm.productKey = query.productKey || products.value[0]?.productKey || ''
   createForm.name = ''
   createVisible.value = true
 }
 
+/** 创建设备：成功后关闭对话框、展示一次性密钥并刷新列表。创建中忽略重复点击。 */
 async function create() {
   if (creating.value) {
     return
@@ -97,12 +111,17 @@ async function create() {
   }
 }
 
+/** 弹出密钥对话框，展示设备密钥（只此一次）。 */
 function showSecret(deviceKey: string, value: string) {
   secret.deviceKey = deviceKey
   secret.value = value
   secretVisible.value = true
 }
 
+/**
+ * 启用/禁用设备（开关）。成功后用服务端返回的状态回写该行；失败时提示，该行状态保持不变。
+ * 同一设备操作进行中时忽略重复触发。
+ */
 async function toggleStatus(row: DeviceView, enabled: boolean) {
   if (busy.has(row.deviceKey)) {
     return
@@ -118,6 +137,7 @@ async function toggleStatus(row: DeviceView, enabled: boolean) {
   }
 }
 
+/** 重置设备密钥：先确认（旧密钥立即失效），确认后展示新密钥。用户取消则不请求。同一设备操作进行中时忽略重复触发。 */
 async function resetSecret(row: DeviceView) {
   if (busy.has(row.deviceKey)) {
     return
@@ -142,6 +162,7 @@ async function resetSecret(row: DeviceView) {
   }
 }
 
+/** 删除设备：先确认再请求。若删掉的是当前页最后一条且不在第 1 页，则退到上一页，避免停在空页。 */
 async function remove(row: DeviceView) {
   if (busy.has(row.deviceKey)) {
     return
@@ -170,6 +191,7 @@ async function remove(row: DeviceView) {
   }
 }
 
+/** 进入页面：先加载产品（名称映射、筛选下拉要用），再加载设备列表。 */
 onMounted(async () => {
   await loadProducts()
   await load()

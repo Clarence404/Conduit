@@ -1,3 +1,5 @@
+/** 把接口错误（Axios 错误、ProblemDetail）转换成可直接展示给用户的中文文案与逐项错误列表。 */
+
 import { isAxiosError } from 'axios'
 
 /** 从接口错误中提取给用户看的文案：优先 ProblemDetail.detail。 */
@@ -15,6 +17,7 @@ export function problemMessage(error: unknown): string {
   return error instanceof Error ? error.message : '未知错误'
 }
 
+/** ProblemDetail.errors 中的一项：identifier 为出错的属性标识（可能没有），message 为错误原因。 */
 export interface ProblemFieldError {
   identifier: string | null
   message: string

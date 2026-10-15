@@ -1,4 +1,9 @@
 <script setup lang="ts">
+/**
+ * 设备详情页：基本信息、MQTT 连接参数，以及每 5 秒轮询刷新的最新值表格。
+ * 设备信息只在进入时加载一次；产品名称取不到时退回显示产品 Key。
+ */
+
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { deviceApi } from '@/api/devices'
@@ -13,6 +18,7 @@ import { usePolling } from '@/composables/usePolling'
 // 不能叫 key：key 是 Vue 保留属性，不会作为 prop 传入
 const props = defineProps<{ deviceKey: string }>()
 
+/** MQTT 端口，可由构建时环境变量 VITE_MQTT_PORT 覆盖，默认 1883；连接地址用当前页面的主机名。 */
 const mqttPort = Number(import.meta.env.VITE_MQTT_PORT) || 1883
 
 const device = ref<DeviceView | null>(null)
@@ -24,6 +30,7 @@ const connection = computed(() =>
   device.value ? buildConnectionInfo(device.value.productKey, device.value.deviceKey, window.location.hostname, mqttPort) : null,
 )
 
+/** 加载设备及其所属产品名称。设备加载失败时提示并终止；产品名称只是展示用，失败时静默。 */
 async function loadDevice() {
   try {
     device.value = await deviceApi.get(props.deviceKey)
@@ -38,6 +45,7 @@ async function loadDevice() {
   }
 }
 
+/** 加载最新值并记录刷新时间。不处理错误：由 startPolling 吞掉，下一轮继续重试。 */
 async function loadLatest() {
   const res = await deviceApi.latest(props.deviceKey)
   values.value = res.values

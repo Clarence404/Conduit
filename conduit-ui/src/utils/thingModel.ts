@@ -1,5 +1,11 @@
+/**
+ * 物模型相关的前端逻辑：数据类型选项、属性表单与请求体的互相转换及校验、显示格式化。
+ * 表单里数值都用字符串保存，转换时才解析并校验。
+ */
+
 import type { CodecView, DataType, PropertyRequest, PropertyView } from '@/api/types'
 
+/** 数据类型下拉选项（值与服务端 DataType 一致）。 */
 export const DATA_TYPES: { value: DataType; label: string }[] = [
   { value: 'DOUBLE', label: '浮点数' },
   { value: 'INT', label: '整数' },
@@ -11,10 +17,12 @@ export const DATA_TYPES: { value: DataType; label: string }[] = [
 /** V0.2-A spec 2.3：INT/ENUM 存为 integer，与已有的浮点历史数据冲突 */
 export const INT_ENUM_HINT = '已有数据的测点请选择浮点数'
 
+/** 数据类型的中文名称；未知类型原样返回。 */
 export function dataTypeLabel(type: DataType): string {
   return DATA_TYPES.find((t) => t.value === type)?.label ?? type
 }
 
+/** 属性表单中随数据类型显示或隐藏的字段。 */
 export interface FieldVisibility {
   range: boolean
   decimals: boolean
@@ -22,6 +30,10 @@ export interface FieldVisibility {
   intHint: boolean
 }
 
+/**
+ * 按数据类型决定表单字段显隐：数值型（DOUBLE/INT）显示范围与小数位，ENUM 显示枚举项，
+ * INT/ENUM 额外显示「已有数据的测点请选择浮点数」提示。toPropertyRequest 也依赖它，隐藏字段一律提交为 null。
+ */
 export function fieldVisibility(type: DataType): FieldVisibility {
   const numeric = type === 'DOUBLE' || type === 'INT'
   return {
@@ -45,6 +57,7 @@ export interface PropertyForm {
   description: string
 }
 
+/** 新增属性时的空表单，默认类型为浮点数。 */
 export function emptyForm(): PropertyForm {
   return {
     identifier: '',
@@ -61,6 +74,7 @@ export function emptyForm(): PropertyForm {
 
 const text = (n: number | null) => (n === null ? '' : String(n))
 
+/** 把已有属性转成编辑表单：null 变空串，枚举值转字符串。 */
 export function formFromProperty(p: PropertyView): PropertyForm {
   return {
     identifier: p.identifier,
@@ -75,11 +89,13 @@ export function formFromProperty(p: PropertyView): PropertyForm {
   }
 }
 
+/** 去首尾空白，空串视为未填写返回 null。 */
 function blankToNull(s: string): string | null {
   const t = s.trim()
   return t ? t : null
 }
 
+/** 解析可选数字：空白返回 null，非数字抛 Error（message 以 label 开头，可直接提示用户）。 */
 function optionalNumber(s: string, label: string): number | null {
   const t = s.trim()
   if (!t) {
@@ -92,6 +108,7 @@ function optionalNumber(s: string, label: string): number | null {
   return n
 }
 
+/** 解析可选整数：在 optionalNumber 基础上要求为整数，否则抛 Error。 */
 function optionalInteger(s: string, label: string): number | null {
   const n = optionalNumber(s, label)
   if (n !== null && !Number.isInteger(n)) {
@@ -124,6 +141,7 @@ export function toPropertyRequest(f: PropertyForm): PropertyRequest {
   }
 }
 
+/** 取值范围的显示文案：两端都有为「min ~ max」，只有一端为「≥ min」或「≤ max」，都没有为「—」。 */
 export function formatRange(min: number | null, max: number | null): string {
   if (min !== null && max !== null) {
     return `${min} ~ ${max}`
@@ -137,6 +155,7 @@ export function formatRange(min: number | null, max: number | null): string {
   return '—'
 }
 
+/** 解码器的显示名称；列表里找不到（如尚未加载）时退回原始名称。 */
 export function codecLabel(codecs: CodecView[], name: string): string {
   return codecs.find((c) => c.name === name)?.displayName ?? name
 }

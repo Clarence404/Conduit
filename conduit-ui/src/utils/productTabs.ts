@@ -1,5 +1,8 @@
+/** 产品详情页标签与地址栏 ?tab= 参数的互相转换，使标签可被链接、刷新和后退保留。 */
+
 import type { LocationQuery, LocationQueryValue } from 'vue-router'
 
+/** 产品详情页的标签：基本信息、物模型、设备。 */
 export type ProductTab = 'basic' | 'model' | 'devices'
 
 const TABS: readonly ProductTab[] = ['basic', 'model', 'devices']

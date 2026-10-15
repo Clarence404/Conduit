@@ -1,3 +1,5 @@
+/** 产品相关 REST 调用：分页列表、详情、创建、修改、删除。productKey 经 encodeURIComponent 拼进路径。 */
+
 import { http } from './client'
 import type { PageView, ProductView, SaveProductRequest } from './types'
 

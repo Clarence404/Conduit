@@ -1,3 +1,8 @@
+/**
+ * 物模型（产品属性）REST 调用：属性的增删改查，以及整体导出/导入。
+ * 导入由服务端对整份文档做校验，失败时响应的 errors 列表可用 problemErrors 取出。
+ */
+
 import { http } from './client'
 import type { ImportMode, PropertyRequest, PropertyView, ThingModelDocument } from './types'
 

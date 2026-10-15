@@ -1,4 +1,11 @@
 <script setup lang="ts">
+/**
+ * 产品详情页，用 ?tab= 区分三个标签：
+ * - 基本信息：编辑名称、描述、解码器；
+ * - 物模型：属性的增删改、整体导入导出，前端分页（属性列表一次取回）；
+ * - 设备：该产品下的设备，服务端分页，每次切到该标签都重新加载以保持在线状态最新。
+ */
+
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -55,6 +62,7 @@ watch([() => properties.value.length, propertySize], ([total, size]) => {
   propertyPage.value = clampPage(propertyPage.value, total, size)
 })
 
+/** 加载产品并回填基本信息表单（会覆盖表单里未保存的修改，只在进入页面时调用）。 */
 async function loadProduct() {
   try {
     product.value = await productApi.get(props.productKey)
@@ -78,6 +86,7 @@ async function refreshPropertyCount() {
   }
 }
 
+/** 复制产品 Key 到剪贴板并提示结果。 */
 async function copyProductKey() {
   if (await copyText(props.productKey)) {
     ElMessage.success('已复制')
@@ -88,6 +97,7 @@ async function copyProductKey() {
 
 const deviceSeq = createRequestSeq()
 
+/** 加载该产品下当前页的设备。用请求序号保证只有最后一次请求写入结果，旧响应被丢弃。 */
 async function loadDevices() {
   const id = deviceSeq.next()
   loadingDevices.value = true
@@ -103,11 +113,13 @@ async function loadDevices() {
   }
 }
 
+/** 设备每页条数变化后回到第 1 页重新加载。 */
 function onDeviceSizeChange() {
   devicePage.value = 1
   void loadDevices()
 }
 
+/** 加载解码器列表，用于基本信息的下拉选项。 */
 async function loadCodecs() {
   try {
     codecs.value = await codecApi.list()
@@ -116,6 +128,7 @@ async function loadCodecs() {
   }
 }
 
+/** 加载产品的全部属性；分页在前端完成。 */
 async function loadProperties() {
   loadingProperties.value = true
   try {
@@ -127,6 +140,7 @@ async function loadProperties() {
   }
 }
 
+/** 保存基本信息（名称必填，解码器一并提交）。成功后用服务端返回值更新产品；保存中忽略重复点击。 */
 async function saveBasic() {
   if (savingBasic.value) return
   if (!basic.name.trim()) {
@@ -148,16 +162,19 @@ async function saveBasic() {
   }
 }
 
+/** 打开属性对话框，新增模式。 */
 function openCreate() {
   editing.value = null
   dialogVisible.value = true
 }
 
+/** 打开属性对话框，编辑模式。 */
 function openEdit(row: PropertyView) {
   editing.value = row
   dialogVisible.value = true
 }
 
+/** 删除属性：先确认再请求（历史数据不会删除），成功后刷新属性列表与属性数。 */
 async function remove(row: PropertyView) {
   try {
     await ElMessageBox.confirm(`确定删除属性「${row.name}（${row.identifier}）」？历史数据不会删除。`, '删除属性', {
@@ -175,6 +192,7 @@ async function remove(row: PropertyView) {
   }
 }
 
+/** 导出物模型并下载为 {productKey}.thing-model.json。 */
 async function exportModel() {
   try {
     downloadJson(`${props.productKey}.thing-model.json`, await thingModelApi.exportModel(props.productKey))
@@ -183,6 +201,7 @@ async function exportModel() {
   }
 }
 
+/** 属性新增、编辑、删除、导入后统一刷新：并行重载属性列表和产品的属性数。 */
 async function onPropertiesChanged() {
   await Promise.all([loadProperties(), refreshPropertyCount()])
 }

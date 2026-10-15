@@ -1,4 +1,9 @@
 <script setup lang="ts">
+/**
+ * 产品列表页：服务端分页；支持新建、编辑、删除产品，并可从行内按钮直接进入产品详情的各个标签页。
+ * 新建时可选解码器，编辑时不能改。
+ */
+
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -29,6 +34,7 @@ const form = reactive({ name: '', description: '', codec: 'standard-json' })
 
 const loadSeq = createRequestSeq()
 
+/** 加载当前页产品。用请求序号保证只有最后一次请求写入结果，旧响应被丢弃。 */
 async function load() {
   const id = loadSeq.next()
   loading.value = true
@@ -44,6 +50,7 @@ async function load() {
   }
 }
 
+/** 加载解码器列表，用于新建表单的下拉和列表里的显示名称。 */
 async function loadCodecs() {
   try {
     codecs.value = await codecApi.list()
@@ -52,15 +59,18 @@ async function loadCodecs() {
   }
 }
 
+/** 进入产品详情页并定位到指定标签（默认「基本信息」；默认标签不写入 ?tab=）。 */
 function openDetail(row: ProductView, tab: ProductTab = 'basic') {
   void router.push({ name: 'product-detail', params: { productKey: row.productKey }, query: tabQuery({}, tab) })
 }
 
+/** 每页条数变化后回到第 1 页重新加载。 */
 function onSizeChange() {
   page.value = 1
   void load()
 }
 
+/** 打开新建对话框，表单重置为默认值（解码器默认 standard-json）。 */
 function openCreate() {
   editingKey.value = null
   form.name = ''
@@ -69,6 +79,7 @@ function openCreate() {
   dialogVisible.value = true
 }
 
+/** 打开编辑对话框并回填该产品；编辑时请求里不带 codec，保持不变。 */
 function openEdit(row: ProductView) {
   editingKey.value = row.productKey
   form.name = row.name
@@ -77,6 +88,7 @@ function openEdit(row: ProductView) {
   dialogVisible.value = true
 }
 
+/** 保存新建或编辑（由 editingKey 区分）。名称必填；保存中忽略重复点击；成功后关闭对话框并刷新列表。 */
 async function save() {
   if (saving.value) return
   if (!form.name.trim()) {
@@ -101,6 +113,7 @@ async function save() {
   }
 }
 
+/** 删除产品：先确认再请求。若删掉的是当前页最后一条且不在第 1 页，则退到上一页。 */
 async function remove(row: ProductView) {
   if (removing.value) return
   try {

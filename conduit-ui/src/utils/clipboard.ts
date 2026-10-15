@@ -1,3 +1,5 @@
+/** 剪贴板工具：优先使用 Clipboard API，不可用时退回 execCommand。 */
+
 /**
  * 写入剪贴板，返回是否成功。
  * 演示环境通过 http + 非 localhost 访问，属于非安全上下文，没有 navigator.clipboard；
@@ -15,6 +17,10 @@ export async function copyText(text: string): Promise<boolean> {
   return legacyCopy(text)
 }
 
+/**
+ * 旧式复制：用屏幕外的只读 textarea 选中文本后 execCommand('copy')，结束后移除并恢复原焦点。
+ * 成功返回 true；抛错或浏览器不支持时返回 false。
+ */
 function legacyCopy(text: string): boolean {
   const textarea = document.createElement('textarea')
   textarea.value = text

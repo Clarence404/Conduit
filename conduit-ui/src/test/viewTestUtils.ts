@@ -1,3 +1,5 @@
+/** 页面组件测试的公共工具：内存路由与等待异步渲染完成。 */
+
 import { flushPromises } from '@vue/test-utils'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import { defineComponent } from 'vue'
