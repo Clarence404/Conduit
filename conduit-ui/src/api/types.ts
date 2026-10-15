@@ -20,12 +20,15 @@ export interface TokenResponse {
   user: UserView
 }
 
+/** 产品；deviceCount 为设备数，onlineCount 为在线设备数（服务端 Redis 不可用时为 null，显示「—」） */
 export interface ProductView {
   productKey: string
   name: string
   description: string | null
   codec: string
   propertyCount: number
+  deviceCount: number
+  onlineCount: number | null
   createdAt: string
 }
 

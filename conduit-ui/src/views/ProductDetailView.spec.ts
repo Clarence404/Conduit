@@ -1,3 +1,7 @@
+/**
+ * ProductDetailView 组件测试：标签与 ?tab= 同步（router.replace）、页头显示产品 Key 与设备计数、
+ * 属性变化后只刷新计数不覆盖未保存的基本信息、属性前端分页（每页 10 条）与删除后页码修正、设备标签的在线圆点。
+ */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ElementPlus, { ElPagination, ElTable } from 'element-plus'
@@ -40,6 +44,8 @@ function product(patch: Partial<ProductView> = {}): ProductView {
     description: '原描述',
     codec: 'standard-json',
     propertyCount: 12,
+    deviceCount: 5,
+    onlineCount: 4,
     createdAt: '2026-10-01T00:00:00Z',
     ...patch,
   }
@@ -87,7 +93,22 @@ describe('ProductDetailView', () => {
     vi.mocked(codecApi.list).mockResolvedValue([{ name: 'standard-json', displayName: '标准 JSON' }])
     vi.mocked(thingModelApi.list).mockResolvedValue(properties(12))
     vi.mocked(thingModelApi.remove).mockResolvedValue(undefined)
-    vi.mocked(deviceApi.list).mockResolvedValue({ items: [], total: 0, page: 1, size: 10 })
+    vi.mocked(deviceApi.list).mockResolvedValue({
+      items: [
+        {
+          deviceKey: 'dk1',
+          name: '1号楼配电室 电表01',
+          productKey: 'pk1',
+          status: 'ENABLED',
+          online: true,
+          lastReportAt: null,
+          createdAt: '2026-10-01T00:00:00Z',
+        },
+      ],
+      total: 1,
+      page: 1,
+      size: 10,
+    })
   })
 
   describe('tab and query sync', () => {
@@ -134,7 +155,24 @@ describe('ProductDetailView', () => {
     })
   })
 
-  it('keeps unsaved basic-info edits and refreshes only the property count after a property change', async () => {
+  it('shows the product name, key and device counts in the page header', async () => {
+    const { wrapper } = await mountAt('/products/pk1')
+
+    const header = wrapper.find('.page-header')
+    expect(header.find('h2').text()).toBe('三相电表（演示）')
+    expect(header.text()).toContain('pk1')
+    expect(header.text()).toContain('设备 5（在线 4）')
+    wrapper.unmount()
+  })
+
+  it('shows the online dot in the devices tab', async () => {
+    const { wrapper } = await mountAt('/products/pk1?tab=devices')
+
+    expect(wrapper.find('.online-dot').text()).toBe('在线')
+    wrapper.unmount()
+  })
+
+  it('keeps unsaved basic-info edits and refreshes only the counts after a property change', async () => {
     const { wrapper } = await mountAt('/products/pk1')
     const nameInput = wrapper.find('.basic input')
     await nameInput.setValue('改了还没保存')
@@ -163,6 +201,7 @@ describe('ProductDetailView', () => {
     expect(table().props('data')).toHaveLength(10)
 
     pager().vm.$emit('update:current-page', 2)
+    pager().vm.$emit('current-change', 2)
     await settle()
     expect(table().props('data')).toHaveLength(2)
 

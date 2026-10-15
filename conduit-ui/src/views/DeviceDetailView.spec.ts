@@ -64,6 +64,8 @@ describe('DeviceDetailView', () => {
       description: null,
       codec: 'standard-json',
       propertyCount: 8,
+      deviceCount: 100,
+      onlineCount: 100,
       createdAt: '2026-10-01T00:00:00Z',
     })
   })
