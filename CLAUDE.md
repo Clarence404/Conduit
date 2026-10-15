@@ -93,3 +93,4 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-15：设备列表筛选修正——路由 query 在页面内变化时重新应用；「更多筛选」角标与强制展开只看已应用条件；useTable 加载失败清空数据（各列表显示「加载失败」而非旧数据）；非法 query 值用 replace 改写掉。
 - 2026-10-15 设备列表筛选与数据驱动在线：列表新增 online / status / reported / createdFrom / createdTo 筛选（online、reported 走内存分页）；上报数据可把设备标记为在线，但数据不推进 `since`、离线后需超过 10 秒宽限期才复活，EMQX 事件仍是权威。
 - 2026-10-15：Java 服务日志统一写入 `CONDUIT_LOG_DIR`（默认 `logs`）下的每服务一个滚动文件（50MB/14 天/1GB）；simulator 由 slf4j-simple 换为 logback-classic；Docker 共用卷 `conduit-logs`。
+- 2026-10-15：编排可同步到 Docker 宿主机 `/opt/conduit`（`deploy/sync-to-host.sh`，借临时容器 + docker cp 写入），供宿主机面板（1Panel）管理；仓库 `deploy/` 仍是唯一来源。

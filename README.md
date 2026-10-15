@@ -260,6 +260,15 @@ cd conduit-ui && npm install && npm test && npm run dev
 
 如果同时还部署了完整的 Docker 应用栈（`app` profile），容器里的 server / transport 会和 IDE 中的实例加入同一个消费组与共享订阅分担消息，数据不会重复也不会丢；但 EMQX 的鉴权回调只指向 `CONDUIT_AUTH_URL` 一处。一般不建议两套同时运行。
 
+## 在宿主机面板（1Panel 等）中管理编排
+
+在本机通过 `DOCKER_HOST` 远程执行 `docker compose` 时，容器标签记录的是本机的编排文件路径，宿主机上的面板因此找不到编排文件。需要由面板管理时：
+
+1. 执行 `deploy/sync-to-host.sh`，把 `docker-compose.yml`、`.env`、`emqx/` 同步到宿主机的 `/opt/conduit`（可用 `CONDUIT_HOST_DIR` 修改）。
+2. 在面板中以该目录的 `docker-compose.yml` 创建/导入编排，项目名为 `conduit`；面板会在宿主机上重建基础服务，此后标签指向宿主机路径。
+
+仓库里的 `deploy/` 仍是唯一来源：修改编排后重新执行同步脚本。之后若又从本机执行 `docker compose` 或 `deploy/build-local.sh`，标签会变回本机路径，需要再在面板中重建一次。
+
 ## 日志
 
 所有 Java 服务（server、transport、simulator）除控制台外，还把日志写到文件：
