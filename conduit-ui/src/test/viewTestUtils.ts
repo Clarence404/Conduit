@@ -13,6 +13,7 @@ export function createTestRouter(): Router {
     history: createMemoryHistory(),
     routes: [
       { path: '/login', name: 'login', component: Empty, meta: ROUTE_META.login },
+      { path: '/home', name: 'home', component: Empty, meta: ROUTE_META.home },
       { path: '/products', name: 'products', component: Empty, meta: ROUTE_META.products },
       {
         path: '/products/:productKey',

@@ -25,6 +25,7 @@ declare module 'vue-router' {
 
 /** 各路由的元信息，键为路由名称 */
 export const ROUTE_META = {
+  home: { title: '首页', menu: '/home', breadcrumb: [{ label: '概览' }, { label: '首页' }] },
   login: { public: true, title: '登录' },
   products: { title: '产品', menu: '/products', breadcrumb: [{ label: '设备接入' }, { label: '产品' }] },
   'product-detail': {

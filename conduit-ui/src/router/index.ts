@@ -18,8 +18,14 @@ export const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: () => import('@/layouts/AppLayout.vue'),
-    redirect: '/devices',
+    redirect: '/home',
     children: [
+      {
+        path: 'home',
+        name: 'home',
+        component: () => import('@/views/HomeView.vue'),
+        meta: ROUTE_META.home,
+      },
       {
         path: 'products',
         name: 'products',

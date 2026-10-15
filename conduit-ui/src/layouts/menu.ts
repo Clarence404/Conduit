@@ -1,6 +1,6 @@
 /** 侧栏菜单定义：分组、菜单项（路径、名称、图标），以及尚未实现、显示为禁用的项（disabledNote 为标注文字）。 */
 import type { Component } from 'vue'
-import { Box, Cpu, OfficeBuilding, User } from '@element-plus/icons-vue'
+import { Box, Cpu, House, OfficeBuilding, User } from '@element-plus/icons-vue'
 
 /** 菜单项；path 同时是 el-menu 的 index 与跳转地址 */
 export interface MenuItem {
@@ -18,6 +18,10 @@ export interface MenuGroup {
 }
 
 export const MENU_GROUPS: MenuGroup[] = [
+  {
+    title: '概览',
+    items: [{ path: '/home', label: '首页', icon: House }],
+  },
   {
     title: '设备接入',
     items: [

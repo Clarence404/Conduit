@@ -104,4 +104,13 @@ describe('AppLayout', () => {
     expect(router.currentRoute.value.name).toBe('login')
     wrapper.unmount()
   })
+
+  it('shows the 概览 group with 首页 highlighted on the home page', async () => {
+    const { wrapper } = await mountAt('/home')
+
+    expect(wrapper.text()).toContain('概览')
+    expect(wrapper.find('.el-menu-item.is-active').text()).toBe('首页')
+    expect(wrapper.findAll('.breadcrumb .el-breadcrumb__inner').map((c) => c.text())).toEqual(['概览', '首页'])
+    wrapper.unmount()
+  })
 })
