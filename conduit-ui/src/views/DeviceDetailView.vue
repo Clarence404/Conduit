@@ -46,6 +46,8 @@ const device = ref<DeviceView | null>(null)
 const failed = ref(false)
 const productName = ref<string | null>(null)
 const model = ref<PropertyView[]>([])
+// 物模型已取回或确定取不到：之前最新值面板不查趋势，避免按错误的测点分类查两次
+const modelReady = ref(false)
 const values = ref<PointView[]>([])
 const lastRefreshed = ref<number | null>(null)
 const connectionVisible = ref(false)
@@ -87,6 +89,7 @@ async function loadDevice() {
   if (properties.status === 'fulfilled') {
     model.value = properties.value
   }
+  modelReady.value = true
 }
 
 /**
@@ -122,7 +125,10 @@ function openEdit() {
   editVisible.value = true
 }
 
-/** 保存名称与启用状态：名称必填；保存中忽略重复点击；成功后更新信息卡、面包屑并关闭对话框 */
+/**
+ * 保存名称与启用状态：名称必填；保存中忽略重复点击；成功后更新信息卡、面包屑并关闭对话框。
+ * 保存期间切换到另一台设备时，旧设备的迟到结果（成功或失败）被丢弃，不写页面、不提示，saving 只由当前设备的状态决定。
+ */
 async function saveEdit() {
   if (saving.value || !device.value) {
     return
@@ -132,31 +138,46 @@ async function saveEdit() {
     ElMessage.warning('请输入设备名称')
     return
   }
+  const key = device.value.deviceKey
   saving.value = true
   try {
-    device.value = await deviceApi.update(device.value.deviceKey, name, editForm.enabled ? 'ENABLED' : 'DISABLED')
-    setName(device.value.name)
+    const updated = await deviceApi.update(key, name, editForm.enabled ? 'ENABLED' : 'DISABLED')
+    // 保存期间路由已切到另一台设备：结果属于旧设备，不能写到新设备的页面与面包屑上
+    if (key !== props.deviceKey) {
+      return
+    }
+    device.value = updated
+    setName(updated.name)
     editVisible.value = false
     ElMessage.success('已保存')
   } catch (e) {
-    ElMessage.error(problemMessage(e))
+    if (key === props.deviceKey) {
+      ElMessage.error(problemMessage(e))
+    }
   } finally {
-    saving.value = false
+    // 切换设备时 resetForDevice 已复位 saving，旧设备的迟到结果不能再改它
+    if (key === props.deviceKey) {
+      saving.value = false
+    }
   }
 }
 
-/** 切换到另一台设备：面包屑名称与全部页面状态回到初始，再加载新设备（骨架屏期间两个标签页面板都已卸载） */
+/** 切换到另一台设备：面包屑名称与全部页面状态回到初始，再加载新设备及其最新值（骨架屏期间两个标签页面板都已卸载） */
 function resetForDevice() {
   setName(null)
   device.value = null
   failed.value = false
   productName.value = null
   model.value = []
+  modelReady.value = false
   values.value = []
   lastRefreshed.value = null
   connectionVisible.value = false
   editVisible.value = false
+  saving.value = false
   void loadDevice()
+  // 不等下一轮 5 秒轮询，立即取新设备的最新值（失败由下一轮轮询重试）
+  void loadLatest().catch(() => {})
 }
 
 watch(() => props.deviceKey, resetForDevice)
@@ -176,6 +197,7 @@ usePolling(loadLatest, 5000)
             :device-key="device.deviceKey"
             :values="values"
             :model="model"
+            :model-ready="modelReady"
             :last-refreshed="lastRefreshed"
             @open-history="openHistory"
           />

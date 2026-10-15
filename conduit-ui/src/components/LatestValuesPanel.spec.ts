@@ -1,6 +1,6 @@
 /**
  * LatestValuesPanel 组件测试：一次历史查询取前 8 个数值测点最近 1 小时的趋势、每 60 秒刷新；状态量卡片无趋势线；
- * 切到表格视图后保存偏好并停止趋势请求；点击卡片发出 open-history。
+ * 切到表格视图后保存偏好并停止趋势请求；物模型尚未加载完（modelReady=false）时不发趋势请求；点击卡片发出 open-history。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -124,6 +124,23 @@ describe('LatestValuesPanel', () => {
     await cardOf(wrapper, 'P01').trigger('click')
 
     expect(wrapper.emitted('open-history')).toEqual([['P01']])
+    wrapper.unmount()
+  })
+
+  it('waits for the thing model before querying sparklines so the first load issues a single query', async () => {
+    const wrapper = mount(LatestValuesPanel, {
+      props: { deviceKey: 'dk1', values: VALUES, model: [], lastRefreshed: NOW, modelReady: false },
+      global: { plugins: [ElementPlus] },
+      attachTo: document.body,
+    })
+    await settle()
+    expect(historyApi.query).not.toHaveBeenCalled()
+
+    // 物模型到达后卡片分类变化（例如枚举量不再当数值），此时才查询一次
+    await wrapper.setProps({ model: [], modelReady: true })
+    await settle()
+
+    expect(historyApi.query).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 

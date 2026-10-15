@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 单个测点的指标卡片：名称与标识；数值（按小数位）+ 单位，或状态量的文字标签（如「运行」）；
- * 数值测点有至少 2 个点时画最近 1 小时迷你趋势线；底部为相对采样时间。点击或回车发出 select（测点标识）。
+ * 数值测点有至少 2 个点时画最近 1 小时迷你趋势线；底部为相对采样时间。点击、回车或空格发出 select（测点标识）。
  */
 import type { MetricCardModel, SparkPoint } from '@/utils/metricCards'
 import Sparkline from './Sparkline.vue'
@@ -19,6 +19,7 @@ const emit = defineEmits<{ select: [identifier: string] }>()
     :title="`查看「${card.title}」的历史曲线`"
     @click="emit('select', card.identifier)"
     @keydown.enter="emit('select', card.identifier)"
+    @keydown.space.prevent="emit('select', card.identifier)"
   >
     <div class="head">
       <span class="title">{{ card.title }}</span>

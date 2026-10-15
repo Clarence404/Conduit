@@ -2,7 +2,8 @@
 /**
  * 设备「最新值」标签页内容：卡片 / 表格两种视图（选择存入外观偏好）。卡片视图每个测点一张 MetricCard，
  * 前 8 个数值测点带最近 1 小时迷你趋势线：一次历史查询取得，每 60 秒刷新（页面隐藏时暂停；表格视图和组件卸载后不再请求）。
- * 数值本身由父组件每 5 秒刷新后通过 values 传入。点击卡片发出 open-history（测点标识）。
+ * 数值本身由父组件每 5 秒刷新后通过 values 传入。物模型决定哪些测点是数值，父组件还没取到物模型时（modelReady=false）
+ * 先不查趋势，避免用错误的分类查一次、物模型到达后又查一次。点击卡片发出 open-history（测点标识）。
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { historyApi } from '@/api/history'
@@ -21,12 +22,14 @@ import { formatPointValue, pointLabel } from '@/utils/pointValue'
 import { formatDateTime } from '@/utils/format'
 import MetricCard from './MetricCard.vue'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   deviceKey: string
   values: PointView[]
   model: PropertyView[]
   lastRefreshed: number | null
-}>()
+  /** 物模型已加载完成（成功或失败都算）；默认 true，false 时暂不查趋势 */
+  modelReady?: boolean
+}>(), { modelReady: true })
 const emit = defineEmits<{ 'open-history': [identifier: string] }>()
 
 const SPARK_REFRESH_MS = 60_000
@@ -62,11 +65,11 @@ function onViewChange(value: unknown) {
   ui.setLatestView(value as LatestView)
 }
 
-// 只在卡片视图且有数值测点时轮询趋势；测点集合变化（而不是每 5 秒的数值刷新）才重新开始
+// 只在物模型就绪、卡片视图且有数值测点时轮询趋势；测点集合变化（而不是每 5 秒的数值刷新）才重新开始
 watch(
-  [() => sparkIds.value.join(','), () => ui.latestView],
-  ([ids, view]) => {
-    if (ids && view === 'cards') {
+  [() => sparkIds.value.join(','), () => ui.latestView, () => props.modelReady],
+  ([ids, view, ready]) => {
+    if (ids && view === 'cards' && ready) {
       poller.start()
     } else {
       poller.stop()

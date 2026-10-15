@@ -1,4 +1,4 @@
-/** MetricCard 组件测试：数值 + 单位 + 趋势线、状态量文字标签不画趋势线、点数不足不画、点击与回车发出 select */
+/** MetricCard 组件测试：数值 + 单位 + 趋势线、状态量文字标签不画趋势线、点数不足不画、点击、回车与空格发出 select */
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
@@ -53,5 +53,15 @@ describe('MetricCard', () => {
     await wrapper.trigger('keydown', { key: 'Enter' })
 
     expect(wrapper.emitted('select')).toEqual([['Ua'], ['Ua']])
+  })
+
+  it('emits select on Space and prevents the page from scrolling', async () => {
+    const wrapper = mountCard(card(), null)
+    const event = new KeyboardEvent('keydown', { key: ' ', cancelable: true })
+
+    wrapper.element.dispatchEvent(event)
+
+    expect(wrapper.emitted('select')).toEqual([['Ua']])
+    expect(event.defaultPrevented).toBe(true)
   })
 })

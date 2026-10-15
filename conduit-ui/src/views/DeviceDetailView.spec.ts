@@ -1,6 +1,7 @@
 /**
  * DeviceDetailView 组件测试：信息卡、「最新值 | 历史」标签与 ?tab= 同步（router.replace）、历史标签才挂载 HistoryPanel 并传入 ?props=、
- * 点击卡片跳到历史并只选中该测点、连接参数弹窗、编辑名称与启用状态、切换到另一台设备时清掉旧面包屑名称并重新加载。
+ * 点击卡片跳到历史并只选中该测点、连接参数弹窗、编辑名称与启用状态、切换到另一台设备时清掉旧面包屑名称并重新加载，
+ * 以及设备切换后旧设备的迟到响应（详情、最新值、保存编辑）被丢弃、新设备的最新值立即加载。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
@@ -13,7 +14,7 @@ import ConnectionDialog from '@/components/ConnectionDialog.vue'
 import { deviceApi } from '@/api/devices'
 import { productApi } from '@/api/products'
 import { thingModelApi } from '@/api/thingModel'
-import type { DeviceView } from '@/api/types'
+import type { DeviceView, PointView } from '@/api/types'
 import { useCurrentPage } from '@/composables/useBreadcrumb'
 import { createTestRouter, settle } from '@/test/viewTestUtils'
 
@@ -92,6 +93,8 @@ describe('DeviceDetailView', () => {
     expect(card.text()).toContain('启用')
     expect(activeTabLabel(wrapper)).toBe('最新值')
     expect(wrapper.findComponent(LatestValuesPanel).props('deviceKey')).toBe('dk1')
+    // 物模型已取回（thingModelApi.list 返回），最新值面板可以开始查趋势
+    expect(wrapper.findComponent(LatestValuesPanel).props('modelReady')).toBe(true)
     expect(wrapper.findComponent(HistoryPanel).exists()).toBe(false)
     wrapper.unmount()
   })
@@ -201,6 +204,98 @@ describe('DeviceDetailView', () => {
     await settle()
     expect(breadcrumb.value.at(-1)?.label).toBe('2号楼配电室 电表02')
     expect(wrapper.find('.info-card h2').text()).toBe('2号楼配电室 电表02')
+    wrapper.unmount()
+  })
+  /** 取得页面的面包屑最后一级文字，用来断言面包屑没被旧设备污染 */
+  function crumbOf(wrapper: Awaited<ReturnType<typeof mountAt>>['wrapper']) {
+    const { breadcrumb } = (wrapper.vm.$ as unknown as { appContext: { app: { runWithContext<T>(fn: () => T): T } } }).appContext.app.runWithContext(
+      () => useCurrentPage(),
+    )
+    return breadcrumb
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    const promise = new Promise<T>((r) => (resolve = r))
+    return { promise, resolve }
+  }
+
+  it('drops the device detail of the previous device that arrives after switching', async () => {
+    const lateA = deferred<DeviceView>()
+    vi.mocked(deviceApi.get).mockReturnValueOnce(lateA.promise)
+    const { wrapper } = await mountAt('/devices/dk1')
+    const breadcrumb = crumbOf(wrapper)
+
+    vi.mocked(deviceApi.get).mockResolvedValueOnce(device({ deviceKey: 'dk2', name: '2号楼配电室 电表02' }))
+    await wrapper.setProps({ deviceKey: 'dk2' })
+    await settle()
+    lateA.resolve(device({ deviceKey: 'dk1', name: '1号楼配电室 电表01' }))
+    await settle()
+
+    expect(wrapper.find('.info-card h2').text()).toBe('2号楼配电室 电表02')
+    expect(breadcrumb.value.at(-1)?.label).toBe('2号楼配电室 电表02')
+    wrapper.unmount()
+  })
+
+  it('drops the latest values of the previous device that arrive after switching', async () => {
+    const stale: PointView = { identifier: 'Ua', name: null, value: 220, ts: 1_000, unit: null, decimals: null, enumLabel: null }
+    const lateA = deferred<{ deviceKey: string; values: PointView[] }>()
+    vi.mocked(deviceApi.latest).mockReturnValueOnce(lateA.promise)
+    const { wrapper } = await mountAt('/devices/dk1')
+
+    vi.mocked(deviceApi.get).mockResolvedValueOnce(device({ deviceKey: 'dk2', name: '2号楼配电室 电表02' }))
+    await wrapper.setProps({ deviceKey: 'dk2' })
+    await settle()
+    lateA.resolve({ deviceKey: 'dk1', values: [stale] })
+    await settle()
+
+    expect(wrapper.findComponent(LatestValuesPanel).props('values')).toEqual([])
+    // 旧设备的采样时间也不能推进新设备信息卡的「最后上报」
+    expect(wrapper.find('.info-card').text()).toContain('最后上报：—')
+    wrapper.unmount()
+  })
+
+  it('loads the latest values of the new device immediately after switching', async () => {
+    const { wrapper } = await mountAt('/devices/dk1')
+    vi.mocked(deviceApi.latest).mockClear()
+    vi.mocked(deviceApi.get).mockResolvedValueOnce(device({ deviceKey: 'dk2', name: '2号楼配电室 电表02' }))
+
+    await wrapper.setProps({ deviceKey: 'dk2' })
+    await settle()
+
+    expect(deviceApi.latest).toHaveBeenCalledWith('dk2')
+    wrapper.unmount()
+  })
+
+  it('does not write a save of the previous device onto the new device page and keeps saving correct', async () => {
+    const lateSave = deferred<DeviceView>()
+    vi.mocked(deviceApi.update).mockReturnValueOnce(lateSave.promise)
+    const { wrapper } = await mountAt('/devices/dk1')
+    const breadcrumb = crumbOf(wrapper)
+    const vm = wrapper.vm as unknown as {
+      editVisible: boolean
+      saving: boolean
+      editForm: { name: string; enabled: boolean }
+      openEdit(): void
+      saveEdit(): Promise<void>
+    }
+    vm.openEdit()
+    vm.editForm.name = '改名中'
+    const saving = vm.saveEdit()
+    expect(vm.saving).toBe(true)
+
+    vi.mocked(deviceApi.get).mockResolvedValueOnce(device({ deviceKey: 'dk2', name: '2号楼配电室 电表02' }))
+    await wrapper.setProps({ deviceKey: 'dk2' })
+    await settle()
+    expect(vm.saving).toBe(false)
+
+    lateSave.resolve(device({ deviceKey: 'dk1', name: '改名中' }))
+    await saving
+    await settle()
+
+    expect(wrapper.find('.info-card h2').text()).toBe('2号楼配电室 电表02')
+    expect(breadcrumb.value.at(-1)?.label).toBe('2号楼配电室 电表02')
+    expect(vm.saving).toBe(false)
     wrapper.unmount()
   })
 })
