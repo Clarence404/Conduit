@@ -7,14 +7,23 @@ import dev.conduit.common.message.RawMessage;
 import dev.conduit.common.message.RawMessageCodec;
 import dev.conduit.server.device.DeviceIdentity;
 import dev.conduit.server.device.DeviceIdentityLookup;
+import dev.conduit.server.pipeline.codec.DecodedPayload;
+import dev.conduit.server.pipeline.codec.DecoderRegistry;
+import dev.conduit.server.pipeline.codec.PayloadDecoder;
 import dev.conduit.server.presence.PresenceHandler;
 import dev.conduit.server.telemetry.LatestValueStore;
 import dev.conduit.server.telemetry.TelemetryUnavailableException;
 import dev.conduit.server.telemetry.TelemetryWriter;
 import dev.conduit.server.telemetry.WriteResult;
+import dev.conduit.server.thingmodel.DataType;
+import dev.conduit.server.thingmodel.ProductProfile;
+import dev.conduit.server.thingmodel.PropertySpec;
+import dev.conduit.server.thingmodel.ThingModelCache;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.RedisSystemException;
 import org.springframework.jdbc.BadSqlGrammarException;
@@ -31,8 +40,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -45,7 +56,10 @@ class PipelineProcessorTest {
 
     MessageBus bus = mock(MessageBus.class);
     DeviceIdentityLookup identities = mock(DeviceIdentityLookup.class);
-    PropertyDecoder decoder = mock(PropertyDecoder.class);
+    ThingModelCache thingModels = mock(ThingModelCache.class);
+    DecoderRegistry decoders = mock(DecoderRegistry.class);
+    PayloadDecoder decoder = mock(PayloadDecoder.class);
+    SimpleMeterRegistry meters = new SimpleMeterRegistry();
     PresenceHandler presenceHandler = mock(PresenceHandler.class);
     TelemetryWriter writer = mock(TelemetryWriter.class);
     LatestValueStore latest = mock(LatestValueStore.class);
@@ -55,10 +69,33 @@ class PipelineProcessorTest {
     void setUp() {
         PipelineProperties props = new PipelineProperties(true, GROUP, "c", 100,
                 Duration.ofSeconds(1), Duration.ofSeconds(60), Duration.ofSeconds(10), 5);
-        processor = new PipelineProcessor(bus, props, identities, decoder, presenceHandler, writer, latest,
-                new SimpleMeterRegistry(), Duration.ofMillis(1), Duration.ofMillis(5));
-        when(decoder.decode(any(), anyLong())).thenReturn(new DecodedProperty(1L, Map.of("Ua", 1.0)));
+        processor = new PipelineProcessor(bus, props, identities, thingModels, decoders, presenceHandler, writer,
+                latest, meters, Duration.ofMillis(1), Duration.ofMillis(5));
+        when(thingModels.find("pk")).thenReturn(Optional.of(new ProductProfile("standard-json", Map.of())));
+        when(decoders.find("standard-json")).thenReturn(Optional.of(decoder));
+        when(decoder.decode(any(), any())).thenReturn(new DecodedPayload(1L, Map.of("Ua", 1.0)));
         when(writer.write(anyList())).thenReturn(WriteResult.ok());
+    }
+
+    private void useModel(PropertySpec... specs) {
+        Map<String, PropertySpec> model = new java.util.LinkedHashMap<>();
+        for (PropertySpec s : specs) {
+            model.put(s.identifier(), s);
+        }
+        when(thingModels.find("pk")).thenReturn(Optional.of(new ProductProfile("standard-json", model)));
+    }
+
+    private static PropertySpec doubleSpec(String id) {
+        return new PropertySpec(id, id, DataType.DOUBLE, null, null, null, null, Map.of());
+    }
+
+    private void decodes(Map<String, Object> values) {
+        when(decoder.decode(any(), any())).thenReturn(new DecodedPayload(1L, values));
+    }
+
+    private double counter(String name, String reason) {
+        var c = meters.find(name).tag("reason", reason).counter();
+        return c == null ? 0 : c.count();
     }
 
     private DeviceIdentity identity(String dk) {
@@ -171,5 +208,88 @@ class PipelineProcessorTest {
         verify(writer, times(1)).write(anyList());
         verify(bus, never()).ack(anyString(), anyList());
         verify(bus, never()).deadLetter(anyString(), any(), anyString());
+    }
+
+    @Test
+    void unknownCodecDeadLettersWholeMessage() {
+        when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
+        when(thingModels.find("pk")).thenReturn(Optional.of(new ProductProfile("gone", Map.of())));
+        Delivery d = delivery("1-0", "d1");
+
+        processor.process(List.of(d));
+
+        verify(bus).deadLetter(GROUP, d, "UNKNOWN_CODEC");
+        verify(writer, never()).write(anyList());
+    }
+
+    @Test
+    void missingProductProfileIsUnknownDevice() {
+        when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
+        when(thingModels.find("pk")).thenReturn(Optional.empty());
+        Delivery d = delivery("1-0", "d1");
+
+        processor.process(List.of(d));
+
+        verify(bus).deadLetter(GROUP, d, "UNKNOWN_DEVICE");
+    }
+
+    @Test
+    void withoutModelNumbersAreWrittenAsDouble() {
+        when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
+        decodes(Map.of("Ua", 220L));
+
+        processor.process(List.of(delivery("1-0", "d1")));
+
+        verify(writer).write(argThat(points -> points.getFirst().fields().equals(Map.of("Ua", 220.0))));
+        verify(bus).ack(GROUP, List.of("1-0"));
+    }
+
+    @Test
+    void partiallyRejectedMessageWritesValidFieldsRecordsRejectionThenAcks() {
+        when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
+        useModel(doubleSpec("Ua"));
+        decodes(Map.of("Ua", 1.0, "Zz", 2L));
+        Delivery d = delivery("1-0", "d1");
+
+        processor.process(List.of(d));
+
+        verify(writer).write(argThat(points -> points.getFirst().fields().equals(Map.of("Ua", 1.0))));
+        InOrder order = inOrder(latest, bus);
+        order.verify(latest).update(eq("d1"), anyLong(), eq(Map.of("Ua", 1.0)));
+        order.verify(bus).recordDead(eq(d), eq("FIELD_REJECTED"),
+                argThat(m -> m.get("rejected").contains("\"field\":\"Zz\"") && m.get("rejected").contains("UNDEFINED")));
+        order.verify(bus).ack(GROUP, List.of("1-0"));
+        verify(bus, never()).deadLetter(anyString(), any(), anyString());
+        assertThat(counter("conduit.pipeline.rejected_fields", "UNDEFINED")).isEqualTo(1.0);
+        assertThat(counter("conduit.pipeline.dead", "FIELD_REJECTED")).isZero();
+    }
+
+    @Test
+    void fullyRejectedMessageIsDeadLetteredWithDetailsAndNotWritten() {
+        when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
+        useModel(doubleSpec("Ua"));
+        decodes(Map.of("Ua", "abc"));
+        Delivery d = delivery("1-0", "d1");
+
+        processor.process(List.of(d));
+
+        verify(bus).recordDead(eq(d), eq("FIELD_REJECTED"), argThat(m -> m.get("rejected").contains("TYPE_MISMATCH")));
+        verify(bus).ack(GROUP, List.of("1-0"));
+        verify(writer, never()).write(anyList());
+        assertThat(counter("conduit.pipeline.rejected_fields", "TYPE_MISMATCH")).isEqualTo(1.0);
+        assertThat(counter("conduit.pipeline.dead", "FIELD_REJECTED")).isEqualTo(1.0);
+    }
+
+    @Test
+    void thingModelLookupFailureIsRetriedInPlace() {
+        when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
+        when(thingModels.find("pk"))
+                .thenThrow(new DataAccessResourceFailureException("db down"))
+                .thenReturn(Optional.of(new ProductProfile("standard-json", Map.of())));
+
+        processor.process(List.of(delivery("1-0", "d1")));
+
+        verify(thingModels, times(2)).find("pk");
+        verify(bus).ack(GROUP, List.of("1-0"));
     }
 }

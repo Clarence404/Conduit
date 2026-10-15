@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.stream.MapRecord;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -23,7 +25,11 @@ import java.util.Optional;
 
 import static dev.conduit.server.support.InfluxTestSupport.awaitCount;
 import static dev.conduit.server.support.InfluxTestSupport.count;
+import static dev.conduit.server.support.InfluxTestSupport.fieldType;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class PipelineIT extends IntegrationTestBase {
 
@@ -73,6 +79,13 @@ class PipelineIT extends IntegrationTestBase {
                 .filter(r -> originalId.equals(r.getValue().get("originalId")))
                 .map(r -> (String) r.getValue().get("reason"))
                 .findFirst();
+    }
+
+    private Map<Object, Object> deadRecord(String originalId) {
+        return redis.opsForStream().range("test:dead", Range.unbounded()).stream()
+                .filter(r -> originalId.equals(r.getValue().get("originalId")))
+                .map(MapRecord::getValue)
+                .findFirst().orElseThrow();
     }
 
     @Test
@@ -223,5 +236,100 @@ class PipelineIT extends IntegrationTestBase {
         awaitCount(influx, device.deviceKey(), "Ua", 1);
         assertThat(latest.get(device.deviceKey())).containsKey("Ia");
         assertThat(runner.claimOnce()).isZero();
+    }
+
+    @Test
+    void flatJsonProductIsDecodedWithItsCodec() {
+        setCodec(device.productKey(), "flat-json");
+        publish(device.productKey(), device.deviceKey(), MessageType.PROPERTY,
+                "{\"id\":\"m1\",\"ts\":%d,\"Ua\":221.5}".formatted(now));
+
+        assertThat(runner.pollOnce()).isEqualTo(1);
+
+        awaitCount(influx, device.deviceKey(), "Ua", 1);
+        assertThat(latest.get(device.deviceKey())).containsEntry("Ua", new LatestValue(221.5, now));
+        assertThat(runner.claimOnce()).isZero();
+    }
+
+    @Test
+    void partiallyRejectedMessageStoresValidFieldsAndRecordsTheRest() {
+        defineProperty(device.productKey(), "Ua", "DOUBLE", 0.0, 300.0);
+        defineProperty(device.productKey(), "Ia", "DOUBLE", null, null);
+        String id = publish(device.productKey(), device.deviceKey(), MessageType.PROPERTY,
+                "{\"ts\":%d,\"params\":{\"Ua\":999,\"Ia\":5.2,\"Zz\":1}}".formatted(now));
+
+        runner.pollOnce();
+
+        awaitCount(influx, device.deviceKey(), "Ia", 1);
+        assertThat(count(influx, device.deviceKey(), "Ua")).isZero();
+        Map<Object, Object> dead = deadRecord(id);
+        assertThat(dead).containsEntry("reason", "FIELD_REJECTED");
+        assertThat((String) dead.get("rejected")).contains(
+                "{\"field\":\"Ua\",\"value\":\"999\",\"reason\":\"OUT_OF_RANGE\"}",
+                "{\"field\":\"Zz\",\"value\":\"1\",\"reason\":\"UNDEFINED\"}");
+        assertThat(latest.get(device.deviceKey())).containsOnlyKeys("Ia");
+        assertThat(runner.claimOnce()).as("original message is acked").isZero();
+    }
+
+    @Test
+    void fullyRejectedMessageIsDeadLettered() {
+        defineProperty(device.productKey(), "Ua", "DOUBLE", null, null);
+        String id = publish(device.productKey(), device.deviceKey(), MessageType.PROPERTY,
+                "{\"ts\":%d,\"params\":{\"Zz\":1}}".formatted(now));
+
+        runner.pollOnce();
+
+        assertThat(deadReason(id)).contains("FIELD_REJECTED");
+        assertThat(deadRecord(id)).containsKey("rejected");
+        assertThat(latest.get(device.deviceKey())).isEmpty();
+        assertThat(runner.claimOnce()).isZero();
+    }
+
+    @Test
+    void intPropertyIsStoredAsInfluxInteger() {
+        String field = unique("cnt");
+        defineProperty(device.productKey(), field, "INT", null, null);
+        publish(device.productKey(), device.deviceKey(), MessageType.PROPERTY,
+                "{\"ts\":%d,\"params\":{\"%s\":42.0}}".formatted(now, field));
+
+        runner.pollOnce();
+
+        awaitCount(influx, device.deviceKey(), field, 1);
+        assertThat(fieldType(influx, field)).isEqualTo("Int64");
+        assertThat(((Number) latest.get(device.deviceKey()).get(field).value()).longValue()).isEqualTo(42L);
+    }
+
+    @Test
+    void unknownCodecDeadLettersWholeMessage() {
+        setCodec(device.productKey(), "no-such-codec");
+        String id = publish(device.productKey(), device.deviceKey(), MessageType.PROPERTY,
+                "{\"params\":{\"Ua\":1}}");
+
+        runner.pollOnce();
+
+        assertThat(deadReason(id)).contains("UNKNOWN_CODEC");
+    }
+
+    @Test
+    void thingModelChangesThroughTheApiTakeEffectImmediately() throws Exception {
+        String auth = bearer(loginAsAdmin());
+        mvc.perform(post("/api/v1/products/{pk}/properties", device.productKey())
+                        .header(HttpHeaders.AUTHORIZATION, auth).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"identifier\":\"Ua\",\"name\":\"Ua\",\"dataType\":\"DOUBLE\"}"))
+                .andExpect(status().isCreated());
+        publish(device.productKey(), device.deviceKey(), MessageType.PROPERTY,
+                "{\"ts\":%d,\"params\":{\"Ua\":250}}".formatted(now));
+        runner.pollOnce();
+        awaitCount(influx, device.deviceKey(), "Ua", 1);
+
+        mvc.perform(put("/api/v1/products/{pk}/properties/Ua", device.productKey())
+                        .header(HttpHeaders.AUTHORIZATION, auth).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Ua\",\"dataType\":\"DOUBLE\",\"maxValue\":100}"))
+                .andExpect(status().isOk());
+        String id = publish(device.productKey(), device.deviceKey(), MessageType.PROPERTY,
+                "{\"ts\":%d,\"params\":{\"Ua\":250}}".formatted(now + 1000));
+        runner.pollOnce();
+
+        assertThat(deadReason(id)).as("cache was evicted, new range applies").contains("FIELD_REJECTED");
     }
 }
