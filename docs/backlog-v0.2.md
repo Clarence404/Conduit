@@ -122,3 +122,4 @@
 - 设备列表 `online` / `reported` 筛选目前读出全部匹配设备的 Redis 状态再内存分页（O(设备数)）；设备到 1 万台规模时改为维护在线集合（Redis Set / ZSet）后直接分页，与首页统计的增量计数一并做。
 - 语义差异：`reported` 依据设备时间戳（最新值 `__last`），`online`（数据驱动部分）依据 transport 的 receivedAt；设备时钟偏差大时两者可能不一致，界面上需留意。
 - 数据驱动在线只在设备有上报时生效；仍在连接但长期不上报的设备在漏掉连接事件时依旧显示离线。
+- EMQX 重启后客户端立即重连时，可能在 HTTP 鉴权资源就绪前完成连接，导致 transport 未获得超级用户、设备发布被授权拒绝（日志 `not_authorized` / `authorization_permission_denied`）；临时办法：EMQX 健康后通过 API 踢掉全部客户端让其重新鉴权。待查明 EMQX 5.8 在鉴权资源未就绪时的行为，并考虑 transport/模拟器在授权失败（SUBACK/PUBACK 错误码）时主动断开重连。
