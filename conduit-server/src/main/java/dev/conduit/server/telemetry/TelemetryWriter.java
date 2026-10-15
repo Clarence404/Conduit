@@ -1,5 +1,7 @@
 package dev.conduit.server.telemetry;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -16,6 +18,7 @@ import java.util.Map;
 public class TelemetryWriter {
 
     static final String MEASUREMENT = "property";
+    private static final Logger log = LoggerFactory.getLogger(TelemetryWriter.class);
 
     private final InfluxClient client;
     private final InfluxProperties props;
@@ -64,6 +67,10 @@ public class TelemetryWriter {
      * 发送并翻译异常：400（非逐行拒绝）转 IllegalStateException，其余 HTTP 错误和 IO 错误统一转 TelemetryUnavailableException。
      */
     private List<InfluxClient.LineError> send(List<String> lines) {
+        if (log.isTraceEnabled()) {
+            // 行协议含测点值，按每行 256 字符截断
+            lines.forEach(l -> log.trace("Influx line: {}", l.length() <= 256 ? l : l.substring(0, 256) + "...(truncated)"));
+        }
         try {
             return client.writeLines(props.database(), lines);
         } catch (InfluxHttpException e) {

@@ -3,6 +3,8 @@ package dev.conduit.simulator;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.conduit.simulator.ConduitApiClient.DeviceSummary;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -23,6 +25,8 @@ public final class DemoProvisioner {
     /** 打包自 docs/examples/demo-meter.thing-model.json。 */
     public static final String DEMO_THING_MODEL = "demo-meter.thing-model.json";
 
+    private static final Logger log = LoggerFactory.getLogger(DemoProvisioner.class);
+
     private DemoProvisioner() {
     }
 
@@ -40,6 +44,7 @@ public final class DemoProvisioner {
         String productKey = api.findOrCreateProduct(productName, codec);
         List<DeviceSummary> existing = new ArrayList<>(api.listDevices(productKey));
         existing.sort(Comparator.comparing(DeviceSummary::deviceKey));
+        log.debug("Provisioning {} devices under product {}: {} already exist", count, productKey, existing.size());
 
         List<DeviceCredentials> result = new ArrayList<>(count);
         for (DeviceSummary device : existing.subList(0, Math.min(count, existing.size()))) {
@@ -72,10 +77,13 @@ public final class DemoProvisioner {
         Set<String> existing = api.propertyIdentifiers(productKey);
         for (JsonNode property : model.get("properties")) {
             if (!existing.contains(property.get("identifier").asText())) {
+                log.debug("Product {} lacks demo property {}, importing the demo thing model (merge)", productKey,
+                        property.get("identifier").asText());
                 api.importThingModel(productKey, model, "merge");
                 return true;
             }
         }
+        log.debug("Product {} already has every demo property, thing model left untouched", productKey);
         return false;
     }
 

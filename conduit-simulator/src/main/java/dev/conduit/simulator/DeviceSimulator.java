@@ -137,6 +137,12 @@ public class DeviceSimulator {
                             reading.put(OperatingState.IDENTIFIER, OperatingState.at(d.deviceKey(), ts));
                         }
                         byte[] payload = format.encode(d.deviceKey() + "-" + seq, ts, reading);
+                        log.debug("Publishing {} seq={} ts={} bytes={}", d.deviceKey(), seq, ts, payload.length);
+                        if (log.isTraceEnabled()) {
+                            String body = new String(payload, StandardCharsets.UTF_8);
+                            log.trace("Payload of {}: {}", d.deviceKey(),
+                                    body.length() <= 256 ? body : body.substring(0, 256) + "...(truncated)");
+                        }
                         publish(scheduler, client, d.deviceKey(), topic, payload, 1, onMessageDone, failedMessages);
                     } catch (RuntimeException e) {
                         log.error("Report task failed for {}", d.deviceKey(), e);
@@ -188,6 +194,7 @@ public class DeviceSimulator {
                 throw e;
             }
             connected.add(client);
+            log.debug("Device {} connected to {}:{}", d.deviceKey(), host, port);
             return client;
         });
     }

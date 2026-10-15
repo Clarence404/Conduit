@@ -56,6 +56,8 @@ public class ConduitApiClient {
                     if (!existing.isEmpty() && !existing.equals(codec)) {
                         log.warn("Product '{}' uses codec {} but the simulator sends {}", name, existing, codec);
                     }
+                    log.debug("Product '{}' found: productKey={} codec={}", name, item.get("productKey").asText(),
+                            existing);
                     return item.get("productKey").asText();
                 }
             }
@@ -63,8 +65,10 @@ public class ConduitApiClient {
                 break;
             }
         }
-        return send("POST", "/api/v1/products", Map.of("name", name, "codec", codec), 201)
+        String productKey = send("POST", "/api/v1/products", Map.of("name", name, "codec", codec), 201)
                 .get("productKey").asText();
+        log.debug("Product '{}' created: productKey={} codec={}", name, productKey, codec);
+        return productKey;
     }
 
     /**
@@ -82,6 +86,8 @@ public class ConduitApiClient {
     /** 导入物模型文档；mode 为服务端支持的导入模式（如 merge）。 */
     public void importThingModel(String productKey, JsonNode document, String mode) {
         send("PUT", "/api/v1/products/" + encode(productKey) + "/thing-model?mode=" + encode(mode), document, 200);
+        log.debug("Thing model imported into {} (mode={}, properties={})", productKey, mode,
+                document.path("properties").size());
     }
 
     /** 设备列表中模拟器关心的字段。 */
@@ -109,6 +115,7 @@ public class ConduitApiClient {
     /** 修改设备名称；接口要求同时提交状态，传入当前状态以保持不变。 */
     public void renameDevice(String deviceKey, String name, String status) {
         send("PUT", "/api/v1/devices/" + encode(deviceKey), Map.of("name", name, "status", status), 200);
+        log.debug("Device {} renamed to '{}'", deviceKey, name);
     }
 
     public void deleteDevice(String deviceKey) {
@@ -122,13 +129,15 @@ public class ConduitApiClient {
     /** 创建设备；明文密钥只在此刻返回一次，调用方需自行保存。 */
     public DeviceCredentials createDevice(String productKey, String name) {
         JsonNode body = send("POST", "/api/v1/devices", Map.of("productKey", productKey, "name", name), 201);
-        return new DeviceCredentials(productKey, body.get("device").get("deviceKey").asText(),
-                body.get("deviceSecret").asText());
+        String deviceKey = body.get("device").get("deviceKey").asText();
+        log.debug("Device created: deviceKey={} name='{}' (productKey={})", deviceKey, name, productKey);
+        return new DeviceCredentials(productKey, deviceKey, body.get("deviceSecret").asText());
     }
 
     /** 重置设备密钥并返回新的明文密钥（旧密钥立即失效）。 */
     public DeviceCredentials resetSecret(String productKey, String deviceKey) {
         JsonNode body = send("POST", "/api/v1/devices/" + encode(deviceKey) + "/reset-secret", null, 200);
+        log.debug("Device secret reset: deviceKey={}", deviceKey);
         return new DeviceCredentials(productKey, deviceKey, body.get("deviceSecret").asText());
     }
 
@@ -149,6 +158,7 @@ public class ConduitApiClient {
                     : HttpRequest.BodyPublishers.ofByteArray(mapper.writeValueAsBytes(body)));
 
             HttpResponse<byte[]> response = http.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
+            log.debug("REST {} {} -> {}", method, path, response.statusCode());
             if (response.statusCode() != expectedStatus) {
                 throw new IllegalStateException(method + " " + path + " returned " + response.statusCode()
                         + ": " + new String(response.body(), StandardCharsets.UTF_8));

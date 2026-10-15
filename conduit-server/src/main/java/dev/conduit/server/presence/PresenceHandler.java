@@ -6,6 +6,8 @@ import dev.conduit.common.message.MessageType;
 import dev.conduit.common.message.RawMessage;
 import dev.conduit.server.pipeline.DeadReason;
 import dev.conduit.server.pipeline.DecodeException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -13,6 +15,8 @@ import java.io.IOException;
 /** 处理 EMQX $SYS 上下线事件：以事件自带时间为准更新在线状态。 */
 @Component
 public class PresenceHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(PresenceHandler.class);
 
     private final ObjectMapper objectMapper;
     private final PresenceStore store;
@@ -42,6 +46,9 @@ public class PresenceHandler {
         JsonNode time = root.get(online ? "connected_at" : "disconnected_at");
         long eventTime = time != null && time.canConvertToLong() ? time.asLong() : message.receivedAt();
         String clientIp = root.path("ipaddress").asText("");
+        // 是否真正写入由 PresenceStore 记录（DEBUG）；这里只在 TRACE 留解析出的事件细节
+        log.trace("Presence event parsed: deviceKey={} online={} eventTime={} clientIp={}", message.deviceKey(),
+                online, eventTime, clientIp);
         store.apply(message.deviceKey(), online, eventTime, clientIp);
     }
 }

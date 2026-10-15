@@ -1,5 +1,7 @@
 package dev.conduit.server.presence;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.connection.ReturnType;
 import org.springframework.data.redis.core.RedisCallback;
@@ -29,6 +31,8 @@ import java.util.Optional;
  */
 @Component
 public class PresenceStore {
+
+    private static final Logger log = LoggerFactory.getLogger(PresenceStore.class);
 
     /**
      * 数据让离线设备重新上线所需超过的宽限期（毫秒）。断连事件前后设备仍可能有在途数据，且 transport 与 EMQX
@@ -83,19 +87,46 @@ public class PresenceStore {
         }
         byte[] script = scriptSource();
         byte[] grace = Long.toString(DATA_ONLINE_GRACE_MILLIS).getBytes(StandardCharsets.UTF_8);
-        redis.executePipelined((RedisCallback<Object>) connection -> {
+        List<Object> results = redis.executePipelined((RedisCallback<Object>) connection -> {
             lastSeenByDevice.forEach((dk, ts) -> connection.scriptingCommands().eval(script, ReturnType.INTEGER, 1,
                     key(dk).getBytes(StandardCharsets.UTF_8), "true".getBytes(StandardCharsets.UTF_8),
                     Long.toString(ts).getBytes(StandardCharsets.UTF_8), new byte[0],
                     "data".getBytes(StandardCharsets.UTF_8), grace));
             return null;
         });
+        logDataBatch(lastSeenByDevice, results);
     }
 
+    /**
+     * 记录数据批量上线的结果：DEBUG 一行（设备数与实际改变在线状态的数量）；TRACE 逐设备列出 applied / ignored。
+     * 脚本返回 1 表示改变了在线状态，与执行顺序（即 map 迭代顺序）一一对应。
+     */
+    private static void logDataBatch(Map<String, Long> lastSeenByDevice, List<Object> results) {
+        if (!log.isDebugEnabled()) {
+            return;
+        }
+        long applied = results.stream().filter(r -> r instanceof Long n && n == 1L).count();
+        log.debug("Presence data batch: devices={} applied={} ignored={} source=data", lastSeenByDevice.size(),
+                applied, lastSeenByDevice.size() - applied);
+        if (log.isTraceEnabled()) {
+            int i = 0;
+            for (Map.Entry<String, Long> e : lastSeenByDevice.entrySet()) {
+                boolean changed = i < results.size() && results.get(i) instanceof Long n && n == 1L;
+                log.trace("Presence data: deviceKey={} ts={} {}", e.getKey(), e.getValue(),
+                        changed ? "applied" : "ignored");
+                i++;
+            }
+        }
+    }
+
+    /** 执行 Lua 脚本并在 DEBUG 记录这次事件/数据是被应用还是被忽略（过期或无变化）。 */
     private boolean run(String deviceKey, boolean online, long time, String clientIp, String source) {
         Long applied = redis.execute(APPLY, List.of(key(deviceKey)), Boolean.toString(online), Long.toString(time),
                 clientIp, source, Long.toString(DATA_ONLINE_GRACE_MILLIS));
-        return applied != null && applied == 1L;
+        boolean changed = applied != null && applied == 1L;
+        log.debug("Presence {}: deviceKey={} online={} time={} source={}", changed ? "applied" : "ignored",
+                deviceKey, online, time, source);
+        return changed;
     }
 
     private static byte[] scriptSource() {

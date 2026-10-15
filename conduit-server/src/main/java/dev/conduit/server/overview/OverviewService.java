@@ -65,6 +65,7 @@ public class OverviewService {
      * @return 总览；Redis 不可用时 onlineCount、products[].onlineCount、deadLastHour 为 null，recentDevices 为空
      */
     public OverviewView overview() {
+        long start = System.nanoTime();
         List<Product> productList = products.selectList(new LambdaQueryWrapper<Product>().orderByDesc(Product::getId));
         int propertyCount = Math.toIntExact(properties.selectCount(null));
         DeviceStats.Snapshot snapshot = stats.snapshot(null);
@@ -72,9 +73,15 @@ public class OverviewService {
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
         int deviceCount = snapshot.deviceCount();
         int enabledCount = snapshot.enabledCount();
-        return new OverviewView(productList.size(), propertyCount, deviceCount, enabledCount,
-                deviceCount - enabledCount, snapshot.onlineCount(), deadLastHour(productList),
-                recentDevices(snapshot.devices(), productsById), productStats(productList, snapshot));
+        DeadSummary dead = deadLastHour(productList);
+        List<RecentDevice> recent = recentDevices(snapshot.devices(), productsById);
+        OverviewView view = new OverviewView(productList.size(), propertyCount, deviceCount, enabledCount,
+                deviceCount - enabledCount, snapshot.onlineCount(), dead, recent,
+                productStats(productList, snapshot));
+        log.debug("Overview: products={} properties={} devices={} online={} deadLastHour={} recent={} elapsedMs={}",
+                productList.size(), propertyCount, deviceCount, snapshot.onlineCount(),
+                dead == null ? null : dead.total(), recent.size(), (System.nanoTime() - start) / 1_000_000);
+        return view;
     }
 
     /**

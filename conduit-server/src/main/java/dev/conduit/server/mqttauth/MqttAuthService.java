@@ -57,7 +57,11 @@ public class MqttAuthService {
             boolean ok = props.transportPassword() != null && !props.transportPassword().isBlank()
                     && constantEquals(password, props.transportPassword())
                     && clientId.startsWith(INTERNAL_CLIENT_PREFIX);
-            return ok ? new Decision(true, true) : deny("transport credentials rejected", clientId);
+            if (ok) {
+                log.debug("MQTT auth allowed for {} as transport superuser", clientId);
+                return new Decision(true, true);
+            }
+            return deny("transport credentials rejected", clientId);
         }
         if (!clientId.equals(username)) {
             return deny("clientId does not match username", clientId);
@@ -73,6 +77,7 @@ public class MqttAuthService {
         if (!hasher.matches(password, d.secretSalt(), d.secretHash())) {
             return deny("wrong secret", clientId);
         }
+        log.debug("MQTT auth allowed for {} as device (productKey={})", clientId, d.productKey());
         return new Decision(true, false);
     }
 

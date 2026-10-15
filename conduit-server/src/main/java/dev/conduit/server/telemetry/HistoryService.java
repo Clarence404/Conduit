@@ -70,6 +70,7 @@ public class HistoryService {
      */
     public HistoryView query(long tenantId, DeviceView device, Map<String, PropertySpec> model,
                              HistoryRequest request) {
+        long start = System.nanoTime();
         Map<String, ColumnType> columns = influx(() -> schema.lookup(request.properties()));
         List<Resolved> resolved = request.properties().stream()
                 .map(id -> resolve(id, model.get(id), columns.get(id)))
@@ -89,6 +90,10 @@ public class HistoryService {
             }
         }
         boolean aggregated = bucketMs != null;
+        log.debug("History query: tenant={} deviceKey={} properties={} present={} mode={} bucketMs={} rangeMs={} elapsedMs={}",
+                tenantId, device.deviceKey(), request.properties().size(), present.size(),
+                present.isEmpty() ? "EMPTY" : aggregated ? "AGGREGATE" : "RAW", bucketMs,
+                request.to() - request.from(), (System.nanoTime() - start) / 1_000_000);
         Map<String, List<List<Object>>> byId = points;
         List<SeriesView> series = resolved.stream()
                 .map(r -> series(r, aggregated ? (r.state() ? Mode.LAST : Mode.AGG) : Mode.RAW,
@@ -201,8 +206,15 @@ public class HistoryService {
         return spec.enumLabels().entrySet().stream().map(e -> new EnumItem(e.getKey(), e.getValue())).toList();
     }
 
+    /** 执行一条查询；DEBUG 记录 SQL 文本、参数（租户/设备 Key、时间范围，无密钥）、返回行数与耗时。 */
     private List<Map<String, Object>> run(SqlQuery query) {
-        return influx(() -> client.querySql(props.database(), query.sql(), query.params()));
+        long start = System.nanoTime();
+        List<Map<String, Object>> rows = influx(() -> client.querySql(props.database(), query.sql(), query.params()));
+        if (log.isDebugEnabled()) {
+            log.debug("History SQL ({} rows, {} ms): {} params={}", rows.size(), (System.nanoTime() - start) / 1_000_000,
+                    query.sql(), query.params());
+        }
+        return rows;
     }
 
     /**

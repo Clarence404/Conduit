@@ -107,6 +107,7 @@ public class PipelineProcessor {
      * @throws ProcessingAbortedException 线程在退避重试中被中断；已读取但未处理的投递保持未 ACK，之后重新认领
      */
     public void process(List<Delivery> batch) {
+        log.debug("Processing batch of {} deliveries", batch.size());
         List<String> presenceAcks = new ArrayList<>();
         List<PendingProperty> properties = new ArrayList<>();
 
@@ -126,6 +127,8 @@ public class PipelineProcessor {
                 switch (message.type()) {
                     case PROPERTY -> properties.add(retry("lookup", () -> toPending(delivery, message)));
                     case PRESENCE_CONNECTED, PRESENCE_DISCONNECTED -> {
+                        log.debug("Presence message {}: deviceKey={} type={}", delivery.id(), message.deviceKey(),
+                                message.type());
                         retry("presence", () -> {
                             presenceHandler.handle(message);
                             return null;
@@ -177,7 +180,10 @@ public class PipelineProcessor {
         DecodedPayload decoded = decoder.decode(
                 new DecodeContext(identity.productKey(), identity.deviceKey(), message.receivedAt()),
                 message.payload());
+        log.debug("Decoded {}: productKey={} deviceKey={} codec={} fields={} ts={}", delivery.id(),
+                identity.productKey(), identity.deviceKey(), profile.codec(), decoded.values().size(), decoded.ts());
         FieldValidation validation = FieldValidator.validate(profile.properties(), decoded.values());
+        logValidation(delivery, identity.deviceKey(), validation);
         validation.rejected().forEach(r ->
                 meters.counter("conduit.pipeline.rejected_fields", "reason", r.reason().name()).increment());
         if (validation.accepted().isEmpty()) {
@@ -190,13 +196,37 @@ public class PipelineProcessor {
     }
 
     /**
+     * 记录校验结果：DEBUG 一行（通过/剔除数量，有剔除时附字段名与原因，不含值）；TRACE 逐测点列出通过的值（截断 256 字符）。
+     */
+    private void logValidation(Delivery delivery, String deviceKey, FieldValidation validation) {
+        if (log.isDebugEnabled()) {
+            String rejectedText = validation.rejected().isEmpty() ? "" : " rejected=" + validation.rejected().stream()
+                    .map(r -> r.field() + ":" + r.reason()).collect(Collectors.joining(",", "[", "]"));
+            log.debug("Validated {}: deviceKey={} accepted={} rejected={}{}", delivery.id(), deviceKey,
+                    validation.accepted().size(), validation.rejected().size(), rejectedText);
+        }
+        if (log.isTraceEnabled()) {
+            validation.accepted().forEach((field, value) -> log.trace("Accepted field {}.{} = {}", deviceKey, field,
+                    truncate(String.valueOf(value))));
+        }
+    }
+
+    /** 把值截断到 256 个字符供 TRACE 日志使用。 */
+    private static String truncate(String value) {
+        return value.length() <= 256 ? value : value.substring(0, 256) + "...(truncated)";
+    }
+
+    /**
      * 批量写 InfluxDB，再逐条更新最新值、补写 FIELD_REJECTED 记录并 ACK。
      * InfluxDB 拒绝的数据点（字段类型冲突）对应的投递进 FIELD_TYPE_CONFLICT；
      * 单条收尾阶段的意外错误只让该条进 PROCESSING_ERROR。其余投递在写库成功后才一次性 ACK（至少一次投递）。
      */
     private void writeProperties(List<PendingProperty> items) {
         List<TelemetryPoint> points = items.stream().map(PendingProperty::point).toList();
+        long writeStart = System.nanoTime();
         WriteResult result = retry("influx write", () -> writer.write(points));
+        log.debug("Influx write: lines={} rejected={} elapsedMs={}", points.size(), result.rejected().size(),
+                (System.nanoTime() - writeStart) / 1_000_000);
         Set<Integer> rejected = result.rejected().stream()
                 .map(WriteResult.Rejected::index).collect(Collectors.toSet());
 
@@ -214,6 +244,8 @@ public class PipelineProcessor {
                     latest.update(p.deviceKey(), p.ts(), p.fields());
                     return null;
                 });
+                log.debug("Latest values updated: deviceKey={} fields={} ts={}", p.deviceKey(), p.fields().size(),
+                        p.ts());
                 if (!item.rejected().isEmpty()) {
                     Map<String, String> details = RejectedFields.details(item.rejected());
                     // 先留痕再 ACK：两步之间崩溃只会产生重复死信记录，不会丢失
@@ -264,6 +296,7 @@ public class PipelineProcessor {
             bus.ack(props.group(), ids);
             return null;
         });
+        log.debug("Acked {} deliveries", ids.size());
     }
 
     private static final int MAX_CAUSE_DEPTH = 16;
@@ -303,7 +336,11 @@ public class PipelineProcessor {
         long delay = initialBackoff.toMillis();
         for (int attempt = 1; ; attempt++) {
             try {
-                return action.get();
+                T result = action.get();
+                if (attempt > 1) {
+                    log.debug("{} recovered after {} attempts", step, attempt);
+                }
+                return result;
             } catch (RuntimeException e) {
                 if (!isRecoverable(e)) {
                     throw e;
@@ -320,7 +357,14 @@ public class PipelineProcessor {
         }
     }
 
+    /**
+     * 无详情的死信。DEBUG 记一行；PROCESSING_ERROR 的调用方已记 ERROR（含堆栈），这里不再重复。
+     * 带详情的重载由调用方（DecodeException 分支）已记 DEBUG。
+     */
     private void dead(Delivery delivery, DeadReason reason) {
+        if (reason != DeadReason.PROCESSING_ERROR) {
+            log.debug("Dead-lettering {}: {}", delivery.id(), reason);
+        }
         dead(delivery, reason, Map.of());
     }
 

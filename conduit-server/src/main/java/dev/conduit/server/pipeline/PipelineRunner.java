@@ -3,6 +3,8 @@ package dev.conduit.server.pipeline;
 import dev.conduit.common.bus.Delivery;
 import dev.conduit.common.bus.MessageBus;
 import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -14,6 +16,8 @@ import java.util.function.Supplier;
  */
 @Component
 public class PipelineRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(PipelineRunner.class);
 
     private final MessageBus bus;
     private final PipelineProperties props;
@@ -40,6 +44,7 @@ public class PipelineRunner {
         List<Delivery> batch = guarded(
                 () -> bus.read(props.group(), props.consumer(), props.batchSize(), props.block()));
         if (!batch.isEmpty()) {
+            log.debug("Read {} deliveries as consumer {} (group {})", batch.size(), props.consumer(), props.group());
             processor.process(batch);
         }
         return batch.size();
@@ -54,6 +59,8 @@ public class PipelineRunner {
         List<Delivery> batch = guarded(
                 () -> bus.claimStale(props.group(), props.consumer(), props.claimMinIdle(), props.batchSize()));
         if (!batch.isEmpty()) {
+            log.debug("Claimed {} stale deliveries (idle >= {} ms) as consumer {}", batch.size(),
+                    props.claimMinIdle().toMillis(), props.consumer());
             processor.process(batch);
         }
         return batch.size();
@@ -65,6 +72,7 @@ public class PipelineRunner {
             return source.get();
         } catch (RuntimeException e) {
             if (isNoGroup(e)) {
+                log.debug("Consumer group {} missing (NOGROUP), recreating it", props.group());
                 bus.ensureGroup(props.group());
             }
             throw e;

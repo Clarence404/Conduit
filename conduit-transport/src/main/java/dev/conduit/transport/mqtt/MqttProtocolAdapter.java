@@ -2,6 +2,7 @@ package dev.conduit.transport.mqtt;
 
 import com.hivemq.client.mqtt.MqttClient;
 import com.hivemq.client.mqtt.lifecycle.MqttClientConnectedContext;
+import com.hivemq.client.mqtt.lifecycle.MqttClientDisconnectedContext;
 import com.hivemq.client.mqtt.MqttGlobalPublishFilter;
 import com.hivemq.client.mqtt.datatypes.MqttQos;
 import com.hivemq.client.mqtt.mqtt5.Mqtt5AsyncClient;
@@ -27,6 +28,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
@@ -55,6 +57,8 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
     Supplier<CompletableFuture<?>> subscriber = this::subscribe;
     BooleanSupplier connected = () -> this.client != null && this.client.getState().isConnected();
     private volatile boolean stopping;
+    /** 收到 CONNACK 的累计次数：首次为首连，之后均为断线自动重连。 */
+    private final AtomicInteger connectCount = new AtomicInteger();
 
     private volatile Mqtt5AsyncClient client;
 
@@ -87,7 +91,8 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
                 .serverHost(props.host())
                 .serverPort(props.port())
                 .automaticReconnectWithDefaultConfig()
-                .addConnectedListener(this::onConnected);
+                .addConnectedListener(this::onConnected)
+                .addDisconnectedListener(this::onDisconnected);
         if (props.username() != null && !props.username().isBlank()) {
             byte[] password = props.password() == null
                     ? new byte[0] : props.password().getBytes(StandardCharsets.UTF_8);
@@ -162,7 +167,24 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
      * 但会话里并没有订阅。MQTT 5 重复订阅只是替换原订阅，无害。运行在事件循环上，不可阻塞。
      */
     void onConnected(MqttClientConnectedContext context) {
+        int n = connectCount.incrementAndGet();
+        if (n == 1) {
+            log.info("MQTT connected to {}:{} as {}", props.host(), props.port(), props.clientId());
+        } else {
+            log.info("MQTT reconnected to {}:{} as {} (connection #{})", props.host(), props.port(),
+                    props.clientId(), n);
+        }
         subscribeWithRetry(subscriber, connected, 0);
+    }
+
+    /**
+     * 连接断开（含自动重连过程中单次连接尝试失败）时记录来源与原因，便于判断是主动断开还是网络/broker 问题。
+     * 运行在事件循环上，只打日志。
+     */
+    void onDisconnected(MqttClientDisconnectedContext context) {
+        Throwable cause = context.getCause();
+        log.info("MQTT disconnected from {}:{} (source={}): {}", props.host(), props.port(), context.getSource(),
+                cause == null ? "no cause" : cause.getMessage());
     }
 
     /**
@@ -173,7 +195,7 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
     void subscribeWithRetry(Supplier<CompletableFuture<?>> subscriber, BooleanSupplier connected, int attempt) {
         subscriber.get().whenComplete((ack, error) -> {
             if (error == null) {
-                log.info("MQTT subscriptions established");
+                log.info("MQTT subscriptions established (shared group {})", props.shareGroup());
                 initialSubscription.complete(null);
                 return;
             }
@@ -231,21 +253,39 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
         }
         ParsedTopic t = parsed.get();
         if (isPresence(t.type()) && t.deviceKey().startsWith(props.ownClientPrefix())) {
+            log.debug("Ignoring presence of platform client {}", t.deviceKey());
             acknowledge(publish);
             return;
         }
         RawMessage message = new RawMessage(t.productKey(), t.deviceKey(), t.type(),
                 publish.getPayloadAsBytes(), clock.millis(), Map.of("topic", topic));
+        if (isPresence(t.type())) {
+            log.debug("MQTT presence event: clientId={} {}", t.deviceKey(),
+                    t.type() == MessageType.PRESENCE_CONNECTED ? "connected" : "disconnected");
+        } else {
+            log.debug("MQTT received: topic={} productKey={} deviceKey={} type={} payloadBytes={}", topic,
+                    t.productKey(), t.deviceKey(), t.type(), message.payload().length);
+        }
+        if (log.isTraceEnabled()) {
+            log.trace("MQTT payload of {}: {}", t.deviceKey(), preview(message.payload()));
+        }
         if (publishWithRetry(message)) {
             acknowledge(publish);
         }
+    }
+
+    /** 取 payload 的前 256 个字符用于 TRACE 日志（按 UTF-8 解码，避免大报文刷屏）。 */
+    private static String preview(byte[] payload) {
+        String text = new String(payload, StandardCharsets.UTF_8);
+        return text.length() <= 256 ? text : text.substring(0, 256) + "...(truncated)";
     }
 
     /** 内联重试直到成功；停止时放弃（不 ACK，由 broker 经持久会话重投）。 */
     private boolean publishWithRetry(RawMessage message) {
         for (int attempt = 0; !stopping; attempt++) {
             try {
-                bus.publish(message);
+                String id = bus.publish(message);
+                log.debug("Published to bus: id={} deviceKey={} type={}", id, message.deviceKey(), message.type());
                 return true;
             } catch (RuntimeException e) {
                 Duration delay = backoff(attempt);
