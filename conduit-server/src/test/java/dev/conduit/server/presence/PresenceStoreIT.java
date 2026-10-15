@@ -51,4 +51,35 @@ class PresenceStoreIT extends IntegrationTestBase {
 
         assertThat(store.get(dk)).isEmpty();
     }
+
+    @Test
+    void onlineApplyOlderThanStoredOfflineIsIgnored() {
+        String dk = unique("dk");
+        store.apply(dk, false, 5000, "");
+
+        assertThat(store.apply(dk, true, 4000, "")).isFalse();
+
+        assertThat(store.get(dk)).contains(new Presence(false, 5000, ""));
+    }
+
+    @Test
+    void onlineApplyNewerThanStoredOfflineSetsOnline() {
+        String dk = unique("dk");
+        store.apply(dk, false, 5000, "");
+
+        assertThat(store.apply(dk, true, 6000, "")).isTrue();
+
+        assertThat(store.get(dk).orElseThrow().online()).isTrue();
+        assertThat(store.get(dk).orElseThrow().since()).isEqualTo(6000);
+    }
+
+    @Test
+    void onlineApplyWithoutIpKeepsExistingIp() {
+        String dk = unique("dk");
+        store.apply(dk, true, 1000, "10.0.0.1");
+
+        store.apply(dk, true, 2000, "");
+
+        assertThat(store.get(dk)).contains(new Presence(true, 2000, "10.0.0.1"));
+    }
 }
