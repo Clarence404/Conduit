@@ -7,7 +7,8 @@
 
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { DataLine, Lock, User } from '@element-plus/icons-vue'
+import { Lock, User } from '@element-plus/icons-vue'
+import ConduitLogo from '@/components/ConduitLogo.vue'
 import { useAuthStore } from '@/stores/auth'
 import { problemMessage } from '@/api/errors'
 import { safeRedirect } from '@/utils/redirect'
@@ -42,7 +43,7 @@ async function submit() {
   <div class="login-page">
     <section class="brand">
       <div class="logo">
-        <el-icon :size="26"><DataLine /></el-icon>
+        <ConduitLogo :size="36" tone="dark-bg" />
         <span>Conduit</span>
       </div>
       <div class="pitch">
@@ -100,12 +101,9 @@ async function submit() {
 .logo {
   display: flex;
   align-items: center;
-  gap: var(--cd-space-2);
+  gap: var(--cd-space-3);
   font-size: 20px;
   font-weight: 600;
-}
-.logo .el-icon {
-  color: var(--el-color-primary);
 }
 .pitch h1 {
   margin: 0 0 var(--cd-space-3);

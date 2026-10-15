@@ -75,3 +75,10 @@ describe('index.html pre-paint theme script', () => {
     expect(() => runPrepaint()).not.toThrow()
   })
 })
+
+describe('favicon', () => {
+  it('index.html links the SVG favicon and the file exists', () => {
+    expect(html).toContain('<link rel="icon" type="image/svg+xml" href="/favicon.svg"')
+    expect(readFileSync(resolve(__dirname, '../public/favicon.svg'), 'utf-8')).toContain('<svg')
+  })
+})
