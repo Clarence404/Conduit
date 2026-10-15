@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# 在本机构建 jar 与前端，再在 Docker 宿主机上只打"复制产物"的薄镜像并启动演示环境。
+# 按需整套部署：在本机构建 jar 与前端，再在 Docker 宿主机上只打"复制产物"的薄镜像，并启动完整应用栈
+# （--profile app --profile demo：server、transport、web 与演示模拟器，加上基础设施）。
+# 日常开发不走这里：基础设施用 `docker compose -f deploy/docker-compose.yml up -d` 单独启动，应用在 IDE 中运行。
 # 适用于 Docker 宿主机无法访问外网的情况：镜像内不再执行 mvn / npm ci，宿主机只需已有基础镜像
 #（eclipse-temurin:21.0.6_7-jre、nginx:1.27.4-alpine、emqx/emqx:5.8.6 及 compose 里的其余镜像）。
 #
@@ -7,7 +9,7 @@
 #（application-local.yml、simulator-local.properties 等）不会进入镜像。
 #
 # 用法（在仓库根目录）：
-#   deploy/build-local.sh            # 构建并启动（含模拟器，即 --profile demo）
+#   deploy/build-local.sh            # 构建并启动完整应用栈（--profile app --profile demo）
 #   deploy/build-local.sh --no-up    # 只构建镜像
 # 环境变量：
 #   DOCKER_HOST  远程宿主机时设置，例如 tcp://<docker-host>:2375
@@ -86,6 +88,6 @@ $COMPOSE -f "$COMPOSE_FILE" build -q emqx
 
 if (( UP )); then
   echo "==> 启动"
-  $COMPOSE -f "$COMPOSE_FILE" --profile demo up -d --no-build --remove-orphans
-  $COMPOSE -f "$COMPOSE_FILE" --profile demo ps
+  $COMPOSE -f "$COMPOSE_FILE" --profile app --profile demo up -d --no-build --remove-orphans
+  $COMPOSE -f "$COMPOSE_FILE" --profile app --profile demo ps
 fi

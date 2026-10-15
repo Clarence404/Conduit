@@ -4,7 +4,7 @@ authentication = [
     backend = http
     enable = true
     method = post
-    url = "http://conduit-server:8080/internal/mqtt/auth"
+    url = "__CONDUIT_AUTH_URL__/internal/mqtt/auth"
     body {
       clientid = "${clientid}"
       username = "${username}"

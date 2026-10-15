@@ -2,6 +2,7 @@
   <configuration default="false" name="Conduit (local all)" type="CompoundRunConfigurationType">
     <toRun name="Conduit Server (local)" type="Application" />
     <toRun name="Conduit Transport (local)" type="Application" />
+    <toRun name="Conduit Simulator (local)" type="Application" />
     <toRun name="Conduit UI (local)" type="js.build_tools.npm" />
     <method v="2" />
   </configuration>
