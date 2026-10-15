@@ -86,6 +86,6 @@ $COMPOSE -f "$COMPOSE_FILE" build -q emqx
 
 if (( UP )); then
   echo "==> 启动"
-  $COMPOSE -f "$COMPOSE_FILE" --profile demo up -d --no-build
+  $COMPOSE -f "$COMPOSE_FILE" --profile demo up -d --no-build --remove-orphans
   $COMPOSE -f "$COMPOSE_FILE" --profile demo ps
 fi
