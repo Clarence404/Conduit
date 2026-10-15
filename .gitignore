@@ -24,3 +24,6 @@ Thumbs.db
 application-local.yml
 simulator-local.properties
 .claude/worktrees/
+
+# 服务日志目录（CONDUIT_LOG_DIR 默认值）
+logs/
