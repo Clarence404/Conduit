@@ -16,7 +16,7 @@ import {
 interface ChartParts {
   xAxis: { type: string; min: number; max: number }
   yAxis: { name?: string; min?: number; max?: number; interval?: number; axisLabel: { formatter: (v: number) => string } }
-  series: Array<{ name: string; stack?: string; step?: string; areaStyle?: unknown; data: unknown[][] }>
+  series: Array<{ name: string; stack?: string; stackStrategy?: string; step?: string; areaStyle?: unknown; data: unknown[][] }>
   tooltip: { formatter: (params: unknown) => string }
   toolbox: { feature: { dataZoom: unknown } }
 }
@@ -104,6 +104,13 @@ describe('numeric charts', () => {
     expect(o.series[1].areaStyle).toBeDefined()
     expect(o.series[2].data).toEqual([[900_000, 220]])
     expect(o.xAxis.min).toBe(900_000)
+  })
+
+  it('stacks the band with every sign so a negative minimum stays correct', () => {
+    const o = parts(buildChartOption(series({ mode: 'AGG', points: [[900_000, -1, -5, 3]] }), AGG_CTX))
+
+    expect(o.series[0]).toMatchObject({ stackStrategy: 'all', data: [[900_000, -5]] })
+    expect(o.series[1]).toMatchObject({ stackStrategy: 'all', data: [[900_000, 8]] })
   })
 
   it('formats tooltip values with decimals and unit', () => {

@@ -56,6 +56,7 @@ describe('startPolling', () => {
 
 describe('createVisiblePoller', () => {
   let hidden = false
+  const originalHidden = Object.getOwnPropertyDescriptor(document, 'hidden')
 
   beforeEach(() => {
     vi.useFakeTimers()
@@ -65,6 +66,11 @@ describe('createVisiblePoller', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    if (originalHidden) {
+      Object.defineProperty(document, 'hidden', originalHidden)
+    } else {
+      delete (document as unknown as Record<string, unknown>).hidden
+    }
   })
 
   function setHidden(value: boolean) {

@@ -74,7 +74,10 @@ function tooltipText(s: SeriesView, params: unknown): string {
   return `${formatDateTime(point[0] as number)}<br/>${escapeHtml(pointText(s, point))}`
 }
 
-/** 数值测点的纵轴与序列：AGG 为波动带 + 平均线，RAW 为单条折线 */
+/**
+ * 数值测点的纵轴与序列：AGG 为波动带 + 平均线，RAW 为单条折线。
+ * 波动带两条序列用 stackStrategy 'all' 堆叠：默认的 'samesign' 会忽略负的基线（min 为负时带顶会算错）。
+ */
 function numericParts(s: SeriesView) {
   const yAxis = {
     type: 'value',
@@ -88,11 +91,12 @@ function numericParts(s: SeriesView) {
     return {
       yAxis,
       series: [
-        { name: '最小', type: 'line', stack: 'band', symbol: 'none', silent: true, lineStyle: { opacity: 0 }, data: s.points.map((p) => [p[0], p[2]]) },
+        { name: '最小', type: 'line', stack: 'band', stackStrategy: 'all', symbol: 'none', silent: true, lineStyle: { opacity: 0 }, data: s.points.map((p) => [p[0], p[2]]) },
         {
           name: '波动范围',
           type: 'line',
           stack: 'band',
+          stackStrategy: 'all',
           symbol: 'none',
           silent: true,
           lineStyle: { opacity: 0 },
