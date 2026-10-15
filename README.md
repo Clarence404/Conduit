@@ -140,7 +140,7 @@ server、connector、simulator 和前端都可以直接在 IDEA 里运行，连�
    | `Conduit Connector (local)` | `ConnectorApplication`，同上 |
    | `Conduit Simulator (local)` | `SimulatorApplication`，读取 `simulator-local.properties` |
    | `Conduit UI (local)` | 在 `conduit-ui/` 下执行 `npm run dev`（首次先 `npm install`） |
-   | `Conduit (local all)` | 一次启动 Server、Connector、Frontend |
+   | `Conduit (local all)` | 一次启动 Server、Connector、UI |
 
 2. 确认 `.env` 中 `BIND_ADDR`、`POSTGRES_PORT`（默认 15432）、`REDIS_PORT`（默认 16379）已按需设置，并执行过一次 `up -d`，让 PostgreSQL 和 Redis 端口对宿主机开放。
 3. 在 `conduit-server/src/main/resources/` 和 `conduit-connector/src/main/resources/` 下各新建一个 `application-local.yml`，写入 Docker 宿主机地址、端口和 `.env` 中的口令。这个文件已在 `.gitignore` 中，不会被提交。
