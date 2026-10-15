@@ -49,6 +49,8 @@ const product = ref<ProductView | null>(null)
 const codecs = ref<CodecView[]>([])
 const properties = ref<PropertyView[]>([])
 const fetchingProperties = ref(false)
+// 属性加载失败：属性表空态显示「加载失败，点击重试」而不是引导新增
+const propertiesFailed = ref(false)
 const basic = reactive({ name: '', description: '', codec: '' })
 const savingBasic = ref(false)
 const dialogVisible = ref(false)
@@ -75,6 +77,7 @@ const {
   page: devicePage,
   size: deviceSize,
   loading: loadingDevices,
+  failed: devicesFailed,
   load: loadDevices,
   onSizeChange: onDeviceSizeChange,
   onPageChange: onDevicePageChange,
@@ -133,13 +136,15 @@ async function loadCodecs() {
   }
 }
 
-/** 加载产品的全部属性，再按当前页码切片（属性变少导致当前页不存在时 useTable 退到最后一页）。 */
+/** 加载产品的全部属性（失败时置 propertiesFailed，表格空态改为「加载失败，点击重试」），再按当前页码切片（属性变少导致当前页不存在时 useTable 退到最后一页）。 */
 async function loadProperties() {
   fetchingProperties.value = true
+  propertiesFailed.value = false
   try {
     properties.value = await thingModelApi.list(props.productKey)
     await loadPropertyPage()
   } catch (e) {
+    propertiesFailed.value = true
     ElMessage.error(problemMessage(e))
   } finally {
     fetchingProperties.value = false
@@ -293,7 +298,10 @@ onMounted(() => {
               </template>
             </el-table-column>
             <template #empty>
-              <el-empty description="暂无属性：未定义物模型时按 V0.1 规则接收数据（数值一律浮点）">
+              <el-empty v-if="propertiesFailed" description="加载失败，点击重试">
+                <el-button type="primary" @click="loadProperties">重试</el-button>
+              </el-empty>
+              <el-empty v-else description="暂无属性：未定义物模型时按 V0.1 规则接收数据（数值一律浮点）">
                 <el-button type="primary" @click="openCreate">新增属性</el-button>
                 <el-button @click="importVisible = true">导入物模型</el-button>
               </el-empty>
@@ -336,7 +344,10 @@ onMounted(() => {
               <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
             </el-table-column>
             <template #empty>
-              <el-empty description="该产品下暂无设备">
+              <el-empty v-if="devicesFailed" description="加载失败，点击重试">
+                <el-button type="primary" @click="loadDevices">重试</el-button>
+              </el-empty>
+              <el-empty v-else description="该产品下暂无设备">
                 <el-button type="primary" @click="router.push({ name: 'devices' })">去设备页新建</el-button>
               </el-empty>
             </template>

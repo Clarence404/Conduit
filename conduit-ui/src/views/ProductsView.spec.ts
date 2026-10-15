@@ -1,7 +1,7 @@
-/** ProductsView 组件测试：首屏请求第 1 页 10 条、「设备（在线/总数）」列、空状态引导新建、行内按钮跳转到详情的标签 */
+/** ProductsView 组件测试：首屏请求第 1 页 10 条、「设备（在线/总数）」列、空状态引导新建、首次加载失败显示「加载失败」并可重试、行内按钮跳转到详情的标签 */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import ElementPlus from 'element-plus'
+import ElementPlus, { ElMessage } from 'element-plus'
 import ProductsView from './ProductsView.vue'
 import { productApi } from '@/api/products'
 import { codecApi } from '@/api/codecs'
@@ -83,6 +83,23 @@ describe('ProductsView', () => {
     await empty.findAll('button').find((b) => b.text() === '新建产品')!.trigger('click')
 
     expect((wrapper.vm as unknown as { dialogVisible: boolean }).dialogVisible).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('shows a retryable failure state instead of the create guide when the first load fails', async () => {
+    vi.spyOn(ElMessage, 'error').mockImplementation(() => ({ close: () => {} }) as never)
+    vi.mocked(productApi.list).mockRejectedValueOnce(new Error('服务不可用'))
+    const { wrapper } = await mountView()
+
+    const empty = wrapper.find('.el-empty')
+    expect(empty.text()).toContain('加载失败')
+    expect(empty.text()).not.toContain('还没有产品')
+
+    await empty.findAll('button').find((b) => b.text() === '重试')!.trigger('click')
+    await settle()
+
+    expect(productApi.list).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.el-table').text()).toContain('三相电表（演示）')
     wrapper.unmount()
   })
 

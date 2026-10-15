@@ -97,4 +97,23 @@ describe('useTable', () => {
     expect(t.loaded.value).toBe(true)
     expect(t.loading.value).toBe(false)
   })
+
+  it('flags a failed load, keeps it until a later load succeeds, and clears it at the start of each load', async () => {
+    vi.spyOn(ElMessage, 'error').mockImplementation(() => ({ close: () => {} }) as never)
+    const retry = deferred<PageView<string>>()
+    const fetch = vi.fn().mockRejectedValueOnce(new Error('服务不可用')).mockReturnValueOnce(retry.promise)
+    const t = useTable<string>(fetch)
+    expect(t.failed.value).toBe(false)
+
+    await t.load()
+    expect(t.failed.value).toBe(true)
+    expect(t.loaded.value).toBe(true)
+
+    const second = t.load()
+    expect(t.failed.value).toBe(false)
+    retry.resolve(pageOf(['a'], 1))
+    await second
+    expect(t.failed.value).toBe(false)
+    expect(t.items.value).toEqual(['a'])
+  })
 })

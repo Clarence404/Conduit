@@ -2,13 +2,14 @@
 /**
  * 设备列表页：筛选栏（产品、关键字，回车即查询）+ 服务端分页（useTable，默认每页 10 条）；在线状态用圆点，启用状态用标签，
  * 最后上报显示相对时间。支持新建设备、启用/禁用、重置密钥、删除，行内可跳到设备详情与所属产品。
- * 创建设备和重置密钥的响应里有密钥明文，通过 SecretDialog 只展示一次。首次加载显示骨架屏，没有设备时引导新建。
+ * 创建设备和重置密钥的响应里有密钥明文，通过 SecretDialog 只展示一次。首次加载显示骨架屏，没有设备时引导新建，加载失败时改为「加载失败，点击重试」。
+ * 查询只使用「已应用」的筛选条件（点查询/回车时才从输入框复制）：翻页、刷新、新建默认产品、空态判断都以它为准，不受尚未提交的输入影响。
  */
 
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Refresh } from '@element-plus/icons-vue'
 import { deviceApi } from '@/api/devices'
 import { productApi } from '@/api/products'
 import { problemMessage } from '@/api/errors'
@@ -25,14 +26,17 @@ const router = useRouter()
 
 const products = ref<ProductView[]>([])
 const productNames = computed(() => new Map(products.value.map((p) => [p.productKey, p.name])))
+// 筛选栏里正在编辑的输入；点「查询」才复制到 applied
 const filters = reactive({ productKey: '', keyword: '' })
-const filtered = computed(() => Boolean(filters.productKey || filters.keyword.trim()))
+// 最近一次查询所用的筛选条件：翻页、刷新、空态与新建默认产品都读它
+const applied = reactive({ productKey: '', keyword: '' })
+const filtered = computed(() => Boolean(applied.productKey || applied.keyword))
 
-const { items, total, page, size, loading, loaded, load, search, onSizeChange, onPageChange } = useTable<DeviceView>(
+const { items, total, page, size, loading, loaded, failed, load, search: searchPage, onSizeChange, onPageChange } = useTable<DeviceView>(
   (p, s) =>
     deviceApi.list({
-      productKey: filters.productKey || undefined,
-      keyword: filters.keyword.trim() || undefined,
+      productKey: applied.productKey || undefined,
+      keyword: applied.keyword || undefined,
       page: p,
       size: s,
     }),
@@ -57,16 +61,23 @@ async function loadProducts() {
   }
 }
 
-/** 清空筛选条件并回到第 1 页查询。 */
+/** 应用输入框里的筛选条件（关键字去首尾空格）并回到第 1 页查询。 */
+function search() {
+  applied.productKey = filters.productKey
+  applied.keyword = filters.keyword.trim()
+  return searchPage()
+}
+
+/** 清空筛选条件（输入与已应用的）并回到第 1 页查询。 */
 function reset() {
   filters.productKey = ''
   filters.keyword = ''
   void search()
 }
 
-/** 打开新建对话框：产品默认取当前筛选的产品，没有筛选则取第一个产品。 */
+/** 打开新建对话框：产品默认取已应用筛选的产品，没有筛选则取第一个产品。 */
 function openCreate() {
-  createForm.productKey = filters.productKey || products.value[0]?.productKey || ''
+  createForm.productKey = applied.productKey || products.value[0]?.productKey || ''
   createForm.name = ''
   createVisible.value = true
 }
@@ -183,6 +194,7 @@ onMounted(() => {
   <div>
     <PageHeader title="设备" subtitle="接入平台的设备：查看在线状态与最后上报，管理启用状态与密钥。">
       <template #actions>
+        <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
         <el-button type="primary" :icon="Plus" :disabled="products.length === 0" @click="openCreate">新建设备</el-button>
       </template>
     </PageHeader>
@@ -241,7 +253,10 @@ onMounted(() => {
             </template>
           </el-table-column>
           <template #empty>
-            <el-empty v-if="filtered" description="没有符合条件的设备">
+            <el-empty v-if="failed" description="加载失败，点击重试">
+              <el-button type="primary" @click="load">重试</el-button>
+            </el-empty>
+            <el-empty v-else-if="filtered" description="没有符合条件的设备">
               <el-button @click="reset">重置筛选</el-button>
             </el-empty>
             <el-empty v-else :description="products.length === 0 ? '还没有产品，先到「产品」页创建产品' : '还没有设备，先新建一台设备'">

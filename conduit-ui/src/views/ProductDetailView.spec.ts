@@ -1,10 +1,11 @@
 /**
  * ProductDetailView 组件测试：标签与 ?tab= 同步（router.replace）、页头显示产品 Key 与设备计数、
- * 属性变化后只刷新计数不覆盖未保存的基本信息、属性前端分页（每页 10 条）与删除后页码修正、设备标签的在线圆点。
+ * 属性变化后只刷新计数不覆盖未保存的基本信息、属性前端分页（每页 10 条）与删除后页码修正、设备标签的在线圆点、
+ * 属性或设备首次加载失败时显示「加载失败」而不是引导新增。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import ElementPlus, { ElPagination, ElTable } from 'element-plus'
+import ElementPlus, { ElMessage, ElPagination, ElTable } from 'element-plus'
 import ProductDetailView from './ProductDetailView.vue'
 import PropertyDialog from '@/components/PropertyDialog.vue'
 import { productApi } from '@/api/products'
@@ -168,6 +169,38 @@ describe('ProductDetailView', () => {
   it('shows the online dot in the devices tab', async () => {
     const { wrapper } = await mountAt('/products/pk1?tab=devices')
 
+    expect(wrapper.find('.online-dot').text()).toBe('在线')
+    wrapper.unmount()
+  })
+
+  it('shows a retryable failure state in the property table when its first load fails', async () => {
+    vi.spyOn(ElMessage, 'error').mockImplementation(() => ({ close: () => {} }) as never)
+    vi.mocked(thingModelApi.list).mockRejectedValueOnce(new Error('服务不可用'))
+    const { wrapper } = await mountAt('/products/pk1?tab=model')
+
+    const empty = wrapper.findAll('.el-empty').find((e) => e.text().includes('加载失败'))
+    expect(empty).toBeDefined()
+    expect(wrapper.text()).not.toContain('暂无属性')
+
+    await empty!.findAll('button').find((b) => b.text() === '重试')!.trigger('click')
+    await settle()
+    expect(thingModelApi.list).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).not.toContain('加载失败')
+    wrapper.unmount()
+  })
+
+  it('shows a retryable failure state in the device table when its first load fails', async () => {
+    vi.spyOn(ElMessage, 'error').mockImplementation(() => ({ close: () => {} }) as never)
+    vi.mocked(deviceApi.list).mockRejectedValueOnce(new Error('服务不可用'))
+    const { wrapper } = await mountAt('/products/pk1?tab=devices')
+
+    const empty = wrapper.findAll('.el-empty').find((e) => e.text().includes('加载失败'))
+    expect(empty).toBeDefined()
+    expect(wrapper.text()).not.toContain('该产品下暂无设备')
+
+    await empty!.findAll('button').find((b) => b.text() === '重试')!.trigger('click')
+    await settle()
+    expect(deviceApi.list).toHaveBeenCalledTimes(2)
     expect(wrapper.find('.online-dot').text()).toBe('在线')
     wrapper.unmount()
   })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 产品列表页：服务端分页（useTable，默认每页 10 条）；支持新建、编辑、删除产品，行内按钮可直接进入产品详情的各个标签页，
- * 「设备（在线/总数）」点击进入产品详情的设备标签。首次加载显示骨架屏；没有产品时引导新建。新建时可选解码器，编辑时不能改。
+ * 「设备（在线/总数）」点击进入产品详情的设备标签。首次加载显示骨架屏；没有产品时引导新建，加载失败时改为「加载失败，点击重试」。新建时可选解码器，编辑时不能改。
  */
 
 import { onMounted, reactive, ref } from 'vue'
@@ -22,7 +22,7 @@ import PageHeader from '@/components/PageHeader.vue'
 const router = useRouter()
 
 const codecs = ref<CodecView[]>([])
-const { items, total, page, size, loading, loaded, load, onSizeChange, onPageChange } = useTable<ProductView>(
+const { items, total, page, size, loading, loaded, failed, load, onSizeChange, onPageChange } = useTable<ProductView>(
   (p, s) => productApi.list(p, s),
 )
 
@@ -158,7 +158,10 @@ onMounted(() => {
             </template>
           </el-table-column>
           <template #empty>
-            <el-empty description="还没有产品，先创建一个产品">
+            <el-empty v-if="failed" description="加载失败，点击重试">
+              <el-button type="primary" @click="load">重试</el-button>
+            </el-empty>
+            <el-empty v-else description="还没有产品，先创建一个产品">
               <el-button type="primary" @click="openCreate">新建产品</el-button>
             </el-empty>
           </template>

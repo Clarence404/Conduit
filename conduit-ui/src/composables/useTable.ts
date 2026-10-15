@@ -23,6 +23,8 @@ export interface TableState<T> {
   loading: Ref<boolean>
   /** 首次加载已结束（成功或失败）；之前显示骨架屏 */
   loaded: Ref<boolean>
+  /** 最近一次加载失败（下一次加载开始时清除）；页面据此把空表格显示为「加载失败，点击重试」而不是引导新建 */
+  failed: Ref<boolean>
   /** 按当前页码与条数加载 */
   load(): Promise<void>
   /** 回到第 1 页加载（筛选条件变化时） */
@@ -44,6 +46,7 @@ export function useTable<T>(fetch: PageFetcher<T>): TableState<T> {
   const size = ref(DEFAULT_PAGE_SIZE)
   const loading = ref(false)
   const loaded = ref(false)
+  const failed = ref(false)
   const seq = createRequestSeq()
 
   /**
@@ -53,6 +56,7 @@ export function useTable<T>(fetch: PageFetcher<T>): TableState<T> {
   async function load(): Promise<void> {
     const id = seq.next()
     loading.value = true
+    failed.value = false
     try {
       const res = await fetch(page.value, size.value)
       if (!seq.isLatest(id)) return
@@ -65,7 +69,10 @@ export function useTable<T>(fetch: PageFetcher<T>): TableState<T> {
       items.value = res.items
       total.value = res.total
     } catch (e) {
-      if (seq.isLatest(id)) ElMessage.error(problemMessage(e))
+      if (seq.isLatest(id)) {
+        failed.value = true
+        ElMessage.error(problemMessage(e))
+      }
     } finally {
       if (seq.isLatest(id)) {
         loading.value = false
@@ -80,5 +87,5 @@ export function useTable<T>(fetch: PageFetcher<T>): TableState<T> {
     return load()
   }
 
-  return { items, total, page, size, loading, loaded, load, search, onSizeChange: search, onPageChange: load }
+  return { items, total, page, size, loading, loaded, failed, load, search, onSizeChange: search, onPageChange: load }
 }
