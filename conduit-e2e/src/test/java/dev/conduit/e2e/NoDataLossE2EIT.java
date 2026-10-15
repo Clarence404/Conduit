@@ -7,6 +7,8 @@ import dev.conduit.simulator.DemoProvisioner;
 import dev.conduit.simulator.DeviceCredentials;
 import dev.conduit.simulator.DeviceSimulator;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -38,6 +40,8 @@ import static org.awaitility.Awaitility.await;
  */
 class NoDataLossE2EIT {
 
+    private static final Logger log = LoggerFactory.getLogger(NoDataLossE2EIT.class);
+
     static final Path DEPLOY = Path.of("..", "deploy").toAbsolutePath().normalize();
     static final int DEVICES = 10;
     static final int MESSAGES_PER_DEVICE = 50;
@@ -53,42 +57,64 @@ class NoDataLossE2EIT {
 
         ConduitApiClient api = new ConduitApiClient(URI.create("http://" + host + ":" + apiPort));
         api.login(DotEnv.require(env, "CONDUIT_ADMIN_USERNAME"), DotEnv.require(env, "CONDUIT_ADMIN_PASSWORD"));
-        List<DeviceCredentials> devices = DemoProvisioner.provision(api, "e2e-" + UUID.randomUUID(), DEVICES);
-        String productKey = devices.getFirst().productKey();
+        // 先建产品拿到 productKey（provision 按名称复用它），这样中途失败也能清理
+        String productName = "e2e-" + UUID.randomUUID();
+        String productKey = api.findOrCreateProduct(productName);
+        try {
+            List<DeviceCredentials> devices = DemoProvisioner.provision(api, productName, DEVICES);
 
-        DeviceSimulator simulator = new DeviceSimulator(host, mqttPort, Duration.ofMillis(100), MESSAGES_PER_DEVICE);
-        CompletableFuture<Void> sending = CompletableFuture.runAsync(() -> {
-            try {
-                simulator.run(devices);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException(e);
+            DeviceSimulator simulator =
+                    new DeviceSimulator(host, mqttPort, Duration.ofMillis(100), MESSAGES_PER_DEVICE);
+            CompletableFuture<Void> sending = CompletableFuture.runAsync(() -> {
+                try {
+                    simulator.run(devices);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(e);
+                }
+            });
+
+            Thread.sleep(1_500);
+            assertThat(sending.isDone()).as("sender must still be running when the server is killed").isFalse();
+            assertThat(countUa(influxPort, productKey)).as("kill must land mid-stream (fewer than all points stored)")
+                    .isLessThan((long) DEVICES * MESSAGES_PER_DEVICE);
+            compose("kill", "conduit-server");
+            Thread.sleep(3_000);
+            compose("start", "conduit-server");
+
+            sending.get();
+
+            await().atMost(Duration.ofMinutes(4)).pollInterval(Duration.ofSeconds(5))
+                    .untilAsserted(() -> assertThat(countUa(influxPort, productKey))
+                            .isEqualTo((long) DEVICES * MESSAGES_PER_DEVICE));
+
+            String dead = composeOutput("exec", "-T", "redis", "redis-cli", "XRANGE", "conduit:stream:dead", "-", "+");
+            assertThat(dead).as("no message of this run may be dead-lettered").doesNotContain(productKey);
+
+            // 被 kill 的消费者留下的待确认条目要等 PIPELINE_CLAIM_MIN_IDLE 之后才会被认领；
+            // 只检查本次运行的 productKey，避免被同时运行的演示模拟器流量干扰
+            Duration claimWait = claimMinIdle().plusSeconds(30);
+            await().atMost(claimWait).pollInterval(Duration.ofSeconds(3))
+                    .untilAsserted(() -> assertThat(pendingEntriesOf(productKey))
+                            .as("pending stream entries of this run in group conduit-server").isEmpty());
+        } finally {
+            cleanUp(api, productKey);
+        }
+    }
+
+    /**
+     * 删除本次运行创建的设备和产品。产品下还有设备时服务端返回 409，所以先删设备。
+     * 清理失败只记日志，不掩盖测试本身的结果。
+     */
+    private static void cleanUp(ConduitApiClient api, String productKey) {
+        try {
+            for (String deviceKey : api.listDeviceKeys(productKey)) {
+                api.deleteDevice(deviceKey);
             }
-        });
-
-        Thread.sleep(1_500);
-        assertThat(sending.isDone()).as("sender must still be running when the server is killed").isFalse();
-        assertThat(countUa(influxPort, productKey)).as("kill must land mid-stream (fewer than all points stored)")
-                .isLessThan((long) DEVICES * MESSAGES_PER_DEVICE);
-        compose("kill", "conduit-server");
-        Thread.sleep(3_000);
-        compose("start", "conduit-server");
-
-        sending.get();
-
-        await().atMost(Duration.ofMinutes(4)).pollInterval(Duration.ofSeconds(5))
-                .untilAsserted(() -> assertThat(countUa(influxPort, productKey))
-                        .isEqualTo((long) DEVICES * MESSAGES_PER_DEVICE));
-
-        String dead = composeOutput("exec", "-T", "redis", "redis-cli", "XRANGE", "conduit:stream:dead", "-", "+");
-        assertThat(dead).as("no message of this run may be dead-lettered").doesNotContain(productKey);
-
-        // 被 kill 的消费者留下的待确认条目要等 PIPELINE_CLAIM_MIN_IDLE 之后才会被认领；
-        // 只检查本次运行的 productKey，避免被同时运行的演示模拟器流量干扰
-        Duration claimWait = claimMinIdle().plusSeconds(30);
-        await().atMost(claimWait).pollInterval(Duration.ofSeconds(3))
-                .untilAsserted(() -> assertThat(pendingEntriesOf(productKey))
-                        .as("pending stream entries of this run in group conduit-server").isEmpty());
+            api.deleteProduct(productKey);
+        } catch (RuntimeException e) {
+            log.warn("Failed to clean up e2e product {}", productKey, e);
+        }
     }
 
     /** 读取 deploy/.env 的 PIPELINE_CLAIM_MIN_IDLE（如 60s、2m），缺省 60s。 */

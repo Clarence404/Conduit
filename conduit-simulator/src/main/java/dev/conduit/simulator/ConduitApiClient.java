@@ -71,16 +71,38 @@ public class ConduitApiClient {
         send("PUT", "/api/v1/products/" + encode(productKey) + "/thing-model?mode=" + encode(mode), document, 200);
     }
 
+    /** 设备列表中模拟器关心的字段。 */
+    public record DeviceSummary(String deviceKey, String name, String status) {
+    }
+
     public List<String> listDeviceKeys(String productKey) {
-        List<String> keys = new ArrayList<>();
+        return listDevices(productKey).stream().map(DeviceSummary::deviceKey).toList();
+    }
+
+    public List<DeviceSummary> listDevices(String productKey) {
+        List<DeviceSummary> devices = new ArrayList<>();
         for (int page = 1; ; page++) {
             JsonNode result = send("GET", "/api/v1/devices?productKey=" + encode(productKey)
                     + "&page=" + page + "&size=" + PAGE_SIZE, null, 200);
-            result.get("items").forEach(item -> keys.add(item.get("deviceKey").asText()));
+            result.get("items").forEach(item -> devices.add(new DeviceSummary(item.get("deviceKey").asText(),
+                    item.path("name").asText(""), item.path("status").asText("ENABLED"))));
             if ((long) page * PAGE_SIZE >= result.get("total").asLong()) {
-                return keys;
+                return devices;
             }
         }
+    }
+
+    /** 修改设备名称；接口要求同时提交状态，传入当前状态以保持不变。 */
+    public void renameDevice(String deviceKey, String name, String status) {
+        send("PUT", "/api/v1/devices/" + encode(deviceKey), Map.of("name", name, "status", status), 200);
+    }
+
+    public void deleteDevice(String deviceKey) {
+        send("DELETE", "/api/v1/devices/" + encode(deviceKey), null, 204);
+    }
+
+    public void deleteProduct(String productKey) {
+        send("DELETE", "/api/v1/products/" + encode(productKey), null, 204);
     }
 
     public DeviceCredentials createDevice(String productKey, String name) {

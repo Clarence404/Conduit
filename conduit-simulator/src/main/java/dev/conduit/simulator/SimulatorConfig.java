@@ -37,7 +37,7 @@ public record SimulatorConfig(URI apiUrl, String adminUsername, String adminPass
                 require(env, "CONDUIT_ADMIN_PASSWORD"),
                 env.getOrDefault("MQTT_HOST", "localhost"),
                 Integer.parseInt(env.getOrDefault("MQTT_PORT", "1883")),
-                env.getOrDefault("SIM_PRODUCT_NAME", "Demo Meter"),
+                env.getOrDefault("SIM_PRODUCT_NAME", "三相电表（演示）"),
                 Integer.parseInt(env.getOrDefault("SIM_DEVICE_COUNT", "100")),
                 Duration.ofMillis(Long.parseLong(env.getOrDefault("SIM_INTERVAL_MS", "10000"))),
                 Integer.parseInt(env.getOrDefault("SIM_MESSAGES_PER_DEVICE", "0")),

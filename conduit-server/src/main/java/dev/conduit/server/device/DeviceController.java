@@ -35,7 +35,7 @@ public class DeviceController {
     public PageView<DeviceView> list(@RequestParam(required = false) String productKey,
                                      @RequestParam(required = false) String keyword,
                                      @RequestParam(defaultValue = "1") @Min(1) int page,
-                                     @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+                                     @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size) {
         return service.list(productKey, keyword, page, size);
     }
 

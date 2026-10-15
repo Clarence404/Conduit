@@ -65,7 +65,6 @@
 ## 测试
 
 - e2e 未覆盖 60s claim 路径（由 PipelineIT 覆盖）
-- e2e 测试数据未清理
 - e2e 的 DEPLOY 路径依赖当前工作目录
 - Influx 同 ts 覆盖，重复写入无法检出
 

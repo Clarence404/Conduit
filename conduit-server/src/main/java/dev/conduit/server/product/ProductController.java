@@ -30,7 +30,7 @@ public class ProductController {
 
     @GetMapping
     public PageView<ProductView> list(@RequestParam(defaultValue = "1") @Min(1) int page,
-                                      @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+                                      @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size) {
         return service.list(page, size);
     }
 

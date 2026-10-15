@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { deviceApi } from '@/api/devices'
@@ -7,6 +7,8 @@ import { productApi } from '@/api/products'
 import { problemMessage } from '@/api/errors'
 import type { DeviceView, ProductView } from '@/api/types'
 import { formatDateTime } from '@/utils/format'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZES } from '@/utils/pagination'
+import { createRequestSeq } from '@/utils/requestSeq'
 import SecretDialog from '@/components/SecretDialog.vue'
 
 const router = useRouter()
@@ -15,7 +17,8 @@ const products = ref<ProductView[]>([])
 const items = ref<DeviceView[]>([])
 const total = ref(0)
 const loading = ref(false)
-const query = reactive({ productKey: '', keyword: '', page: 1, size: 20 })
+const query = reactive({ productKey: '', keyword: '', page: 1, size: DEFAULT_PAGE_SIZE })
+const productNames = computed(() => new Map(products.value.map((p) => [p.productKey, p.name])))
 
 const createVisible = ref(false)
 const creating = ref(false)
@@ -35,7 +38,10 @@ async function loadProducts() {
   }
 }
 
+const loadSeq = createRequestSeq()
+
 async function load() {
+  const id = loadSeq.next()
   loading.value = true
   try {
     const res = await deviceApi.list({
@@ -44,16 +50,22 @@ async function load() {
       page: query.page,
       size: query.size,
     })
+    if (!loadSeq.isLatest(id)) return
     items.value = res.items
     total.value = res.total
   } catch (e) {
-    ElMessage.error(problemMessage(e))
+    if (loadSeq.isLatest(id)) ElMessage.error(problemMessage(e))
   } finally {
-    loading.value = false
+    if (loadSeq.isLatest(id)) loading.value = false
   }
 }
 
 function search() {
+  query.page = 1
+  void load()
+}
+
+function onSizeChange() {
   query.page = 1
   void load()
 }
@@ -189,7 +201,13 @@ onMounted(async () => {
     <el-table v-loading="loading" :data="items" border>
       <el-table-column prop="deviceKey" label="设备 Key" width="180" />
       <el-table-column prop="name" label="名称" />
-      <el-table-column prop="productKey" label="产品 Key" width="180" />
+      <el-table-column label="产品" width="180">
+        <template #default="{ row }">
+          <router-link :to="{ name: 'product-detail', params: { productKey: row.productKey } }">
+            {{ productNames.get(row.productKey) ?? row.productKey }}
+          </router-link>
+        </template>
+      </el-table-column>
       <el-table-column label="在线" width="90">
         <template #default="{ row }">
           <el-tag :type="row.online ? 'success' : 'info'">{{ row.online ? '在线' : '离线' }}</el-tag>
@@ -222,9 +240,11 @@ onMounted(async () => {
       v-model:current-page="query.page"
       v-model:page-size="query.size"
       class="pager"
-      layout="total, prev, pager, next"
+      layout="total, sizes, prev, pager, next"
+      :page-sizes="PAGE_SIZES"
       :total="total"
       @current-change="load"
+      @size-change="onSizeChange"
     />
 
     <el-dialog v-model="createVisible" title="新建设备" width="480px" :close-on-click-modal="false">
