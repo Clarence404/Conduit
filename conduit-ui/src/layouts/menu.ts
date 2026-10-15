@@ -17,6 +17,10 @@ export interface MenuGroup {
   items: MenuItem[]
 }
 
+/**
+ * 侧栏菜单的全部分组，按显示顺序排列：概览、设备接入、系统管理（用户与租户尚未实现，带 disabledNote 显示为禁用）。
+ * 菜单项 path 与路由 meta.menu 对应，用来在详情页高亮所属菜单。
+ */
 export const MENU_GROUPS: MenuGroup[] = [
   {
     title: '概览',

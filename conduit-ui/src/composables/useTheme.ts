@@ -12,6 +12,7 @@ const dark = ref(false)
  * 合成最终主题：跟随系统时取系统设置，否则取偏好本身。
  * @param pref 主题偏好
  * @param systemDark 系统当前是否为深色
+ * 注意：conduit-ui/index.html 的首屏前内联脚本复刻了这条规则，修改时要同步（prepaintTheme.spec.ts 校验两者一致）。
  */
 export function resolveDark(pref: ThemePref, systemDark: boolean): boolean {
   return pref === 'system' ? systemDark : pref === 'dark'

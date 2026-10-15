@@ -6,6 +6,7 @@ import { computed, onBeforeUnmount, ref, type ComputedRef } from 'vue'
 import { useRoute } from 'vue-router'
 import type { BreadcrumbItem } from '@/router/meta'
 
+/** 产品名称：浏览器标题的后缀（「页面名 · Conduit」）与没有页面名时的标题 */
 export const APP_NAME = 'Conduit'
 
 const objectName = ref<string | null>(null)

@@ -1,6 +1,8 @@
 /**
  * 外观偏好（Pinia）：主题（浅色/深色/跟随系统）、侧栏风格（浅色/深色）、侧栏折叠、设备最新值视图（卡片/表格）。
  * 存在 localStorage 键 conduit.ui；读写失败（隐私模式、被禁用、配额满）时使用默认值，不报错。
+ * 注意：conduit-ui/index.html 里有一段首屏前内联脚本，用同样的规则解析 theme 以避免深色用户白屏闪烁；
+ * 修改键名或 theme 的解析规则时要同步修改它（prepaintTheme.spec.ts 会校验两者一致）。
  */
 import { defineStore } from 'pinia'
 
@@ -16,6 +18,7 @@ export interface UiPrefs {
   latestView: LatestView
 }
 
+/** 外观偏好在 localStorage 中的键（index.html 的首屏前脚本也写死了这个键） */
 export const UI_STORAGE_KEY = 'conduit.ui'
 
 /** 默认偏好：跟随系统、深色侧栏、侧栏展开、卡片视图 */
@@ -77,6 +80,10 @@ export function savePrefs(prefs: UiPrefs): void {
   }
 }
 
+/**
+ * 外观偏好 store：状态即 UiPrefs，初始值来自 localStorage（无效或缺失时用默认值）；
+ * 每个 set 动作更新状态并立即写回 localStorage，主题的实际应用由 useTheme 监听 theme 完成。
+ */
 export const useUiStore = defineStore('ui', {
   state: (): UiPrefs => loadPrefs(),
   actions: {

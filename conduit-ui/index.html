@@ -4,6 +4,31 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Conduit</title>
+    <script>
+      // 首屏前主题：应用包加载前就按外观偏好给 <html> 加上 dark 类，深色用户不会先看到一闪而过的白屏。
+      // 解析规则必须与 src/stores/ui.ts 的 parsePrefs（读 localStorage 键 conduit.ui 的 theme 字段，只认 light/dark/system，
+      // 其余一律按 system）和 src/composables/useTheme.ts 的 resolveDark（system 取 prefers-color-scheme）保持一致；
+      // 改动任何一处时同步改另外两处。读取失败（隐私模式等）时保持浅色，应用启动后 installTheme 会再校正一次。
+      try {
+        var theme = 'system'
+        var raw = window.localStorage.getItem('conduit.ui')
+        if (raw) {
+          var data = null
+          try {
+            data = JSON.parse(raw)
+          } catch (e) {
+            // 存的内容无法解析：和 parsePrefs 一样按默认（跟随系统）处理
+          }
+          if (data && typeof data === 'object' && !Array.isArray(data) && (data.theme === 'light' || data.theme === 'dark')) {
+            theme = data.theme
+          }
+        }
+        var dark = theme === 'system' ? typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches : theme === 'dark'
+        document.documentElement.classList.toggle('dark', dark)
+      } catch (e) {
+        // 忽略
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>
