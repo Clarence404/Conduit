@@ -55,6 +55,25 @@ public abstract class IntegrationTestBase {
         return new TestDevice(tenantId, productKey, deviceKey, secret);
     }
 
+    protected void setCodec(String productKey, String codec) {
+        jdbc.update("update product set codec = ? where product_key = ?", codec, productKey);
+    }
+
+    /** 直接写库定义属性（产品所在租户）。物模型缓存只在流水线首次处理该产品后才有条目，先定义再上报即可。 */
+    protected void insertProperty(String productKey, String identifier, String name, String dataType, String unit,
+                                  Double min, Double max, Integer decimals, String enumItemsJson) {
+        jdbc.update("insert into product_property (tenant_id, product_id, identifier, name, data_type, unit, "
+                        + "min_value, max_value, decimals, enum_items) "
+                        + "select tenant_id, id, ?, ?, ?, cast(? as varchar), cast(? as double precision), "
+                        + "cast(? as double precision), cast(? as smallint), cast(? as jsonb) "
+                        + "from product where product_key = ?",
+                identifier, name, dataType, unit, min, max, decimals, enumItemsJson, productKey);
+    }
+
+    protected void defineProperty(String productKey, String identifier, String dataType, Double min, Double max) {
+        insertProperty(productKey, identifier, identifier, dataType, null, min, max, null, null);
+    }
+
     @AfterEach
     void clearTenantContext() {
         TenantContext.clear();
