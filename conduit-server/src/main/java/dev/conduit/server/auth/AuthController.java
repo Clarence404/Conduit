@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import dev.conduit.server.auth.AuthDtos.LoginRequest;
 import dev.conduit.server.auth.AuthDtos.TokenResponse;
 import dev.conduit.server.auth.AuthDtos.UserView;
+import dev.conduit.server.tenant.Tenant;
+import dev.conduit.server.tenant.TenantMapper;
 import dev.conduit.server.web.ApiException;
 import io.jsonwebtoken.JwtException;
 import jakarta.validation.Valid;
@@ -33,12 +35,15 @@ public class AuthController {
     private static final String ACTIVE = "ACTIVE";
 
     private final AppUserMapper users;
+    private final TenantMapper tenants;
     private final PasswordEncoder encoder;
     private final JwtService jwt;
     private final JwtProperties props;
 
-    public AuthController(AppUserMapper users, PasswordEncoder encoder, JwtService jwt, JwtProperties props) {
+    public AuthController(AppUserMapper users, TenantMapper tenants, PasswordEncoder encoder, JwtService jwt,
+                          JwtProperties props) {
         this.users = users;
+        this.tenants = tenants;
         this.encoder = encoder;
         this.jwt = jwt;
         this.props = props;
@@ -89,9 +94,10 @@ public class AuthController {
                 .build();
     }
 
+    /** 当前登录用户（含所属租户名称）。 */
     @GetMapping("/me")
     public UserView me(@AuthenticationPrincipal AuthPrincipal principal) {
-        return new UserView(principal.username(), principal.role());
+        return userView(principal);
     }
 
     /** 为用户签发 access + refresh 令牌：refresh 写入 Cookie，access 与有效期（秒）放在响应体。 */
@@ -100,8 +106,7 @@ public class AuthController {
         String refresh = jwt.issue(principal, JwtService.TokenType.REFRESH);
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, refreshCookie(refresh, props.refreshTtl()).toString())
-                .body(new TokenResponse(access, props.accessTtl().toSeconds(),
-                        new UserView(principal.username(), principal.role())));
+                .body(new TokenResponse(access, props.accessTtl().toSeconds(), userView(principal)));
     }
 
     /** refresh Cookie：HttpOnly、SameSite=Strict、仅发往 /api/v1/auth；Secure 由配置决定（生产应开启）。 */
@@ -113,6 +118,14 @@ public class AuthController {
                 .path("/api/v1/auth")
                 .maxAge(maxAge)
                 .build();
+    }
+
+    /**
+     * 组装给 UI 的用户视图：租户名称按 tenantId 查 tenant 表（该表不做租户行过滤）；租户不存在时名称为 null。
+     */
+    private UserView userView(AuthPrincipal principal) {
+        Tenant tenant = tenants.selectById(principal.tenantId());
+        return new UserView(principal.username(), principal.role(), tenant == null ? null : tenant.getName());
     }
 
     private static AuthPrincipal principalOf(AppUser user) {

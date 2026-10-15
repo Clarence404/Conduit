@@ -16,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/** 认证接口集成测试：登录、刷新、登出、/me，以及当前用户视图中的租户名称。 */
 class AuthIT extends IntegrationTestBase {
 
     private MvcResult login(String password) throws Exception {
@@ -33,10 +34,12 @@ class AuthIT extends IntegrationTestBase {
         String setCookie = result.getResponse().getHeader(HttpHeaders.SET_COOKIE);
         assertThat(setCookie).contains("conduit_refresh=").contains("HttpOnly")
                 .contains("SameSite=Strict").contains("Path=/api/v1/auth");
+        assertThat(result.getResponse().getContentAsString()).contains("\"tenantName\":\"Default\"");
         mvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, bearer(loginAsAdmin())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value("admin"))
-                .andExpect(jsonPath("$.role").value("ADMIN"));
+                .andExpect(jsonPath("$.role").value("ADMIN"))
+                .andExpect(jsonPath("$.tenantName").value("Default"));
     }
 
     @Test

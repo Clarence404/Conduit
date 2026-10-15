@@ -2,8 +2,10 @@ package dev.conduit.server.product;
 
 import com.jayway.jsonpath.JsonPath;
 import dev.conduit.server.support.IntegrationTestBase;
+import dev.conduit.server.presence.PresenceStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 
@@ -15,9 +17,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/** 产品接口集成测试：增删改查、分页、校验、租户隔离、解码器、属性数，以及设备数与在线数。 */
 class ProductApiIT extends IntegrationTestBase {
 
     String auth;
+
+    @Autowired
+    PresenceStore presence;
 
     @BeforeEach
     void login() throws Exception {
@@ -159,5 +165,41 @@ class ProductApiIT extends IntegrationTestBase {
         mvc.perform(get("/api/v1/products").param("size", "100").header(HttpHeaders.AUTHORIZATION, auth))
                 .andExpect(jsonPath("$.items[?(@.productKey == '" + pk + "')].propertyCount",
                         org.hamcrest.Matchers.contains(2)));
+    }
+
+    @Test
+    void deviceAndOnlineCountsAreReportedInCreateGetAndList() throws Exception {
+        String pk = createProduct("设备计数产品");
+        mvc.perform(get("/api/v1/products/{pk}", pk).header(HttpHeaders.AUTHORIZATION, auth))
+                .andExpect(jsonPath("$.deviceCount").value(0))
+                .andExpect(jsonPath("$.onlineCount").value(0));
+
+        long productId = jdbc.queryForObject("select id from product where product_key = ?", Long.class, pk);
+        String online = insertDevice(productId, "ENABLED");
+        String offline = insertDevice(productId, "ENABLED");
+        insertDevice(productId, "DISABLED");
+        long now = System.currentTimeMillis();
+        presence.apply(online, true, now, "");
+        presence.apply(offline, false, now, "");
+
+        mvc.perform(get("/api/v1/products/{pk}", pk).header(HttpHeaders.AUTHORIZATION, auth))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.deviceCount").value(3))
+                .andExpect(jsonPath("$.onlineCount").value(1));
+        mvc.perform(get("/api/v1/products").param("size", "100").header(HttpHeaders.AUTHORIZATION, auth))
+                .andExpect(jsonPath("$.items[?(@.productKey == '" + pk + "')].deviceCount",
+                        org.hamcrest.Matchers.contains(3)))
+                .andExpect(jsonPath("$.items[?(@.productKey == '" + pk + "')].onlineCount",
+                        org.hamcrest.Matchers.contains(1)));
+    }
+
+    /** 直接写库在默认租户的指定产品下建一台设备，返回 deviceKey。 */
+    private String insertDevice(long productId, String status) {
+        String deviceKey = unique("dk");
+        String salt = secretHasher.newSalt();
+        jdbc.update("insert into device (tenant_id, product_id, device_key, name, secret_hash, secret_salt, status) "
+                        + "values (?, ?, ?, '计数测试设备', ?, ?, ?)",
+                defaultTenantId(), productId, deviceKey, secretHasher.hash("secret-" + deviceKey, salt), salt, status);
+        return deviceKey;
     }
 }
