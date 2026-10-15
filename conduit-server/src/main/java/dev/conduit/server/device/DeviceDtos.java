@@ -14,9 +14,11 @@ public final class DeviceDtos {
     private DeviceDtos() {
     }
 
+    /** 创建设备请求：所属产品 Key 与设备名称。 */
     public record CreateDeviceRequest(@NotBlank String productKey, @NotBlank @Size(max = 128) String name) {
     }
 
+    /** 更新设备请求：新名称与状态（ENABLED / DISABLED）。 */
     public record UpdateDeviceRequest(@NotBlank @Size(max = 128) String name,
                                       @NotBlank @Pattern(regexp = "ENABLED|DISABLED") String status) {
     }
