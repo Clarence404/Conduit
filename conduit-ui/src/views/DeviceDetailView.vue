@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { deviceApi } from '@/api/devices'
+import { productApi } from '@/api/products'
 import { problemMessage } from '@/api/errors'
 import type { DeviceView, PointView } from '@/api/types'
 import { buildConnectionInfo } from '@/utils/connection'
@@ -15,6 +16,7 @@ const props = defineProps<{ deviceKey: string }>()
 const mqttPort = Number(import.meta.env.VITE_MQTT_PORT) || 1883
 
 const device = ref<DeviceView | null>(null)
+const productName = ref<string | null>(null)
 const values = ref<PointView[]>([])
 const lastRefreshed = ref<number | null>(null)
 
@@ -27,6 +29,12 @@ async function loadDevice() {
     device.value = await deviceApi.get(props.deviceKey)
   } catch (e) {
     ElMessage.error(problemMessage(e))
+    return
+  }
+  try {
+    productName.value = (await productApi.get(device.value.productKey)).name
+  } catch {
+    // 拿不到产品名称时退回显示产品 Key
   }
 }
 
@@ -47,7 +55,12 @@ usePolling(loadLatest, 5000)
     <el-card header="基本信息">
       <el-descriptions :column="2" border>
         <el-descriptions-item label="设备 Key">{{ device.deviceKey }}</el-descriptions-item>
-        <el-descriptions-item label="产品 Key">{{ device.productKey }}</el-descriptions-item>
+        <el-descriptions-item label="产品">
+          <router-link :to="{ name: 'product-detail', params: { productKey: device.productKey } }">
+            {{ productName ?? device.productKey }}
+          </router-link>
+          <span v-if="productName" class="hint product-key">{{ device.productKey }}</span>
+        </el-descriptions-item>
         <el-descriptions-item label="在线状态">
           <el-tag :type="device.online ? 'success' : 'info'">{{ device.online ? '在线' : '离线' }}</el-tag>
         </el-descriptions-item>
@@ -110,6 +123,9 @@ usePolling(loadLatest, 5000)
   padding: 12px;
   background: var(--el-fill-color-light);
   border-radius: 4px;
+}
+.product-key {
+  margin-left: 8px;
 }
 .card-header {
   display: flex;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { productApi } from '@/api/products'
 import { codecApi } from '@/api/codecs'
@@ -7,12 +8,16 @@ import { problemMessage } from '@/api/errors'
 import type { CodecView, ProductView } from '@/api/types'
 import { formatDateTime } from '@/utils/format'
 import { codecLabel } from '@/utils/thingModel'
+import { DEFAULT_PAGE_SIZE, PAGE_SIZES } from '@/utils/pagination'
+import { tabQuery, type ProductTab } from '@/utils/productTabs'
+
+const router = useRouter()
 
 const items = ref<ProductView[]>([])
 const codecs = ref<CodecView[]>([])
 const total = ref(0)
 const page = ref(1)
-const size = ref(20)
+const size = ref(DEFAULT_PAGE_SIZE)
 const loading = ref(false)
 
 const dialogVisible = ref(false)
@@ -40,6 +45,15 @@ async function loadCodecs() {
   } catch (e) {
     ElMessage.error(problemMessage(e))
   }
+}
+
+function openDetail(row: ProductView, tab: ProductTab = 'basic') {
+  void router.push({ name: 'product-detail', params: { productKey: row.productKey }, query: tabQuery({}, tab) })
+}
+
+function onSizeChange() {
+  page.value = 1
+  void load()
 }
 
 function openCreate() {
@@ -132,8 +146,10 @@ onMounted(() => {
       <el-table-column label="创建时间" width="180">
         <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="140">
+      <el-table-column label="操作" width="230">
         <template #default="{ row }">
+          <el-button link type="primary" @click="openDetail(row)">详情</el-button>
+          <el-button link type="primary" @click="openDetail(row, 'model')">物模型</el-button>
           <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
           <el-button link type="danger" @click="remove(row)">删除</el-button>
         </template>
@@ -144,9 +160,11 @@ onMounted(() => {
       v-model:current-page="page"
       v-model:page-size="size"
       class="pager"
-      layout="total, prev, pager, next"
+      layout="total, sizes, prev, pager, next"
+      :page-sizes="PAGE_SIZES"
       :total="total"
       @current-change="load"
+      @size-change="onSizeChange"
     />
 
     <el-dialog

@@ -25,8 +25,8 @@ async function logout() {
     <el-aside width="200px" class="aside">
       <div class="brand">Conduit</div>
       <el-menu :default-active="activeMenu" router>
-        <el-menu-item index="/devices">设备</el-menu-item>
         <el-menu-item index="/products">产品</el-menu-item>
+        <el-menu-item index="/devices">设备</el-menu-item>
       </el-menu>
     </el-aside>
     <el-container>

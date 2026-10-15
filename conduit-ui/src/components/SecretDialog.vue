@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { ElMessage } from 'element-plus'
+import { copyText } from '@/utils/clipboard'
 
 const props = defineProps<{ modelValue: boolean; deviceKey: string; secret: string }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
 async function copy() {
-  try {
-    await navigator.clipboard.writeText(props.secret)
+  if (await copyText(props.secret)) {
     ElMessage.success('已复制')
-  } catch {
+  } else {
     ElMessage.warning('复制失败，请手动选择复制')
   }
 }
