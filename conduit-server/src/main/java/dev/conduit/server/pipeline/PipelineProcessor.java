@@ -39,7 +39,7 @@ import java.util.stream.Collectors;
 /**
  * 处理一批投递。属性消息：身份检查 → 物模型缓存取产品配置 → 按 codec 解码 → 逐测点校验 → 写 InfluxDB 与最新值 → ACK；
  * 被剔除的测点另写一条 FIELD_REJECTED 死信记录。不可恢复的错误进死信（并 ACK）；下游不可用时原地退避重试，
- * 未处理的投递保持未 ACK，之后由认领机制重新投递。属性数据成功落库后顺带把设备标记为在线（尽力而为，失败不影响 ACK）。重复投递由 InfluxDB 同 ts 覆盖与最新值按 ts 比较吸收。
+ * 未处理的投递保持未 ACK，之后由认领机制重新投递。属性数据落库并 ACK 后，按数据来源批量把设备标记为在线（尽力而为，失败不影响 ACK；规则见 PresenceStore）。重复投递由 InfluxDB 同 ts 覆盖与最新值按 ts 比较吸收。
  */
 @Component
 public class PipelineProcessor {
@@ -237,27 +237,21 @@ public class PipelineProcessor {
     }
 
     /**
-     * 把本批成功落库的设备标记为在线：上报数据说明设备正在连接，补偿「设备在 transport 订阅之前就已连接、没有收到连接事件」的情况。
-     * 事件时间取该设备本批消息的最大 receivedAt，交给 Lua 的乱序保护：更晚的断连事件不会被覆盖，断连之前收到的数据也不会让设备复活。
-     * 客户端 IP 传 null（属性消息不带 IP），Lua 在上线且 IP 为空时保留原有 IP。
-     * 每个设备每批只写一次；这是尽力而为的附带动作，Redis 失败只在每批记一次 WARN，不重试、不影响 ACK。
+     * 把本批成功落库并已 ACK 的设备按「数据」来源标记为在线（{@link PresenceStore#applyDataBatch}，一次 pipeline 往返）：
+     * 补偿「设备在 transport 订阅之前就已连接、没有收到连接事件」的情况。时间取该设备本批消息的最大 receivedAt
+     * （transport 主机时钟，与 EMQX 事件时钟不同源），因此数据<b>不会推进</b>乱序保护用的 since：已在线不变，
+     * 离线设备只有数据时间超过断连时间加宽限期才会复活，晚到的断连事件仍然生效。
+     * 必须在 ACK 之后执行；这是尽力而为的附带动作，Redis 失败只在每批记一次 WARN，不重试、不影响 ACK。
      */
     private void markOnline(Map<String, Long> reportedAt) {
-        int failed = 0;
-        RuntimeException first = null;
-        for (Map.Entry<String, Long> e : reportedAt.entrySet()) {
-            try {
-                presence.apply(e.getKey(), true, e.getValue(), null);
-            } catch (RuntimeException ex) {
-                failed++;
-                if (first == null) {
-                    first = ex;
-                }
-            }
+        if (reportedAt.isEmpty()) {
+            return;
         }
-        if (failed > 0) {
-            log.warn("Failed to mark {} device(s) online from data (best effort, ignored): {}", failed,
-                    first.getMessage());
+        try {
+            presence.applyDataBatch(reportedAt);
+        } catch (RuntimeException e) {
+            log.warn("Failed to mark {} device(s) online from data (best effort, ignored): {}", reportedAt.size(),
+                    e.getMessage());
         }
     }
 

@@ -74,4 +74,26 @@ class DeviceServiceTest {
                     assertThat(e.getMessage()).isEqualTo("在线状态暂不可用");
                 });
     }
+
+    @Test
+    void reportedFilterReturns503WhenLastReportReadFails() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), Device.class);
+        DeviceMapper devices = mock(DeviceMapper.class);
+        LatestValueStore latest = mock(LatestValueStore.class);
+        DeviceService service = new DeviceService(devices, mock(ProductMapper.class), mock(ProductService.class),
+                mock(KeyGenerator.class), mock(SecretHasher.class), mock(DeviceIdentityCache.class),
+                latest, mock(PresenceStore.class), Clock.systemUTC());
+        Device d = new Device();
+        d.setId(1L);
+        d.setDeviceKey("dk1");
+        when(devices.selectList(any())).thenReturn(List.of(d));
+        when(latest.lastReportTimes(anyList())).thenThrow(new RedisConnectionFailureException("down"));
+
+        assertThatThrownBy(() -> service.list(
+                new DeviceFilter(null, null, null, null, DeviceFilter.Reported.RECENT, null, null), 1, 10))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.status().value()).isEqualTo(503);
+                    assertThat(e.getMessage()).isEqualTo("在线状态暂不可用");
+                });
+    }
 }

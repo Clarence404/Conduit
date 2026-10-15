@@ -140,11 +140,12 @@ public class DeviceService {
         List<Device> rows = devices.selectList(query);
         List<String> deviceKeys = rows.stream().map(Device::getDeviceKey).toList();
 
+        // 在线状态与最近上报都读：筛选用其一，页面视图直接复用这两份结果，不再二次读取 Redis
         Map<String, Presence> presenceByDevice;
         Map<String, Long> lastReports;
         try {
-            presenceByDevice = filter.online() != null ? presence.getAll(deviceKeys) : Map.of();
-            lastReports = filter.reported() != null ? latest.lastReportTimes(deviceKeys) : Map.of();
+            presenceByDevice = presence.getAll(deviceKeys);
+            lastReports = latest.lastReportTimes(deviceKeys);
         } catch (DataAccessException e) {
             log.warn("Redis unavailable for device list filters", e);
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "在线状态暂不可用");
@@ -175,7 +176,7 @@ public class DeviceService {
         Map<Long, Device> full = pageIds.isEmpty() ? Map.of()
                 : devices.selectBatchIds(pageIds).stream().collect(Collectors.toMap(Device::getId, d -> d));
         List<Device> pageRows = pageIds.stream().map(full::get).filter(Objects::nonNull).toList();
-        return new PageView<>(toViews(pageRows), matched.size(), page, size);
+        return new PageView<>(toViews(pageRows, presenceByDevice, lastReports), matched.size(), page, size);
     }
 
     /**
@@ -260,11 +261,19 @@ public class DeviceService {
             return List.of();
         }
         List<String> deviceKeys = list.stream().map(Device::getDeviceKey).toList();
+        return toViews(list, presence.getAll(deviceKeys), latest.lastReportTimes(deviceKeys));
+    }
+
+    /**
+     * 用已经读好的在线状态与最近上报时间构建视图（筛选路径复用，避免再读一次 Redis）；产品标识仍批量查一次库。
+     */
+    private List<DeviceView> toViews(List<Device> list, Map<String, Presence> presenceByDevice,
+                                     Map<String, Long> lastReports) {
+        if (list.isEmpty()) {
+            return List.of();
+        }
         Map<Long, String> productKeys = products.selectBatchIds(list.stream().map(Device::getProductId).distinct().toList())
                 .stream().collect(Collectors.toMap(Product::getId, Product::getProductKey));
-        Map<String, Presence> presenceByDevice = presence.getAll(deviceKeys);
-        Map<String, Long> lastReports = latest.lastReportTimes(deviceKeys);
-
         return list.stream().map(d -> {
             Presence p = presenceByDevice.get(d.getDeviceKey());
             return new DeviceView(d.getDeviceKey(), d.getName(), productKeys.get(d.getProductId()), d.getStatus(),

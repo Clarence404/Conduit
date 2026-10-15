@@ -128,16 +128,25 @@ class PipelineProcessorTest {
     }
 
     @Test
-    void marksDeviceOnlineOncePerDevicePerBatchWithLatestReceivedAt() {
+    void marksDevicesOnlineInOneBatchCallWithLatestReceivedAtPerDevice() {
         when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
         when(identities.find("d2")).thenReturn(Optional.of(identity("d2")));
 
         processor.process(List.of(deliveryAt("1-0", "d1", 100), deliveryAt("2-0", "d1", 300),
                 deliveryAt("3-0", "d2", 200)));
 
-        verify(presence, times(1)).apply("d1", true, 300L, null);
-        verify(presence, times(1)).apply("d2", true, 200L, null);
-        verify(presence, times(2)).apply(anyString(), eq(true), anyLong(), any());
+        verify(presence, times(1)).applyDataBatch(Map.of("d1", 300L, "d2", 200L));
+    }
+
+    @Test
+    void marksOnlineOnlyAfterAck() {
+        when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
+
+        processor.process(List.of(deliveryAt("1-0", "d1", 100)));
+
+        InOrder order = inOrder(bus, presence);
+        order.verify(bus).ack(GROUP, List.of("1-0"));
+        order.verify(presence).applyDataBatch(Map.of("d1", 100L));
     }
 
     @Test
@@ -146,19 +155,18 @@ class PipelineProcessorTest {
 
         processor.process(List.of(deliveryAt("1-0", "d1", 100)));
 
-        verify(presence, never()).apply(anyString(), anyBoolean(), anyLong(), any());
+        verify(presence, never()).applyDataBatch(any());
     }
 
     @Test
     void presenceFailureDoesNotFailOrRetryProcessing() {
         when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
-        when(presence.apply(anyString(), anyBoolean(), anyLong(), any()))
-                .thenThrow(new RedisConnectionFailureException("down"));
+        doThrow(new RedisConnectionFailureException("down")).when(presence).applyDataBatch(any());
 
         processor.process(List.of(deliveryAt("1-0", "d1", 100)));
 
         verify(bus, times(1)).ack(GROUP, List.of("1-0"));
-        verify(presence, times(1)).apply(anyString(), anyBoolean(), anyLong(), any());
+        verify(presence, times(1)).applyDataBatch(any());
         verify(bus, never()).recordDead(any(), anyString(), anyMap());
     }
 
