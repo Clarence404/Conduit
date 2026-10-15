@@ -15,8 +15,10 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Conduit REST 的最小客户端，只覆盖模拟器与端到端测试需要的接口。 */
 public class ConduitApiClient {
@@ -65,9 +67,16 @@ public class ConduitApiClient {
                 .get("productKey").asText();
     }
 
-    /** 产品当前物模型中的属性数量；用于判断是否还需要导入物模型。 */
-    public int propertyCount(String productKey) {
-        return send("GET", "/api/v1/products/" + encode(productKey), null, 200).path("propertyCount").asInt();
+    /**
+     * 产品已定义的属性标识。
+     *
+     * @return 按接口返回顺序的标识集合；产品没有物模型时为空
+     */
+    public Set<String> propertyIdentifiers(String productKey) {
+        JsonNode list = send("GET", "/api/v1/products/" + encode(productKey) + "/properties", null, 200);
+        Set<String> ids = new LinkedHashSet<>();
+        list.forEach(p -> ids.add(p.get("identifier").asText()));
+        return ids;
     }
 
     /** 导入物模型文档；mode 为服务端支持的导入模式（如 merge）。 */

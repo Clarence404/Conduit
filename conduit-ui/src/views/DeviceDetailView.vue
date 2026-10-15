@@ -1,10 +1,12 @@
 <script setup lang="ts">
 /**
- * 设备详情页：基本信息、MQTT 连接参数，以及每 5 秒轮询刷新的最新值表格。
+ * 设备详情页：上方为基本信息；下方「最新值 | 历史」两个标签页，标签与路由 query ?tab= 同步（用 router.replace，
+ * 不产生历史记录）。最新值标签含每 5 秒轮询刷新的最新值表格与 MQTT 连接参数；历史曲线由 HistoryPanel 负责，只在历史标签激活时挂载。
  * 设备信息只在进入时加载一次；产品名称取不到时退回显示产品 Key。
  */
 
 import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { deviceApi } from '@/api/devices'
 import { productApi } from '@/api/products'
@@ -13,10 +15,23 @@ import type { DeviceView, PointView } from '@/api/types'
 import { buildConnectionInfo } from '@/utils/connection'
 import { formatPointValue, pointLabel } from '@/utils/pointValue'
 import { formatDateTime } from '@/utils/format'
+import { deviceTabFromQuery, deviceTabQuery, type DeviceTab } from '@/utils/deviceTabs'
 import { usePolling } from '@/composables/usePolling'
+import HistoryPanel from '@/components/HistoryPanel.vue'
 
 // 不能叫 key：key 是 Vue 保留属性，不会作为 prop 传入
 const props = defineProps<{ deviceKey: string }>()
+
+const route = useRoute()
+const router = useRouter()
+
+// 当前标签与 ?tab= 同步；用 replace 切换，不产生历史记录
+const activeTab = computed<DeviceTab>({
+  get: () => deviceTabFromQuery(route.query.tab),
+  set: (tab) => {
+    void router.replace({ query: deviceTabQuery(route.query, tab) })
+  },
+})
 
 /** MQTT 端口，可由构建时环境变量 VITE_MQTT_PORT 覆盖，默认 1883；连接地址用当前页面的主机名。 */
 const mqttPort = Number(import.meta.env.VITE_MQTT_PORT) || 1883
@@ -78,38 +93,48 @@ usePolling(loadLatest, 5000)
       </el-descriptions>
     </el-card>
 
-    <el-card v-if="connection" header="连接参数">
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="地址">{{ connection.host }}</el-descriptions-item>
-        <el-descriptions-item label="端口">{{ connection.port }}</el-descriptions-item>
-        <el-descriptions-item label="clientId">{{ connection.clientId }}</el-descriptions-item>
-        <el-descriptions-item label="username">{{ connection.username }}</el-descriptions-item>
-        <el-descriptions-item label="password">设备密钥（创建或重置时显示）</el-descriptions-item>
-        <el-descriptions-item label="上报 topic">{{ connection.topic }}</el-descriptions-item>
-      </el-descriptions>
-      <p class="label">payload 示例</p>
-      <pre class="payload">{{ connection.payloadExample }}</pre>
-    </el-card>
+    <el-tabs v-model="activeTab">
+      <el-tab-pane label="最新值" name="latest">
+        <div class="pane">
+          <el-card>
+            <template #header>
+              <div class="card-header">
+                <span>最新值</span>
+                <span class="hint">每 5 秒刷新 · {{ formatDateTime(lastRefreshed) }}</span>
+              </div>
+            </template>
+            <el-table :data="values" border empty-text="暂无数据">
+              <el-table-column label="测点" width="240">
+                <template #default="{ row }">{{ pointLabel(row) }}</template>
+              </el-table-column>
+              <el-table-column label="值">
+                <template #default="{ row }">{{ formatPointValue(row) }}</template>
+              </el-table-column>
+              <el-table-column label="采样时间" width="200">
+                <template #default="{ row }">{{ formatDateTime(row.ts) }}</template>
+              </el-table-column>
+            </el-table>
+          </el-card>
 
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>最新值</span>
-          <span class="hint">每 5 秒刷新 · {{ formatDateTime(lastRefreshed) }}</span>
+          <el-card v-if="connection" header="连接参数">
+            <el-descriptions :column="2" border>
+              <el-descriptions-item label="地址">{{ connection.host }}</el-descriptions-item>
+              <el-descriptions-item label="端口">{{ connection.port }}</el-descriptions-item>
+              <el-descriptions-item label="clientId">{{ connection.clientId }}</el-descriptions-item>
+              <el-descriptions-item label="username">{{ connection.username }}</el-descriptions-item>
+              <el-descriptions-item label="password">设备密钥（创建或重置时显示）</el-descriptions-item>
+              <el-descriptions-item label="上报 topic">{{ connection.topic }}</el-descriptions-item>
+            </el-descriptions>
+            <p class="label">payload 示例</p>
+            <pre class="payload">{{ connection.payloadExample }}</pre>
+          </el-card>
         </div>
-      </template>
-      <el-table :data="values" border empty-text="暂无数据">
-        <el-table-column label="测点" width="240">
-          <template #default="{ row }">{{ pointLabel(row) }}</template>
-        </el-table-column>
-        <el-table-column label="值">
-          <template #default="{ row }">{{ formatPointValue(row) }}</template>
-        </el-table-column>
-        <el-table-column label="采样时间" width="200">
-          <template #default="{ row }">{{ formatDateTime(row.ts) }}</template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+      </el-tab-pane>
+
+      <el-tab-pane label="历史" name="history">
+        <HistoryPanel v-if="activeTab === 'history'" :device-key="device.deviceKey" :product-key="device.productKey" />
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
@@ -121,6 +146,11 @@ usePolling(loadLatest, 5000)
 }
 .detail h2 {
   margin: 0;
+}
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 .label {
   margin: 16px 0 4px;

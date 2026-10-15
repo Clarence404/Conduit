@@ -15,6 +15,7 @@ import org.testcontainers.utility.MountableFile;
 
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -26,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
+/** DeviceSimulator 对真实 EMQX 的集成测试：上报数量与时间戳、可选的运行状态 st、连接失败重试后退出。 */
 @Testcontainers
 class DeviceSimulatorIT {
 
@@ -38,32 +40,39 @@ class DeviceSimulatorIT {
                     .waitingFor(Wait.forLogMessage(".*is running now.*", 1))
                     .withStartupTimeout(Duration.ofMinutes(2));
 
-    private static List<DeviceCredentials> devices(int n) {
+    private static List<DeviceCredentials> devices(String prefix, int n) {
         List<DeviceCredentials> list = new ArrayList<>();
         for (int i = 1; i <= n; i++) {
-            list.add(new DeviceCredentials("pk", "dk-" + i, "secret"));
+            list.add(new DeviceCredentials("pk", prefix + i, "secret"));
         }
         return list;
+    }
+
+    /** 订阅所有上报并收集 payload 文本。 */
+    private static Mqtt5BlockingClient subscribe(String id, List<String> payloads) {
+        Mqtt5BlockingClient subscriber = MqttClient.builder().useMqttVersion5().identifier(id)
+                .serverHost(EMQX.getHost()).serverPort(EMQX.getMappedPort(1883)).buildBlocking();
+        subscriber.connect();
+        subscriber.toAsync().subscribeWith().topicFilter("conduit/+/+/up/property").qos(MqttQos.AT_LEAST_ONCE)
+                .callback(p -> payloads.add(new String(p.getPayloadAsBytes(), StandardCharsets.UTF_8)))
+                .send().join();
+        return subscriber;
     }
 
     @Test
     void publishesAllMessagesWithStrictlyIncreasingTimestampsPerDevice() throws Exception {
         List<String> payloads = new CopyOnWriteArrayList<>();
-        Mqtt5BlockingClient subscriber = MqttClient.builder().useMqttVersion5().identifier("it-subscriber")
-                .serverHost(EMQX.getHost()).serverPort(EMQX.getMappedPort(1883)).buildBlocking();
-        subscriber.connect();
-        subscriber.toAsync().subscribeWith().topicFilter("conduit/+/+/up/property").qos(MqttQos.AT_LEAST_ONCE)
-                .callback(p -> payloads.add(new String(p.getPayloadAsBytes(), java.nio.charset.StandardCharsets.UTF_8)))
-                .send().join();
+        Mqtt5BlockingClient subscriber = subscribe("it-subscriber", payloads);
 
         new DeviceSimulator(EMQX.getHost(), EMQX.getMappedPort(1883), Duration.ofMillis(50), 5,
-                Duration.ofSeconds(30)).run(devices(3));
+                Duration.ofSeconds(30)).run(devices("dk-", 3));
 
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(payloads).hasSize(15));
         ObjectMapper mapper = new ObjectMapper();
         Map<String, List<Long>> tsByDevice = new HashMap<>();
         for (String payload : payloads) {
             JsonNode json = mapper.readTree(payload);
+            assertThat(json.get("params").has(OperatingState.IDENTIFIER)).as("st is opt-in").isFalse();
             String id = json.get("id").asText();
             tsByDevice.computeIfAbsent(id.substring(0, id.lastIndexOf('-')), k -> new ArrayList<>())
                     .add(json.get("ts").asLong());
@@ -79,15 +88,37 @@ class DeviceSimulatorIT {
     }
 
     @Test
-    void failedConnectThrowsPromptlyAndLeavesNoSimulatorThreads() throws IOException {
+    void publishesTheOperatingStateWhenEnabled() throws Exception {
+        List<String> payloads = new CopyOnWriteArrayList<>();
+        Mqtt5BlockingClient subscriber = subscribe("it-subscriber-st", payloads);
+
+        new DeviceSimulator(EMQX.getHost(), EMQX.getMappedPort(1883), Duration.ofMillis(50), 2,
+                Duration.ofSeconds(30), PayloadFormat.STANDARD, true).run(devices("st-", 2));
+
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(payloads).hasSize(4));
+        ObjectMapper mapper = new ObjectMapper();
+        for (String payload : payloads) {
+            JsonNode json = mapper.readTree(payload);
+            String deviceKey = json.get("id").asText().substring(0, json.get("id").asText().lastIndexOf('-'));
+            JsonNode st = json.get("params").get(OperatingState.IDENTIFIER);
+            assertThat(st.isIntegralNumber()).isTrue();
+            assertThat(st.asLong()).isEqualTo(OperatingState.at(deviceKey, json.get("ts").asLong()));
+        }
+        subscriber.disconnect();
+    }
+
+    @Test
+    void failedConnectRetriesThenThrowsAndLeavesNoSimulatorThreads() throws IOException {
         int closedPort;
         try (ServerSocket socket = new ServerSocket(0)) {
             closedPort = socket.getLocalPort();
         }
+        ConnectRetry fastRetry = new ConnectRetry(3, Duration.ofMillis(100), d -> Thread.sleep(d.toMillis()));
 
         assertThatThrownBy(() -> new DeviceSimulator("127.0.0.1", closedPort, Duration.ofMillis(50), 5,
-                Duration.ofSeconds(30)).run(devices(2)))
-                .isInstanceOf(RuntimeException.class);
+                Duration.ofSeconds(30)).withConnectRetry(fastRetry).run(devices("dk-", 2)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("after 3 attempts");
 
         await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
                 assertThat(Thread.getAllStackTraces().keySet())

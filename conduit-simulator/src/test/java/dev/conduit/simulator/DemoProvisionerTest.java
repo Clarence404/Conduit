@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** DemoProvisioner 与 ConduitApiClient 的单元测试（本地 HttpServer 模拟 Conduit REST）。 */
 class DemoProvisionerTest {
 
     HttpServer server;
@@ -26,7 +27,7 @@ class DemoProvisionerTest {
     final List<String> requestBodies = new CopyOnWriteArrayList<>();
     final List<String> queries = new CopyOnWriteArrayList<>();
     final AtomicInteger created = new AtomicInteger();
-    volatile int propertyCount;
+    volatile String propertiesJson = "[]";
 
     @BeforeEach
     void start() throws IOException {
@@ -59,8 +60,7 @@ class DemoProvisionerTest {
                 status = 201;
                 body = "{\"productKey\":\"pk-new\",\"codec\":\"flat-json\"}";
             }
-            case "GET /api/v1/products/pk-demo" -> body = "{\"productKey\":\"pk-demo\",\"propertyCount\":"
-                    + propertyCount + "}";
+            case "GET /api/v1/products/pk-demo/properties" -> body = propertiesJson;
             case "PUT /api/v1/products/pk-demo/thing-model" -> body = "[]";
             case "GET /api/v1/devices" -> body = """
                     {"items":[{"deviceKey":"dk-b","name":"1号楼配电室 电表02","status":"ENABLED"},
@@ -99,6 +99,15 @@ class DemoProvisionerTest {
         ConduitApiClient api = new ConduitApiClient(URI.create("http://127.0.0.1:" + server.getAddress().getPort()));
         api.login("admin", "pw");
         return api;
+    }
+
+    /** 属性列表接口的响应：只含 identifier 的 JSON 数组。 */
+    private static String properties(String... identifiers) {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < identifiers.length; i++) {
+            sb.append(i == 0 ? "" : ",").append("{\"identifier\":\"").append(identifiers[i]).append("\"}");
+        }
+        return sb.append(']').toString();
     }
 
     @Test
@@ -162,22 +171,33 @@ class DemoProvisionerTest {
 
     @Test
     void importsDemoThingModelWhenProductHasNoProperties() {
-        propertyCount = 0;
+        propertiesJson = "[]";
 
         assertThat(DemoProvisioner.ensureThingModel(client(), "pk-demo")).isTrue();
 
         assertThat(queries).contains("PUT /api/v1/products/pk-demo/thing-model?mode=merge");
         assertThat(requestBodies).anySatisfy(b -> assertThat(b)
-                .startsWith("PUT /api/v1/products/pk-demo/thing-model ").contains("\"identifier\":\"Ua\""));
+                .startsWith("PUT /api/v1/products/pk-demo/thing-model ").contains("\"identifier\":\"Ua\"")
+                .contains("\"identifier\":\"st\""));
     }
 
     @Test
-    void skipsImportWhenProductAlreadyHasProperties() {
-        propertyCount = 3;
+    void mergesDemoThingModelWhenAnyDemoPropertyIsMissing() {
+        propertiesJson = properties("Ua", "Ub", "Uc", "Ia", "Ib", "Ic", "EPimp", "custom");
+
+        assertThat(DemoProvisioner.ensureThingModel(client(), "pk-demo")).isTrue();
+
+        assertThat(queries).contains("PUT /api/v1/products/pk-demo/thing-model?mode=merge");
+    }
+
+    @Test
+    void skipsImportWhenEveryDemoPropertyExists() {
+        propertiesJson = properties("Ua", "Ub", "Uc", "Ia", "Ib", "Ic", "EPimp", "st", "custom");
 
         assertThat(DemoProvisioner.ensureThingModel(client(), "pk-demo")).isFalse();
 
-        assertThat(calls).doesNotContain("PUT /api/v1/products/pk-demo/thing-model");
+        assertThat(calls).contains("GET /api/v1/products/pk-demo/properties")
+                .doesNotContain("PUT /api/v1/products/pk-demo/thing-model");
     }
 
     @Test
@@ -196,9 +216,17 @@ class DemoProvisionerTest {
 
         List<String> ids = new ArrayList<>();
         model.get("properties").forEach(p -> ids.add(p.get("identifier").asText()));
-        assertThat(ids).containsExactly("Ua", "Ub", "Uc", "Ia", "Ib", "Ic", "EPimp");
-        model.get("properties").forEach(p -> assertThat(p.get("dataType").asText()).isEqualTo("DOUBLE"));
+        assertThat(ids).containsExactly("Ua", "Ub", "Uc", "Ia", "Ib", "Ic", "EPimp", "st");
+        for (int i = 0; i < 7; i++) {
+            assertThat(model.get("properties").get(i).get("dataType").asText()).isEqualTo("DOUBLE");
+        }
         assertThat(model.get("properties").get(0).get("decimals").asInt()).isEqualTo(1);
         assertThat(model.get("properties").get(6).get("decimals").asInt()).isEqualTo(3);
+        JsonNode st = model.get("properties").get(7);
+        assertThat(st.get("name").asText()).isEqualTo("运行状态");
+        assertThat(st.get("dataType").asText()).isEqualTo("ENUM");
+        List<String> items = new ArrayList<>();
+        st.get("enumItems").forEach(e -> items.add(e.get("value").asInt() + "=" + e.get("label").asText()));
+        assertThat(items).containsExactly("0=停机", "1=运行", "2=检修");
     }
 }

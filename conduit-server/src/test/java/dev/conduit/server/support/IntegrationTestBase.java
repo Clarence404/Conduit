@@ -38,6 +38,7 @@ public abstract class IntegrationTestBase {
     @Autowired
     protected SecretHasher secretHasher;
 
+    /** 测试用设备凭据：租户、产品 Key、设备 Key 与明文密钥。 */
     protected record TestDevice(long tenantId, String productKey, String deviceKey, String secret) {
     }
 

@@ -24,7 +24,7 @@ conduit-ui（Vue）──REST──> conduit-server
 | `conduit-common` | 跨进程共享：`MessageBus` 接口与 Redis Streams 实现、协议无关的 `RawMessage` |
 | `conduit-transport` | 协议接入层（对应 ThingsBoard 的 transport）：订阅 EMQX 共享主题，把设备报文原样组装成 `RawMessage` 发布到总线；不做业务解析 |
 | `conduit-server` | 业务核心：EMQX 鉴权回调、总线消费流水线（解码 → 物模型校验 → 写时序库/最新值）、REST API、多租户 |
-| `conduit-simulator` | 演示用设备模拟器：自动创建演示产品/设备、导入演示物模型、按间隔上报 |
+| `conduit-simulator` | 演示用设备模拟器：自动创建演示产品/设备、导入演示物模型、按间隔上报；演示设备附带枚举运行状态 st，首次连接 MQTT 失败每 2 秒重试、最多 15 次 |
 | `conduit-ui` | 前端：Vue 3 + TypeScript + Element Plus + ECharts |
 | `conduit-e2e` | 端到端测试（`-Pe2e`）：杀进程不丢数据 |
 | `deploy/` | Docker Compose（项目名 `conduit`）、`build-local.sh` |
@@ -36,8 +36,8 @@ conduit-ui（Vue）──REST──> conduit-server
 - **多租户**：所有业务表带 `tenant_id`，MyBatis-Plus 租户拦截器自动过滤；跨租户查询（如按 productKey 找产品）必须显式标注并只在内部使用。
 - **物模型**（V0.2-A）：产品定义属性（DOUBLE/INT/BOOL/TEXT/ENUM），上报按属性逐测点校验；不合格测点被剔除并记录 `FIELD_REJECTED`；没有物模型的产品按 V0.1 规则（数值一律浮点）。物模型缓存 60 秒，编辑后提交事务再失效。
 - **解码器**：`PayloadDecoder` SPI，按产品选择（`standard-json`、`flat-json`），名称重复启动即失败。
-- **时序库**：InfluxDB 3 Core 3.12.0，自写 HTTP 客户端（`/api/v3/write_lp`、`/api/v3/query_sql`），所有产品共用表 `property`，tag 为 `tenant_id`/`product_key`/`device_key`，每个测点一列，保留 30 天。
-- **历史查询**（V0.2-B）：单设备多测点，服务端自动选择原始或按时间桶聚合（每条曲线 ≤ 1000 点），SQL 参数化。
+- **时序库**：InfluxDB 3 Core 3.12.0，自写 HTTP 客户端（`/api/v3/write_lp`、`/api/v3/query_sql`），所有产品共用表 `property`，tag 为 `tenant_id`/`product_key`/`device_key`，每个测点一列，保留 30 天。列类型全表共享：同名测点在所有产品中必须是同一类型（例如模拟器只给物模型含枚举 st 的演示产品发送 st，e2e 等无物模型产品不发）。
+- **历史查询**（V0.2-B）：`GET /api/v1/devices/{deviceKey}/history`，单设备 1～8 个测点，跨度 1 分钟～30 天（默认最近 1 小时）。先计数：每个测点 ≤ 1000 点时返回原始点，否则在固定档位（1s、5s、10s、30s、1m、5m、15m、30m、1h、3h、6h、12h）中取使桶数 ≤ 1000 的最小桶，用 `date_bin`（原点 1970）聚合：数值 avg/min/max，布尔/枚举取桶内最后值（`selector_last`）。SQL 参数化，时间参数用 ISO-8601 UTC 字符串；列名只用 `InfluxSchema`（60 秒缓存，未知列强制刷新一次）确认存在的标识符；InfluxDB 不可达或 5xx → 503，其他查询错误 → 500 且不暴露 SQL。前端 ECharts 6.1.0（5.6.0 存在 XSS 公告 GHSA-fgmj-fm8m-jvvx，故升级）经 `echarts/core` 按需引入（不用 vue-echarts），每测点一张联动小图，框选缩放后重新查询。
 - **部署**：Docker 宿主机无外网时用 `deploy/build-local.sh`：本机从干净检出构建 jar 与前端，宿主机只打复制产物的薄镜像。
 
 ### 1.3 版本路线
@@ -57,7 +57,7 @@ conduit-ui（Vue）──REST──> conduit-server
 
 - Java 21、Spring Boot 3.5、MyBatis-Plus、Flyway；包名 `dev.conduit.<模块>`；按业务分包（`device`、`product`、`thingmodel`、`telemetry`、`pipeline` …）。
 - 测试：先写失败测试（TDD）；集成测试用 Testcontainers；前端用 Vitest + `@vue/test-utils`。
-- 界面：中文文案；所有分页表格默认每页 10 条（可选 10/20/50/100）；功能入口要显眼（列表有「操作」列按钮、详情页有面包屑、产品与设备互相可跳转）。
+- 界面：中文文案；所有分页表格默认每页 10 条（可选 10/20/50/100）；功能入口要显眼（列表有「操作」列按钮、详情页有面包屑、产品与设备互相可跳转）；详情页的标签页与路由 query `tab` 同步（`router.replace`）。
 - 演示与测试数据：用有意义的中文名称（如「三相电表（演示）」「1号楼配电室 电表01」），测试结束清理自己创建的数据。
 - 提交：Conventional Commits；只署名不带邮箱；不加任何 AI 署名行。
 - 仓库公开：不要把 IP、本机路径、用户名、口令、token 写进受版本控制的文件；本地配置（`deploy/.env`、`application-local.yml`、`simulator-local.properties`）已在 `.gitignore`。
@@ -77,6 +77,6 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-15：`conduit-connector` 改名 `conduit-transport`（避免与 EMQX 数据集成 Connector 混淆），env `TRANSPORT_MQTT_*`，属性前缀 `conduit.transport.mqtt`。
 - 2026-10-15：Docker 宿主机无外网，部署用 `deploy/build-local.sh`（本机干净检出构建 + 薄镜像）。
 - 2026-10-15：界面约定——分页每页 10 条、入口显眼（操作列 + 面包屑）、演示数据用有意义中文名、e2e 自清理。
-- 2026-10-15 V0.2-B：历史曲线在设备详情「历史」标签页；服务端自动聚合（≤1000 点/曲线，固定桶档位，数值 avg/min/max、状态取桶内最后值）；ECharts 5.6.0 按需引入；SQL 参数化（`2026-10-15-conduit-v0.2b-history-design.md`）。
+- 2026-10-15 V0.2-B：历史曲线在设备详情「历史」标签页；服务端自动聚合（≤1000 点/曲线，固定桶档位，数值 avg/min/max、状态取桶内最后值）；ECharts 6.1.0 按需引入（原定 5.6.0，因 XSS 公告 GHSA-fgmj-fm8m-jvvx 升级）；SQL 参数化（`2026-10-15-conduit-v0.2b-history-design.md`）。
 - 2026-10-15 路线图：V2.1 AI 能力（自然语言查数、异常检测、物模型草稿生成、告警摘要）。
 - 2026-10-15：所有类与重点方法必须写中文注释（见 2.1）；升级时同步更新本文件。

@@ -16,6 +16,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -75,8 +76,43 @@ public class InfluxClient implements AutoCloseable {
      * SQL 经 URL 编码放在查询串中，调用方必须自行保证 SQL 已参数化/转义。
      */
     public List<Map<String, Object>> querySql(String db, String sql) {
-        HttpResponse<String> response = send(HttpRequest.newBuilder(
-                uri("/api/v3/query_sql", "db", db, "q", sql, "format", "json")).GET());
+        return rows(send(HttpRequest.newBuilder(
+                uri("/api/v3/query_sql", "db", db, "q", sql, "format", "json")).GET()));
+    }
+
+    /**
+     * 参数化 SQL 查询（POST /api/v3/query_sql，format=json）。SQL 中用 $name 引用 params 中的值：
+     * 字符串参数可直接用于比较；时间参数必须是 {@link InfluxTime#iso(long)} 生成的 ISO-8601 UTC 字符串。
+     *
+     * @param db     数据库名
+     * @param sql    SQL 文本，不得拼接任何请求值
+     * @param params 参数名 → 值
+     * @return 结果行（列名 → 值），无结果为空列表
+     * @throws InfluxHttpException  InfluxDB 返回非 200
+     * @throws UncheckedIOException 连接失败、超时等 IO 错误
+     */
+    public List<Map<String, Object>> querySql(String db, String sql, Map<String, Object> params) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("db", db);
+        body.put("q", sql);
+        body.put("params", params);
+        body.put("format", "json");
+        String json;
+        try {
+            json = mapper.writeValueAsString(body);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
+        return rows(send(HttpRequest.newBuilder(uri("/api/v3/query_sql"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))));
+    }
+
+    /**
+     * 解析查询响应：非 200 抛 InfluxHttpException；空响应体视为无结果；
+     * 响应不是预期的 JSON 数组时抛 IllegalStateException。
+     */
+    private List<Map<String, Object>> rows(HttpResponse<String> response) {
         if (response.statusCode() != 200) {
             throw new InfluxHttpException(response.statusCode(), response.body());
         }

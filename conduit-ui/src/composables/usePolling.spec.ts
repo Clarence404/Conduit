@@ -1,5 +1,6 @@
+/** startPolling 与 createVisiblePoller 的单元测试 */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { startPolling } from './usePolling'
+import { createVisiblePoller, startPolling } from './usePolling'
 
 describe('startPolling', () => {
   beforeEach(() => {
@@ -50,5 +51,109 @@ describe('startPolling', () => {
 
     expect(maxRunning).toBe(1)
     stop()
+  })
+})
+
+describe('createVisiblePoller', () => {
+  let hidden = false
+  const originalHidden = Object.getOwnPropertyDescriptor(document, 'hidden')
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    hidden = false
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    if (originalHidden) {
+      Object.defineProperty(document, 'hidden', originalHidden)
+    } else {
+      delete (document as unknown as Record<string, unknown>).hidden
+    }
+  })
+
+  function setHidden(value: boolean) {
+    hidden = value
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+
+  it('runs on start, polls, and stops on stop()', async () => {
+    const task = vi.fn().mockResolvedValue(undefined)
+    const poller = createVisiblePoller(task, 1000)
+
+    poller.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(task).toHaveBeenCalledTimes(1)
+    expect(poller.isActive()).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(task).toHaveBeenCalledTimes(2)
+
+    poller.stop()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(task).toHaveBeenCalledTimes(2)
+    expect(poller.isActive()).toBe(false)
+    poller.dispose()
+  })
+
+  it('pauses while hidden and runs immediately when visible again', async () => {
+    const task = vi.fn().mockResolvedValue(undefined)
+    const poller = createVisiblePoller(task, 1000)
+    poller.start()
+    await vi.advanceTimersByTimeAsync(0)
+
+    setHidden(true)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(task).toHaveBeenCalledTimes(1)
+
+    setHidden(false)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(task).toHaveBeenCalledTimes(2)
+    poller.dispose()
+  })
+
+  it('does not resume a stopped poller when the page becomes visible', async () => {
+    const task = vi.fn().mockResolvedValue(undefined)
+    const poller = createVisiblePoller(task, 1000)
+    poller.start()
+    await vi.advanceTimersByTimeAsync(0)
+    poller.stop()
+
+    setHidden(true)
+    setHidden(false)
+    await vi.advanceTimersByTimeAsync(5000)
+
+    expect(task).toHaveBeenCalledTimes(1)
+    poller.dispose()
+  })
+
+  it('waits for visibility when started while hidden', async () => {
+    const task = vi.fn().mockResolvedValue(undefined)
+    hidden = true
+    const poller = createVisiblePoller(task, 1000)
+
+    poller.start()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(task).not.toHaveBeenCalled()
+
+    setHidden(false)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(task).toHaveBeenCalledTimes(1)
+    poller.dispose()
+  })
+
+  it('stops listening after dispose()', async () => {
+    const task = vi.fn().mockResolvedValue(undefined)
+    const poller = createVisiblePoller(task, 1000)
+    poller.start()
+    await vi.advanceTimersByTimeAsync(0)
+
+    poller.dispose()
+    setHidden(true)
+    setHidden(false)
+    await vi.advanceTimersByTimeAsync(5000)
+
+    expect(task).toHaveBeenCalledTimes(1)
   })
 })
