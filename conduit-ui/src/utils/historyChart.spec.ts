@@ -151,6 +151,22 @@ describe('state charts', () => {
   })
 })
 
+describe('tooltip escaping', () => {
+  it('escapes user-defined name and unit text in the formatter output', () => {
+    const xss = '<img src=x onerror=alert(1)>'
+    const raw = series({ name: xss, unit: xss })
+    const agg = series({ name: xss, unit: xss, mode: 'AGG', points: [[900_000, 220, 219.5, 221]] })
+
+    for (const out of [
+      parts(buildChartOption(raw, RAW_CTX)).tooltip.formatter([{ dataIndex: 0 }]),
+      parts(buildChartOption(agg, AGG_CTX)).tooltip.formatter([{ dataIndex: 0 }]),
+    ]) {
+      expect(out).not.toContain('<img')
+      expect(out).toContain('&lt;img src=x onerror=alert(1)&gt;')
+    }
+  })
+})
+
 describe('empty data', () => {
   it('still returns axes with empty series', () => {
     const o = parts(buildChartOption(series({ points: [] }), RAW_CTX))
