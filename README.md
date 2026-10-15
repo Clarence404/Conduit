@@ -219,7 +219,7 @@ server、connector、simulator 和前端都可以直接在 IDEA 里运行，连�
 
 ## 端到端测试：杀进程不丢数据
 
-10 台设备各发 50 条消息，发送中途 kill 并重启 `conduit-server`，最终 InfluxDB 中应恰好 500 条。需要 Compose 环境已启动（不带 demo profile 亦可）。
+10 台设备各发 50 条消息，发送中途 kill 并重启 `conduit-server`，最终 InfluxDB 中应恰好 500 条。需要 Compose 环境已启动（不带 demo profile 亦可）。不要同时运行两个 e2e：它们共用同一个 conduit-server，一个 kill 它会让另一个连接失败。
 
 ```bash
 mvn install -DskipTests

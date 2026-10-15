@@ -111,7 +111,8 @@ class NoDataLossE2EIT {
 
     /** 消费组 conduit-server 中仍待确认、且属于 productKey 的条目内容（空串表示没有）。 */
     private String pendingEntriesOf(String productKey) throws Exception {
-        String script = "redis-cli XPENDING conduit:stream:up conduit-server - + 1000 | awk 'NR%4==1' "
+        // 上限取大，避免积压超过上限时（按 id 从旧到新列出）漏掉本次运行的条目
+        String script = "redis-cli XPENDING conduit:stream:up conduit-server - + 100000 | awk 'NR%4==1' "
                 + "| while read id; do redis-cli XRANGE conduit:stream:up \"$id\" \"$id\"; done";
         String entries = composeOutput("exec", "-T", "redis", "sh", "-c", script);
         return entries.contains(productKey) ? entries : "";
