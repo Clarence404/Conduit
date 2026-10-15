@@ -18,4 +18,22 @@ describe('FilterBar', () => {
     await wrapper.findAll('button').find((b) => b.text() === '重置')!.trigger('click')
     expect(wrapper.emitted('reset')).toHaveLength(1)
   })
+
+  it('only shows the 更多筛选 toggle with a more slot, renders the slot when expanded and shows the count', async () => {
+    const plain = mount(FilterBar, { global: { plugins: [ElementPlus] } })
+    expect(plain.find('[data-test="more-toggle"]').exists()).toBe(false)
+
+    const wrapper = mount(FilterBar, {
+      props: { expanded: false, moreCount: 2 },
+      global: { plugins: [ElementPlus] },
+      slots: { more: '<span class="extra" />' },
+    })
+    expect(wrapper.find('.extra').exists()).toBe(false)
+    expect(wrapper.find('[data-test="more-toggle"]').text()).toContain('更多筛选(2)')
+    await wrapper.find('[data-test="more-toggle"]').trigger('click')
+    expect(wrapper.emitted('toggle')).toHaveLength(1)
+
+    await wrapper.setProps({ expanded: true })
+    expect(wrapper.find('.extra').exists()).toBe(true)
+  })
 })

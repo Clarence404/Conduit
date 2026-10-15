@@ -47,6 +47,11 @@ async function load() {
 
 const poller = createVisiblePoller(load, REFRESH_MS)
 
+/** 点击指标卡跳到设备列表；online 为 true 时直接带上「在线」筛选（在线数未知时模板不触发） */
+function openDevices(online = false) {
+  void router.push(online ? { name: 'devices', query: { online: 'true' } } : { name: 'devices' })
+}
+
 /** 进入设备详情 */
 function openDevice(deviceKey: string) {
   void router.push({ name: 'device-detail', params: { deviceKey } })
@@ -76,12 +81,20 @@ onBeforeUnmount(() => {
           <div class="tile-value">{{ data.productCount }}</div>
           <div class="tile-sub">共定义 {{ data.propertyCount }} 个属性</div>
         </div>
-        <div class="tile cd-panel" data-test="tile-devices">
+        <div class="tile cd-panel clickable" data-test="tile-devices" role="link" tabindex="0" @click="openDevices()" @keydown.enter="openDevices()">
           <div class="tile-head"><el-icon><Cpu /></el-icon>设备</div>
           <div class="tile-value">{{ data.deviceCount }}</div>
           <div class="tile-sub">已启用 {{ data.enabledCount }} · 已禁用 {{ data.disabledCount }}</div>
         </div>
-        <div class="tile cd-panel" data-test="tile-online">
+        <div
+          class="tile cd-panel"
+          :class="{ clickable: data.onlineCount !== null }"
+          data-test="tile-online"
+          :role="data.onlineCount !== null ? 'link' : undefined"
+          :tabindex="data.onlineCount !== null ? 0 : undefined"
+          @click="data.onlineCount !== null && openDevices(true)"
+          @keydown.enter="data.onlineCount !== null && openDevices(true)"
+        >
           <div class="tile-head"><el-icon><Connection /></el-icon>在线设备</div>
           <div class="tile-value">{{ formatCount(data.onlineCount) }}</div>
           <el-progress v-if="rate !== null" :percentage="rate" :show-text="false" :stroke-width="6" status="success" />
@@ -155,6 +168,13 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: var(--cd-space-2);
+}
+.tile.clickable {
+  cursor: pointer;
+}
+.tile.clickable:hover,
+.tile.clickable:focus-visible {
+  outline: 1px solid var(--el-color-primary);
 }
 .tile-head {
   display: flex;

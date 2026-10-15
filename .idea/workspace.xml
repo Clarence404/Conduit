@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="RunDashboard">
+    <option name="configurationTypes">
+      <set>
+        <option value="Application" />
+        <option value="SpringBootApplicationConfigurationType" />
+        <option value="js.build_tools.npm" />
+      </set>
+    </option>
+  </component>
+  <component name="RunManager" selected="Compound.Conduit (local all)" />
+</project>

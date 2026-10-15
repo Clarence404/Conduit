@@ -1,8 +1,8 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Conduit Server (local)" type="Application" factoryName="Application">
-    <option name="MAIN_CLASS_NAME" value="dev.conduit.server.ServerApplication" />
+  <configuration default="false" name="Conduit Server (local)" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <option name="ACTIVE_PROFILES" value="local" />
     <module name="conduit-server" />
-    <option name="VM_PARAMETERS" value="-Dspring.profiles.active=local" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="dev.conduit.server.ServerApplication" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>

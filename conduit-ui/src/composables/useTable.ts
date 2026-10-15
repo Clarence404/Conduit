@@ -37,7 +37,7 @@ export interface TableState<T> {
 
 /**
  * 创建分页表格状态。不会自动加载，由页面在挂载或切换标签时调用 load()。
- * @param fetch 取一页数据的函数；抛错时提示接口错误并保留上一次的数据
+ * @param fetch 取一页数据的函数；抛错时提示接口错误并清空数据（页面据 failed 显示「加载失败」）
  */
 export function useTable<T>(fetch: PageFetcher<T>): TableState<T> {
   const items = ref([]) as Ref<T[]>
@@ -51,7 +51,7 @@ export function useTable<T>(fetch: PageFetcher<T>): TableState<T> {
 
   /**
    * 加载当前页。先发后到的旧响应（及其错误提示、loading 复位）被丢弃；
-   * 当前页为空且超出最后一页时，退到最后一页再加载一次。
+   * 当前页为空且超出最后一页时，退到最后一页再加载一次；加载失败时清空 items 与 total。
    */
   async function load(): Promise<void> {
     const id = seq.next()
@@ -70,6 +70,9 @@ export function useTable<T>(fetch: PageFetcher<T>): TableState<T> {
       total.value = res.total
     } catch (e) {
       if (seq.isLatest(id)) {
+        // 清空上一次的数据：失败后表格显示「加载失败」，不能把旧筛选条件下的行留在新条件下
+        items.value = []
+        total.value = 0
         failed.value = true
         ElMessage.error(problemMessage(e))
       }

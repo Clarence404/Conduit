@@ -1,8 +1,8 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Conduit Transport (local)" type="Application" factoryName="Application">
-    <option name="MAIN_CLASS_NAME" value="dev.conduit.transport.TransportApplication" />
+  <configuration default="false" name="Conduit Transport (local)" type="SpringBootApplicationConfigurationType" factoryName="Spring Boot">
+    <option name="ACTIVE_PROFILES" value="local" />
     <module name="conduit-transport" />
-    <option name="VM_PARAMETERS" value="-Dspring.profiles.active=local" />
+    <option name="SPRING_BOOT_MAIN_CLASS" value="dev.conduit.transport.TransportApplication" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>

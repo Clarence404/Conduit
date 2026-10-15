@@ -42,6 +42,7 @@ describe('LoginView', () => {
     const { wrapper, router } = await mountAt('/login?redirect=/devices/dk1')
 
     expect(wrapper.find('.brand').text()).toContain('Conduit 设备接入平台')
+    expect(wrapper.find('.brand svg.conduit-logo').attributes('data-tone')).toBe('dark-bg')
     await submit(wrapper, 'admin', 'secret-pass')
 
     expect(authApi.login).toHaveBeenCalledWith('admin', 'secret-pass')

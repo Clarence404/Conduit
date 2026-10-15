@@ -84,7 +84,7 @@ describe('useTable', () => {
     expect(t.items.value).toEqual(['k'])
   })
 
-  it('shows the error of the latest request and keeps the previous rows', async () => {
+  it('shows the error of the latest request and clears the previous rows', async () => {
     const error = vi.spyOn(ElMessage, 'error').mockImplementation(() => ({ close: () => {} }) as never)
     const fetch = vi.fn().mockResolvedValueOnce(pageOf(['a'], 1)).mockRejectedValueOnce(new Error('服务不可用'))
     const t = useTable<string>(fetch)
@@ -93,7 +93,7 @@ describe('useTable', () => {
     await t.load()
 
     expect(error).toHaveBeenCalledWith('服务不可用')
-    expect(t.items.value).toEqual(['a'])
+    expect(t.items.value).toEqual([])
     expect(t.loaded.value).toBe(true)
     expect(t.loading.value).toBe(false)
   })
@@ -115,5 +115,19 @@ describe('useTable', () => {
     await second
     expect(t.failed.value).toBe(false)
     expect(t.items.value).toEqual(['a'])
+  })
+
+  it('clears the previous rows and total when a later load fails, so stale data never shows under a new query', async () => {
+    vi.spyOn(ElMessage, 'error').mockImplementation(() => ({ close: () => {} }) as never)
+    const fetch = vi.fn().mockResolvedValueOnce(pageOf(['a', 'b'], 2)).mockRejectedValueOnce(new Error('在线状态暂不可用'))
+    const t = useTable<string>(fetch)
+
+    await t.load()
+    expect(t.items.value).toEqual(['a', 'b'])
+
+    await t.search()
+    expect(t.failed.value).toBe(true)
+    expect(t.items.value).toEqual([])
+    expect(t.total.value).toBe(0)
   })
 })

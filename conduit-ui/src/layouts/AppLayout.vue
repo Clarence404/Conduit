@@ -1,17 +1,18 @@
 <script setup lang="ts">
 /**
- * 登录后的整体布局。左侧侧栏：Logo、分组菜单（带图标，系统管理项为禁用的「V0.2-C」），按路由 meta.menu 高亮；
+ * 登录后的整体布局：外壳恰好一屏高（100vh），侧栏固定在左侧、「收起菜单」钉在其底部，顶栏固定，只有右侧内容区（el-main）滚动。左侧侧栏：Logo、分组菜单（带图标，系统管理项为禁用的「V0.2-C」），按路由 meta.menu 高亮；
  * 可折叠（偏好保存，窗口宽度 < 820px 时强制折叠），浅色/深色两种风格（偏好）。
  * 顶栏：左侧全局面包屑（路由 meta + 详情页对象名称），右侧外观设置、租户名称、用户头像下拉（用户名、租户、退出登录）。
  * 页面渲染在 router-view。
  */
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowDown, Brush, DataLine, Expand, Fold } from '@element-plus/icons-vue'
+import { ArrowDown, Brush, Expand, Fold } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { useCurrentPage } from '@/composables/useBreadcrumb'
 import { useMediaQuery } from '@/composables/useMediaQuery'
+import ConduitLogo from '@/components/ConduitLogo.vue'
 import AppearancePanel from '@/components/AppearancePanel.vue'
 import { MENU_GROUPS } from './menu'
 
@@ -52,7 +53,7 @@ function onCommand(command: string) {
   <el-container class="layout">
     <el-aside :width="collapsed ? 'var(--cd-sidebar-collapsed-width)' : 'var(--cd-sidebar-width)'" :class="['sidebar', `cd-sidebar--${ui.sidebarStyle}`]">
       <div class="brand">
-        <el-icon :size="22" class="brand-icon"><DataLine /></el-icon>
+        <ConduitLogo :size="28" :tone="ui.sidebarStyle === 'dark' ? 'dark-bg' : 'auto'" />
         <span v-if="!collapsed" class="brand-name">Conduit</span>
       </div>
       <el-menu :default-active="activeMenu" :collapse="collapsed" :collapse-transition="false" router class="menu">
@@ -124,7 +125,9 @@ function onCommand(command: string) {
 
 <style scoped>
 .layout {
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 .sidebar {
   display: flex;
@@ -163,11 +166,9 @@ function onCommand(command: string) {
   font-size: 18px;
   font-weight: 600;
 }
-.brand-icon {
-  color: var(--el-color-primary);
-}
 .menu {
   flex: 1;
+  min-height: 0;
   border-right: none;
   overflow-y: auto;
   --el-menu-bg-color: var(--cd-sidebar-bg);
@@ -207,6 +208,7 @@ function onCommand(command: string) {
 }
 .main {
   min-width: 0;
+  min-height: 0;
 }
 .header {
   height: var(--cd-header-height);
@@ -237,6 +239,9 @@ function onCommand(command: string) {
 }
 .content {
   min-width: 0;
+  min-height: 0;
+  padding: var(--cd-space-4);
+  overflow: auto;
   background: var(--cd-page-bg);
 }
 @media (max-width: 819px) {

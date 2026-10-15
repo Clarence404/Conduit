@@ -32,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 /**
- * 前置条件：Compose 环境已启动（docker compose -f deploy/docker-compose.yml up -d）。
+ * 前置条件：完整应用栈已启动（docker compose -f deploy/docker-compose.yml --profile app up -d），测试会 kill/start 容器里的 conduit-server。
  * 场景：10 台设备 × 50 条消息，发送过程中 kill 掉 conduit-server 再启动，最终 InfluxDB 恰好 500 条。
  *
  * 环境变量：E2E_HOST（Docker 主机地址，默认 localhost）、E2E_COMPOSE（compose 命令，默认 "docker compose"）。

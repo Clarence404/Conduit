@@ -59,21 +59,28 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >-
-        sed "s|__CONDUIT_INTERNAL_TOKEN__|$${CONDUIT_INTERNAL_TOKEN}|" /conduit/base.hocon.tpl > /opt/emqx/etc/base.hocon
+        esc() { printf '%s' "$$1" | sed 's/[&|\\]/\\&/g'; };
+        sed -e "s|__CONDUIT_INTERNAL_TOKEN__|$$(esc "$${CONDUIT_INTERNAL_TOKEN}")|"
+        -e "s|__CONDUIT_AUTH_URL__|$$(esc "$${CONDUIT_AUTH_URL}")|"
+        /conduit/base.hocon.tpl > /opt/emqx/etc/base.hocon
         && exec /usr/bin/docker-entrypoint.sh /opt/emqx/bin/emqx foreground
     environment:
       CONDUIT_INTERNAL_TOKEN: ${CONDUIT_INTERNAL_TOKEN:?CONDUIT_INTERNAL_TOKEN is required}
+      # 鉴权回调地址：完整 Docker 部署用默认值；server 在 IDE 中运行时改为 http://<dev-host>:8080
+      CONDUIT_AUTH_URL: ${CONDUIT_AUTH_URL:-http://conduit-server:8080}
       EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:?EMQX_DASHBOARD_PASSWORD is required}
     volumes:
       - emqx-data:/opt/emqx/data
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${MQTT_PORT:-1883}:1883"
       - "${BIND_ADDR:-127.0.0.1}:${EMQX_DASHBOARD_PORT:-18083}:18083"
-    # 设备/transport 的连接鉴权回调 conduit-server：server 就绪后再起 EMQX，
-    # 否则 HTTP 鉴权资源启动时解析不到主机，早到的连接会被拒绝
+    # 默认只起基础设施，conduit-server 属于 app profile，不能硬依赖；
+    # 启用 app profile 时 compose 仍会先等 server 健康再起 EMQX（required: false 只在 server 未启用时忽略该依赖），
+    # 未启用时 EMQX 对鉴权回调自行重试
     depends_on:
       conduit-server:
         condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
       interval: 5s
@@ -81,6 +88,7 @@ services:
     restart: unless-stopped
 
   conduit-server:
+    profiles: ["app"]
     build:
       context: ..
       dockerfile: Dockerfile
@@ -99,6 +107,10 @@ services:
       TRANSPORT_MQTT_USERNAME: ${TRANSPORT_MQTT_USERNAME:-conduit-transport}
       TRANSPORT_MQTT_PASSWORD: ${TRANSPORT_MQTT_PASSWORD:?TRANSPORT_MQTT_PASSWORD is required}
       PIPELINE_CLAIM_MIN_IDLE: ${PIPELINE_CLAIM_MIN_IDLE:-60s}
+      CONDUIT_LOG_DIR: /var/log/conduit
+    # 三个 Java 服务共用命名卷 conduit-logs 存放日志（JRE 镜像默认以 root 运行，可直接写入）
+    volumes:
+      - conduit-logs:/var/log/conduit
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${API_PORT:-8091}:8080"
     depends_on:
@@ -126,6 +138,7 @@ services:
     restart: unless-stopped
 
   conduit-transport:
+    profiles: ["app"]
     build:
       context: ..
       dockerfile: Dockerfile
@@ -137,6 +150,9 @@ services:
       TRANSPORT_CLIENT_ID: conduit-transport-1
       TRANSPORT_MQTT_USERNAME: ${TRANSPORT_MQTT_USERNAME:-conduit-transport}
       TRANSPORT_MQTT_PASSWORD: ${TRANSPORT_MQTT_PASSWORD}
+      CONDUIT_LOG_DIR: /var/log/conduit
+    volumes:
+      - conduit-logs:/var/log/conduit
     depends_on:
       redis:
         condition: service_healthy
@@ -147,6 +163,7 @@ services:
     restart: unless-stopped
 
   conduit-web:
+    profiles: ["app"]
     build:
       context: ../conduit-ui
       args:
@@ -157,6 +174,7 @@ services:
       - conduit-server
     restart: unless-stopped
 
+  # 演示模拟器依赖 app 栈，需同时启用两个 profile：--profile app --profile demo
   simulator:
     profiles: ["demo"]
     build:
@@ -173,6 +191,9 @@ services:
       SIM_DEVICE_COUNT: ${SIM_DEVICE_COUNT:-100}
       SIM_INTERVAL_MS: ${SIM_INTERVAL_MS:-10000}
       SIM_PAYLOAD_FORMAT: ${SIM_PAYLOAD_FORMAT:-standard}
+      CONDUIT_LOG_DIR: /var/log/conduit
+    volumes:
+      - conduit-logs:/var/log/conduit
     depends_on:
       emqx:
         condition: service_healthy
@@ -187,3 +208,4 @@ volumes:
   redis-data:
   influx3-data:
   emqx-data:
+  conduit-logs:

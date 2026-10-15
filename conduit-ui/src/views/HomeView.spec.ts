@@ -121,4 +121,30 @@ describe('HomeView', () => {
     await vi.advanceTimersByTimeAsync(90_000)
     expect(overviewApi.get).toHaveBeenCalledTimes(2)
   })
+
+  it('links the devices tile to /devices and the online tile to /devices?online=true', async () => {
+    const { wrapper, router } = await mountView()
+
+    await wrapper.find('[data-test="tile-devices"]').trigger('click')
+    await settle()
+    expect(router.currentRoute.value.fullPath).toBe('/devices')
+
+    await router.push('/home')
+    await wrapper.find('[data-test="tile-online"]').trigger('click')
+    await settle()
+    expect(router.currentRoute.value.fullPath).toBe('/devices?online=true')
+    wrapper.unmount()
+  })
+
+  it('does not make the online tile a link when the online count is unknown', async () => {
+    vi.mocked(overviewApi.get).mockResolvedValue(overview({ onlineCount: null }))
+    const { wrapper, router } = await mountView()
+
+    const online = wrapper.find('[data-test="tile-online"]')
+    expect(online.attributes('role')).toBeUndefined()
+    await online.trigger('click')
+    await settle()
+    expect(router.currentRoute.value.fullPath).toBe('/home')
+    wrapper.unmount()
+  })
 })

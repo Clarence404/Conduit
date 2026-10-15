@@ -24,7 +24,7 @@ defineProps<{ title: string; subtitle?: string }>()
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--cd-space-3);
-  margin-bottom: var(--cd-space-4);
+  margin-bottom: var(--cd-space-3);
 }
 .title {
   margin: 0;
