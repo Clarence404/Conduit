@@ -43,6 +43,7 @@ vi.mock('@/utils/echarts', () => ({
       return chart
     }),
     connect: vi.fn(),
+    disconnect: vi.fn(),
   },
 }))
 vi.mock('@/api/history', () => ({ historyApi: { query: vi.fn() } }))
@@ -237,6 +238,76 @@ describe('HistoryPanel', () => {
     expect(wrapper.text()).toContain('该时段没有数据')
     expect(fake.charts).toHaveLength(0)
     wrapper.unmount()
+  })
+
+  it('keeps the previous valid custom range when an invalid one is picked', async () => {
+    const wrapper = await mountPanel()
+    const picker = wrapper.findComponent({ name: 'ElDatePicker' })
+    const valid: [Date, Date] = [new Date(NOW - 2 * HOUR), new Date(NOW - HOUR)]
+    const tooLong: [Date, Date] = [new Date(NOW - 45 * 24 * HOUR), new Date(NOW)]
+
+    // v-model 先写入选择器的值，随后才触发 change
+    picker.vm.$emit('update:modelValue', valid)
+    picker.vm.$emit('change', valid)
+    await settle()
+    expect(historyApi.query).toHaveBeenLastCalledWith('dk1', DEFAULT_IDS, NOW - 2 * HOUR, NOW - HOUR)
+
+    picker.vm.$emit('update:modelValue', tooLong)
+    picker.vm.$emit('change', tooLong)
+    await settle()
+    expect(picker.props('modelValue')).toEqual(valid)
+
+    await button(wrapper, '刷新').trigger('click')
+    await settle()
+    expect(historyApi.query).toHaveBeenLastCalledWith('dk1', DEFAULT_IDS, NOW - 2 * HOUR, NOW - HOUR)
+    wrapper.unmount()
+  })
+
+  it('clears the picker when an invalid range is picked in quick-range mode', async () => {
+    const wrapper = await mountPanel()
+    const picker = wrapper.findComponent({ name: 'ElDatePicker' })
+    const tooLong: [Date, Date] = [new Date(NOW - 45 * 24 * HOUR), new Date(NOW)]
+
+    picker.vm.$emit('update:modelValue', tooLong)
+    picker.vm.$emit('change', tooLong)
+    await settle()
+    expect(picker.props('modelValue')).toBe('')
+
+    await button(wrapper, '刷新').trigger('click')
+    await settle()
+    expect(historyApi.query).toHaveBeenLastCalledWith('dk1', DEFAULT_IDS, Date.now() - HOUR, Date.now())
+    wrapper.unmount()
+  })
+
+  it('disposes the chart of a removed series, reuses the kept one and never inits an element twice', async () => {
+    const ub: SeriesView = { ...ua(), identifier: 'Ub', name: 'B 相电压' }
+    vi.mocked(historyApi.query).mockResolvedValueOnce(view({ series: [ua(), ub] }))
+    const wrapper = await mountPanel()
+    expect(fake.charts).toHaveLength(2)
+    const [chartUa, chartUb] = fake.charts
+
+    vi.mocked(historyApi.query).mockResolvedValue(view({ series: [ua()] }))
+    // 选择由 Ua、Ub、Zz 改为 Ua
+    wrapper.findComponent({ name: 'ElSelect' }).vm.$emit('update:modelValue', ['Ua'])
+    await settle()
+
+    expect(historyApi.query).toHaveBeenLastCalledWith('dk1', ['Ua'], expect.any(Number), expect.any(Number))
+    expect(chartUb.dispose).toHaveBeenCalled()
+    expect(chartUa.dispose).not.toHaveBeenCalled()
+    expect(fake.charts).toHaveLength(2)
+    expect(chartUa.setOption.mock.calls.length).toBeGreaterThan(1)
+    expect(new Set(fake.charts.map((c) => c.getDom())).size).toBe(fake.charts.length)
+    wrapper.unmount()
+  })
+
+  it('dispatches the cursor action without replaying it on connected charts and disconnects the group on unmount', async () => {
+    const wrapper = await mountPanel()
+
+    expect(fake.charts[0].dispatchAction).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'takeGlobalCursor', escapeConnect: true }),
+    )
+    wrapper.unmount()
+    expect(echarts.disconnect).toHaveBeenCalledWith('history-dk1')
   })
 
   it('stops polling and disposes charts on unmount', async () => {

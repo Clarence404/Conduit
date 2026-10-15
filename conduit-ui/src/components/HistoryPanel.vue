@@ -35,8 +35,10 @@ const group = `history-${props.deviceKey}`
 const candidates = ref<PropertyCandidate[]>([])
 const selected = ref<string[]>([])
 const rangeKey = ref<QuickRangeKey | 'custom'>(DEFAULT_QUICK_RANGE)
-// 自定义起止（el-date-picker datetimerange）；未选择时为空串，清空后组件会写入 null
-const customValue = ref<[Date, Date] | ''>('')
+// 自定义起止的选择器绑定值（el-date-picker datetimerange）：v-model 会先于校验写入，可能暂存不合法的范围；清空后组件会写入 null
+const customValue = ref<[Date, Date] | null | ''>('')
+// 最近一次通过校验的自定义范围，查询只读它；校验失败时选择器回退到该值，因此不合法的范围不会进入后续查询
+const appliedCustom = ref<[Date, Date] | null>(null)
 const zoom = ref<TimeRange | null>(null)
 const data = ref<HistoryView | null>(null)
 const loading = ref(false)
@@ -66,8 +68,8 @@ function currentRange(): TimeRange | null {
     return zoom.value
   }
   if (rangeKey.value === 'custom') {
-    const value = customValue.value
-    return Array.isArray(value) ? { from: value[0].getTime(), to: value[1].getTime() } : null
+    const value = appliedCustom.value
+    return value ? { from: value[0].getTime(), to: value[1].getTime() } : null
   }
   return quickRange(rangeKey.value, Date.now())
 }
@@ -156,7 +158,8 @@ function renderCharts() {
     }
     chart.setOption(buildChartOption(s, ctx), true)
     // 让框选缩放处于激活状态，用户直接拖动即可选择范围
-    chart.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: true })
+    // escapeConnect：联动图表不重放此动作，否则每次渲染要做 N×(N-1) 次完整更新
+    chart.dispatchAction({ type: 'takeGlobalCursor', key: 'dataZoomSelect', dataZoomSelectActive: true, escapeConnect: true })
   }
   echarts.connect(group)
 }
@@ -196,6 +199,7 @@ function resetZoom() {
 function selectQuick(key: QuickRangeKey) {
   rangeKey.value = key
   customValue.value = ''
+  appliedCustom.value = null
   zoom.value = null
   schedule()
 }
@@ -205,7 +209,10 @@ function onQuickChange(value: unknown) {
   selectQuick(value as QuickRangeKey)
 }
 
-/** 自定义起止：清空时回到默认快捷范围；跨度不合法时提示并保持当前视图。参数为组件抛出的值（[开始, 结束] 或 null） */
+/**
+ * 自定义起止：清空时回到默认快捷范围；跨度不合法时提示、选择器回退到最近一次合法的范围（快捷范围模式下为空）并保持当前视图。
+ * 参数为组件抛出的值（[开始, 结束] 或 null）
+ */
 function onCustomChange(value: unknown) {
   if (!Array.isArray(value) || value.length !== 2) {
     selectQuick(DEFAULT_QUICK_RANGE)
@@ -215,8 +222,10 @@ function onCustomChange(value: unknown) {
   const error = rangeError({ from: start.getTime(), to: end.getTime() })
   if (error) {
     ElMessage.warning(error)
+    customValue.value = appliedCustom.value ?? ''
     return
   }
+  appliedCustom.value = [start, end]
   rangeKey.value = 'custom'
   zoom.value = null
   schedule()
@@ -240,6 +249,7 @@ onBeforeUnmount(() => {
   seq.next()
   window.removeEventListener('resize', resizeCharts)
   disposeCharts()
+  echarts.disconnect(group)
 })
 </script>
 

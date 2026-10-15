@@ -136,6 +136,9 @@ function stateParts(s: SeriesView) {
   }
 }
 
+/** 透明 1x1 GIF，用来占位被隐藏的工具栏图标 */
+const TRANSPARENT_ICON = 'image://data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=='
+
 /**
  * 生成一条曲线的 ECharts option：时间横轴固定为查询范围，工具栏只提供框选缩放，提示框按 axis 触发（配合 echarts.connect 联动）。
  * points 为空时仍返回带坐标轴、空序列的 option（界面另行显示「该时段没有数据」）。
@@ -144,7 +147,12 @@ export function buildChartOption(s: SeriesView, ctx: ChartContext): EChartsCoreO
   const common = {
     animation: false,
     grid: { left: 64, right: 48, top: 24, bottom: 28 },
-    toolbox: { right: 8, top: 0, feature: { dataZoom: { yAxisIndex: 'none', title: { zoom: '框选缩放', back: '还原' } } } },
+    // 不提供「还原」：每次 setOption 都会清空缩放历史，该按钮不起作用（重置缩放由面板按钮负责）。ECharts 无法移除内置 back 图标，换成透明 1x1 图片并清空标题
+    toolbox: {
+      right: 8,
+      top: 0,
+      feature: { dataZoom: { yAxisIndex: 'none', icon: { back: TRANSPARENT_ICON }, title: { zoom: '框选缩放', back: '' } } },
+    },
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, formatter: (params: unknown) => tooltipText(s, params) },
     xAxis: { type: 'time', min: axisMin(ctx), max: ctx.to },
   }
