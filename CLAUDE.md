@@ -1,6 +1,8 @@
 # Conduit 项目说明（给 Claude 与开发者）
 
-个人研究用的 IoT 平台：设备通过 MQTT 接入，数据经消息总线进入服务端，按产品物模型校验后写入时序库，前端查看设备、最新值与历史曲线。本文件记录**整体设计思路与编码约定**，设计有变化时同步更新这里（以及对应 spec）。
+个人研究用的 IoT 平台：设备通过 MQTT 接入，数据经消息总线进入服务端，按产品物模型校验后写入时序库，前端查看设备、最新值与历史曲线。本文件记录**整体设计思路与编码约定**。
+
+**维护规则**：每次升级（新子项目、架构调整、重要修复）除了写 `docs/superpowers/` 下的 spec / plan 外，还必须把其中**决定性质的约定**（技术选型、模块职责、数据格式与语义、接口约定、界面与数据约定、部署方式等）同步更新到本文件对应章节，并在第 4 节「决定记录」追加一条；与本文件冲突的旧内容直接改掉，不留过期描述。
 
 ## 1. 整体设计
 
@@ -63,3 +65,18 @@ conduit-ui（Vue）──REST──> conduit-server
 ## 3. 本地开发
 
 见 README「开发」与「在 IDE 中运行」：IDEA 中运行 server 与 UI，PostgreSQL / Redis / InfluxDB / EMQX 使用演示环境；本地 transport 必须 `session-expiry-seconds: 0`。
+
+## 4. 决定记录
+
+按时间追加，每条一行：日期、版本、决定、对应 spec / 提交。
+
+- 2026-10-14 V0.1：Spring Boot 3 + EMQX 5 + Redis Streams 总线（经 `MessageBus` 接口）+ PostgreSQL 16 + Redis 7；前端 Vue 3 + Element Plus；transport / server 两进程；EMQX HTTP 鉴权回调；多租户从 V0.1 起带 `tenant_id`（`2026-10-14-conduit-v0.1-design.md`）。
+- 2026-10-15 V0.2：拆为 A 物模型与编解码 → B 历史查询与曲线 → C 多租户与用户管理，依次实施。
+- 2026-10-15 V0.2-A：时序库改为 InfluxDB 3 Core 3.12.0（自写 v3 HTTP 客户端）；物模型只做属性（8 个字段）；逐测点校验与 `FIELD_REJECTED`；解码器 SPI（`standard-json`、`flat-json`）（`2026-10-15-conduit-v0.2a-thing-model-design.md`）。
+- 2026-10-15：流水线可恢复错误沿异常 cause 链判断（MyBatis 包装的数据库断连也原地重试）；死信统一"先写记录再 ack"。
+- 2026-10-15：`conduit-connector` 改名 `conduit-transport`（避免与 EMQX 数据集成 Connector 混淆），env `TRANSPORT_MQTT_*`，属性前缀 `conduit.transport.mqtt`。
+- 2026-10-15：Docker 宿主机无外网，部署用 `deploy/build-local.sh`（本机干净检出构建 + 薄镜像）。
+- 2026-10-15：界面约定——分页每页 10 条、入口显眼（操作列 + 面包屑）、演示数据用有意义中文名、e2e 自清理。
+- 2026-10-15 V0.2-B：历史曲线在设备详情「历史」标签页；服务端自动聚合（≤1000 点/曲线，固定桶档位，数值 avg/min/max、状态取桶内最后值）；ECharts 5.6.0 按需引入；SQL 参数化（`2026-10-15-conduit-v0.2b-history-design.md`）。
+- 2026-10-15 路线图：V2.1 AI 能力（自然语言查数、异常检测、物模型草稿生成、告警摘要）。
+- 2026-10-15：所有类与重点方法必须写中文注释（见 2.1）；升级时同步更新本文件。
