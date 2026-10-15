@@ -51,9 +51,15 @@ export interface SecretView {
 }
 
 export interface PointView {
-  name: string
+  identifier: string
+  /** 物模型中的显示名称；未定义时为 null */
+  name: string | null
   value: number | string | boolean
   ts: number
+  unit: string | null
+  decimals: number | null
+  /** 枚举值对应的名称；非枚举或未定义时为 null */
+  enumLabel: string | null
 }
 
 export interface LatestView {

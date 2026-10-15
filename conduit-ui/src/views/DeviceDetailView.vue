@@ -77,7 +77,7 @@ usePolling(loadLatest, 5000)
         </div>
       </template>
       <el-table :data="values" border empty-text="暂无数据">
-        <el-table-column prop="name" label="测点" width="200" />
+        <el-table-column prop="identifier" label="测点" width="200" />
         <el-table-column label="值">
           <template #default="{ row }">{{ formatValue(row.value) }}</template>
         </el-table-column>
