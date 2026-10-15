@@ -4,6 +4,7 @@
  * 快捷范围且未缩放时每 30 秒自动刷新（页面隐藏时暂停）；框选缩放后按选中范围重新查询并暂停自动刷新，
  * 「重置缩放」回到原范围；用请求序号丢弃过期响应（缩放、改范围、改测点、刷新、轮询都会使旧请求作废）。
  * 图表随主题切换：深色时用 ECharts 内置 dark 主题，主题变化时销毁并按新主题重建实例。
+ * 初始选中的测点可由 initialProps 指定（来自 ?props=），不存在的标识被忽略，一个都不剩时用默认选中（前 4 个数值测点）。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
@@ -27,9 +28,9 @@ import {
   type TimeRange,
 } from '@/utils/historyRange'
 import { buildChartOption, seriesLabel, zoomRangeFromEvent } from '@/utils/historyChart'
-import { defaultSelection, MAX_SELECTED, propertyCandidates, type PropertyCandidate } from '@/utils/historyProperties'
+import { initialSelection, MAX_SELECTED, propertyCandidates, type PropertyCandidate } from '@/utils/historyProperties'
 
-const props = defineProps<{ deviceKey: string; productKey: string }>()
+const props = defineProps<{ deviceKey: string; productKey: string; initialProps?: string[] }>()
 
 const REFRESH_MS = 30_000
 const group = `history-${props.deviceKey}`
@@ -247,7 +248,7 @@ onMounted(async () => {
   try {
     const [model, latest] = await Promise.all([thingModelApi.list(props.productKey), deviceApi.latest(props.deviceKey)])
     candidates.value = propertyCandidates(model, latest.values)
-    selected.value = defaultSelection(candidates.value)
+    selected.value = initialSelection(candidates.value, props.initialProps ?? [])
   } catch (e) {
     ElMessage.error(problemMessage(e))
   }

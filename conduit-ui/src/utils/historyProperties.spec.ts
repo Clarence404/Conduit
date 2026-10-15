@@ -1,7 +1,7 @@
 /** historyProperties 的单元测试：测点候选过滤、上限、默认选中 */
 import { describe, expect, it } from 'vitest'
 import type { DataType, PointView, PropertyView } from '@/api/types'
-import { DEFAULT_SELECTED, MAX_SELECTED, defaultSelection, propertyCandidates } from './historyProperties'
+import { DEFAULT_SELECTED, MAX_SELECTED, defaultSelection, initialSelection, propertyCandidates } from './historyProperties'
 
 function prop(identifier: string, dataType: DataType, name = identifier.toUpperCase()): PropertyView {
   return {
@@ -66,5 +66,30 @@ describe('defaultSelection', () => {
   it('selects fewer when fewer are numeric', () => {
     expect(defaultSelection(propertyCandidates([prop('st', 'ENUM'), prop('Ua', 'DOUBLE')], []))).toEqual(['Ua'])
     expect(defaultSelection([])).toEqual([])
+  })
+})
+
+describe('initialSelection', () => {
+  const candidates = propertyCandidates(
+    [prop('Ua', 'DOUBLE'), prop('Ub', 'DOUBLE'), prop('Uc', 'DOUBLE'), prop('Ia', 'DOUBLE'), prop('Ib', 'DOUBLE'), prop('st', 'ENUM')],
+    [],
+  )
+
+  it('keeps the requested identifiers that exist, in the requested order', () => {
+    expect(initialSelection(candidates, ['st', 'nope', 'Ua'])).toEqual(['st', 'Ua'])
+  })
+
+  it('falls back to the default selection when nothing requested exists', () => {
+    expect(initialSelection(candidates, ['nope'])).toEqual(defaultSelection(candidates))
+    expect(initialSelection(candidates, [])).toEqual(defaultSelection(candidates))
+  })
+
+  it('keeps at most MAX_SELECTED identifiers', () => {
+    const many = propertyCandidates(
+      Array.from({ length: 10 }, (_, i) => prop(`P${i}`, 'DOUBLE')),
+      [],
+    )
+
+    expect(initialSelection(many, many.map((c) => c.identifier))).toHaveLength(MAX_SELECTED)
   })
 })

@@ -339,4 +339,28 @@ describe('HistoryPanel', () => {
     await settle()
     wrapper.unmount()
   })
+
+  it('starts with the properties passed in initialProps and ignores unknown ones', async () => {
+    const wrapper = mount(HistoryPanel, {
+      props: { deviceKey: 'dk1', productKey: 'pk1', initialProps: ['Ub', 'nope'] },
+      global: { plugins: [ElementPlus] },
+      attachTo: document.body,
+    })
+    await settle()
+
+    expect(historyApi.query).toHaveBeenCalledWith('dk1', ['Ub'], NOW - HOUR, NOW)
+    wrapper.unmount()
+  })
+
+  it('falls back to the default selection when no initial property exists', async () => {
+    const wrapper = mount(HistoryPanel, {
+      props: { deviceKey: 'dk1', productKey: 'pk1', initialProps: ['nope'] },
+      global: { plugins: [ElementPlus] },
+      attachTo: document.body,
+    })
+    await settle()
+
+    expect(historyApi.query).toHaveBeenCalledWith('dk1', DEFAULT_IDS, NOW - HOUR, NOW)
+    wrapper.unmount()
+  })
 })
