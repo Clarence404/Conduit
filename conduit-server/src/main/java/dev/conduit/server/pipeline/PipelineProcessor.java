@@ -44,6 +44,7 @@ public class PipelineProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(PipelineProcessor.class);
 
+    /** 已通过解码与校验、等待批量写库的属性消息：投递、待写数据点、被剔除的测点。 */
     private record PendingProperty(Delivery delivery, TelemetryPoint point, List<RejectedField> rejected) {
     }
 
@@ -74,6 +75,7 @@ public class PipelineProcessor {
                 Duration.ofSeconds(1), Duration.ofSeconds(30));
     }
 
+    /** 可指定退避时间的构造器，测试用（避免真实等待）。 */
     PipelineProcessor(MessageBus bus, PipelineProperties props, DeviceIdentityLookup identities,
                       ThingModelCache thingModels, DecoderRegistry decoders, PresenceHandler presenceHandler,
                       TelemetryWriter writer, LatestValueStore latest, MeterRegistry meters,
@@ -91,6 +93,14 @@ public class PipelineProcessor {
         this.maxBackoff = maxBackoff;
     }
 
+    /**
+     * 处理一批投递：逐条分流，在线/离线消息处理后统一 ACK，属性消息攒成一批后统一写库。
+     * 每条投递的去向：投递次数超过 maxDeliveries 进 MAX_DELIVERY_EXCEEDED；信封损坏进 MALFORMED_ENVELOPE；
+     * EVENT 暂不支持，进 UNSUPPORTED_TYPE；DecodeException 按其原因进死信；其他运行时异常只让该条进 PROCESSING_ERROR，
+     * 不影响同批其他消息。
+     *
+     * @throws ProcessingAbortedException 线程在退避重试中被中断；已读取但未处理的投递保持未 ACK，之后重新认领
+     */
     public void process(List<Delivery> batch) {
         List<String> presenceAcks = new ArrayList<>();
         List<PendingProperty> properties = new ArrayList<>();
@@ -137,6 +147,13 @@ public class PipelineProcessor {
         }
     }
 
+    /**
+     * 属性消息的「解码 → 校验」阶段：依次检查设备存在、已启用、productKey 一致，取产品物模型与 codec 并解码、逐测点校验。
+     * 被剔除的测点计入指标，并随 PendingProperty 带到写库之后留痕。
+     *
+     * @throws DecodeException UNKNOWN_DEVICE / DEVICE_DISABLED / PRODUCT_MISMATCH / UNKNOWN_CODEC、解码失败，
+     *                         或全部测点被拒绝（FIELD_REJECTED，details 含被拒详情）
+     */
     private PendingProperty toPending(Delivery delivery, RawMessage message) {
         DeviceIdentity identity = identities.find(message.deviceKey())
                 .orElseThrow(() -> new DecodeException(DeadReason.UNKNOWN_DEVICE, message.deviceKey()));
@@ -167,6 +184,11 @@ public class PipelineProcessor {
         return new PendingProperty(delivery, point, validation.rejected());
     }
 
+    /**
+     * 批量写 InfluxDB，再逐条更新最新值、补写 FIELD_REJECTED 记录并 ACK。
+     * InfluxDB 拒绝的数据点（字段类型冲突）对应的投递进 FIELD_TYPE_CONFLICT；
+     * 单条收尾阶段的意外错误只让该条进 PROCESSING_ERROR。其余投递在写库成功后才一次性 ACK（至少一次投递）。
+     */
     private void writeProperties(List<PendingProperty> items) {
         List<TelemetryPoint> points = items.stream().map(PendingProperty::point).toList();
         WriteResult result = retry("influx write", () -> writer.write(points));
@@ -206,6 +228,7 @@ public class PipelineProcessor {
         meters.counter("conduit.pipeline.processed", "type", "property").increment(acks.size());
     }
 
+    /** 批量 ACK（空列表直接返回），暂时性故障原地重试。 */
     private void ack(List<String> ids) {
         if (ids.isEmpty()) {
             return;
@@ -242,6 +265,13 @@ public class PipelineProcessor {
     }
 
     /** 下游暂时不可用时原地指数退避重试，不重新读取，因此不消耗投递次数。 */
+    /**
+     * 原地执行 action：仅可恢复错误（见 isRecoverable）才退避重试，延迟从 initialBackoff 起翻倍、封顶 maxBackoff，无限重试；
+     * 其余异常原样抛出。
+     *
+     * @param step 步骤名，仅用于日志
+     * @throws ProcessingAbortedException 等待期间线程被中断（会恢复中断标志）
+     */
     private <T> T retry(String step, Supplier<T> action) {
         long delay = initialBackoff.toMillis();
         for (int attempt = 1; ; attempt++) {
@@ -267,6 +297,7 @@ public class PipelineProcessor {
         dead(delivery, reason, Map.of());
     }
 
+    /** 写死信记录、ACK 原投递并计数 conduit.pipeline.dead；details 写入死信记录。 */
     private void dead(Delivery delivery, DeadReason reason, Map<String, String> details) {
         // 先留痕再 ACK，分两步各自重试：ACK 暂时失败时不会重复写死信记录
         retry("dead letter", () -> {

@@ -43,14 +43,23 @@ public class ThingModelCache {
         this.cache = Caffeine.newBuilder().expireAfterWrite(TTL).maximumSize(MAX_SIZE).ticker(ticker).build();
     }
 
+    /**
+     * 按 productKey 取产品配置：命中缓存直接返回，否则读库并缓存；产品不存在返回 empty。
+     */
     public Optional<ProductProfile> find(String productKey) {
         return Optional.ofNullable(cache.get(productKey, this::load));
     }
 
+    /**
+     * 使该产品的缓存失效。调用方应在修改已提交之后再调用，否则可能被并发读重新缓存旧数据。
+     */
     public void evict(String productKey) {
         cache.invalidate(productKey);
     }
 
+    /**
+     * 从库加载：先跨租户找到产品，再以产品所属租户的身份读取其属性（按 id 升序）。产品不存在返回 null。
+     */
     private ProductProfile load(String productKey) {
         Product product = products.findByKeyAnyTenant(productKey);
         if (product == null) {

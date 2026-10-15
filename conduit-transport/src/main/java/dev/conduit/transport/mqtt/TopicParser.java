@@ -4,11 +4,20 @@ import dev.conduit.common.message.MessageType;
 
 import java.util.Optional;
 
+/**
+ * MQTT topic 解析器（纯函数）：把设备上行 topic 与 EMQX 的 $SYS 上下线 topic 映射为 {@link ParsedTopic}，
+ * 供 {@link MqttProtocolAdapter} 决定消息的产品、设备与类型。
+ */
 public final class TopicParser {
 
     private TopicParser() {
     }
 
+    /**
+     * 解析 topic。以 {@code $SYS/} 开头按上下线事件解析，否则按设备上行 topic 解析。
+     *
+     * @return 解析结果；格式不符、段为空或类型未知时返回 empty（调用方丢弃该消息）
+     */
     public static Optional<ParsedTopic> parse(String topic) {
         return topic.startsWith("$SYS/") ? parseSystemTopic(topic) : parseDeviceTopic(topic);
     }

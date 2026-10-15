@@ -6,9 +6,12 @@ package dev.conduit.transport.adapter;
  */
 public interface ProtocolAdapter {
 
+    /** 适配器名称，用于日志。 */
     String name();
 
+    /** 建立与设备侧（如 EMQX）的连接并开始接收；就绪后才返回，失败抛异常。 */
     void start();
 
+    /** 停止接收并释放连接，需可安全调用。 */
     void stop();
 }

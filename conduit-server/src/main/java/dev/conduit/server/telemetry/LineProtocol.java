@@ -12,6 +12,10 @@ public final class LineProtocol {
     private LineProtocol() {
     }
 
+    /**
+     * 构造一行 InfluxDB 行协议：measurement,tag=.. field=.. 毫秒时间戳。
+     * fields 为空或 null、名称为空/含非法字符、字段值类型不支持时抛 IllegalArgumentException。tag 按传入 Map 的迭代顺序输出。
+     */
     public static String line(String measurement, Map<String, String> tags, Map<String, Object> fields, long tsMillis) {
         if (fields == null || fields.isEmpty()) {
             throw new IllegalArgumentException("At least one field is required");
@@ -28,6 +32,10 @@ public final class LineProtocol {
         return sb.append(' ').append(tsMillis).toString();
     }
 
+    /**
+     * 按类型格式化字段值：Long 加 i 后缀，Double 必须有限，Boolean 原样，String 加引号并转义反斜杠与双引号；
+     * null、非有限数值和其他类型抛 IllegalArgumentException。name 仅用于错误消息。
+     */
     static String fieldValue(String name, Object value) {
         return switch (value) {
             case Long l -> l + "i";

@@ -24,6 +24,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         this.jwt = jwt;
     }
 
+    /**
+     * 有合法 Bearer access token 时写入认证信息并绑定 TenantContext；令牌无效不报错，仅保持未认证。
+     * 无论请求如何结束都会在 finally 中清除 TenantContext，避免线程复用时租户串用。
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {

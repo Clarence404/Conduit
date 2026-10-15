@@ -21,6 +21,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * {@link MessageBus} 的 Redis Streams 实现：上行流用 XADD/XREADGROUP/XACK，
+ * 崩溃遗留消息用 XPENDING+XCLAIM 重新认领，失败消息写入独立的死信流。
+ * 处于 transport（写入）与 server 流水线（消费）之间。
+ */
 public class RedisStreamMessageBus implements MessageBus {
 
     // Lettuce's generic execute() cannot decode integer replies, so XPENDING goes through a script.
@@ -35,11 +40,13 @@ public class RedisStreamMessageBus implements MessageBus {
         this.props = props;
     }
 
+    /** XADD 到上行流，按 maxLen 近似裁剪（超长时最旧消息会被丢弃）。 */
     @Override
     public String publish(RawMessage message) {
         return xadd(props.streamKey(), RawMessageCodec.toFields(message), props.maxLen());
     }
 
+    /** XGROUP CREATE（从 0-0 起、MKSTREAM），忽略 BUSYGROUP（组已存在），其他错误原样抛出。 */
     @Override
     public void ensureGroup(String group) {
         byte[] key = bytes(props.streamKey());
@@ -54,6 +61,7 @@ public class RedisStreamMessageBus implements MessageBus {
         }
     }
 
+    /** XREADGROUP 读取组内尚未投递的新消息（lastConsumed），deliveryCount 固定为 1。 */
     @Override
     public List<Delivery> read(String group, String consumer, int count, Duration block) {
         @SuppressWarnings("unchecked")
@@ -69,6 +77,10 @@ public class RedisStreamMessageBus implements MessageBus {
                 .toList();
     }
 
+    /**
+     * 先用 XPENDING IDLE 在服务端筛出空闲超时的条目并取得既有投递次数，再 XCLAIM 转给当前消费者；
+     * deliveryCount = 既有次数 + 1。
+     */
     @Override
     public List<Delivery> claimStale(String group, String consumer, Duration minIdle, int count) {
         // IDLE filter runs server-side so the count window only holds genuinely stale entries
@@ -106,6 +118,7 @@ public class RedisStreamMessageBus implements MessageBus {
         return result;
     }
 
+    /** XACK；ids 为空直接返回。 */
     @Override
     public void ack(String group, List<String> ids) {
         if (ids.isEmpty()) {
@@ -114,12 +127,14 @@ public class RedisStreamMessageBus implements MessageBus {
         redis.opsForStream().acknowledge(props.streamKey(), group, ids.toArray(String[]::new));
     }
 
+    /** 先 recordDead 再 ack；顺序不可颠倒，避免写死信前崩溃导致消息丢失。 */
     @Override
     public void deadLetter(String group, Delivery delivery, String reason) {
         recordDead(delivery, reason, Map.of());
         ack(group, List.of(delivery.id()));
     }
 
+    /** 在原始字段上叠加 details 与标准字段（reason 等，不可被 details 覆盖）后写入死信流。 */
     @Override
     public void recordDead(Delivery delivery, String reason, Map<String, String> details) {
         Map<String, String> fields = new LinkedHashMap<>(delivery.fields());
@@ -132,6 +147,7 @@ public class RedisStreamMessageBus implements MessageBus {
         xadd(props.deadKey(), fields, props.deadMaxLen());
     }
 
+    /** 以字节方式 XADD 并近似裁剪到 maxLen；Redis 未返回 id 时抛 IllegalStateException。 */
     private String xadd(String key, Map<String, String> fields, long maxLen) {
         Map<byte[], byte[]> raw = new LinkedHashMap<>();
         fields.forEach((k, v) -> raw.put(bytes(k), bytes(v)));

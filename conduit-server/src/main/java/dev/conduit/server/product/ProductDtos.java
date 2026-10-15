@@ -5,6 +5,9 @@ import jakarta.validation.constraints.Size;
 
 import java.time.OffsetDateTime;
 
+/**
+ * 产品接口的请求与响应对象集合。
+ */
 public final class ProductDtos {
 
     private ProductDtos() {
@@ -15,6 +18,9 @@ public final class ProductDtos {
                                      @Size(max = 32) String codec) {
     }
 
+    /**
+     * 产品响应视图。propertyCount 为物模型属性数。
+     */
     public record ProductView(String productKey, String name, String description, String codec, int propertyCount,
                               OffsetDateTime createdAt) {
 

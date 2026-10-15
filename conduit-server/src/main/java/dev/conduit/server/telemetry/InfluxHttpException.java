@@ -12,10 +12,16 @@ public class InfluxHttpException extends RuntimeException {
         this.status = status;
     }
 
+    /**
+     * InfluxDB 返回的 HTTP 状态码，调用方据此区分「请求有误」（400）与「服务不可用」。
+     */
     public int status() {
         return status;
     }
 
+    /**
+     * 截断响应体到 300 字符，避免异常消息过长；null 视为空串。
+     */
     private static String abbreviate(String body) {
         if (body == null) {
             return "";

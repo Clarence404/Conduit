@@ -7,6 +7,10 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 
+/**
+ * 把所有 {@link ProtocolAdapter} 挂到 Spring 生命周期上：容器启动完成时依次 start，关闭时 stop。
+ * 任一适配器 start 抛异常会使 transport 进程启动失败。
+ */
 @Component
 public class AdapterLifecycle implements SmartLifecycle {
 

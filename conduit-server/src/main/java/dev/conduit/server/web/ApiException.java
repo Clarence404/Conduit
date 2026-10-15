@@ -2,6 +2,10 @@ package dev.conduit.server.web;
 
 import org.springframework.http.HttpStatus;
 
+/**
+ * 业务层抛出的、需要映射为特定 HTTP 状态码的异常，由 {@link GlobalExceptionHandler} 转成 problem+json。
+ * 优先使用 badRequest / unauthorized / notFound / conflict 工厂方法。
+ */
 public class ApiException extends RuntimeException {
 
     private final HttpStatus status;

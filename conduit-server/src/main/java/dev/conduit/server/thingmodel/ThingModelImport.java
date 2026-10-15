@@ -15,6 +15,11 @@ final class ThingModelImport {
     private ThingModelImport() {
     }
 
+    /**
+     * 校验导入文件，返回全部错误，为空表示可导入。检查项：单个属性规则、文件内标识重复、与已有属性的数据类型冲突（类型不可改）、
+     * 导入后属性总数上限（REPLACE 只数文件内的，MERGE 数已有与文件的并集）。空项（null）记为错误并继续检查其余项。
+     * @param existingTypes 产品已有属性的标识到数据类型
+     */
     static List<ItemError> validate(List<PropertyRequest> items, Map<String, DataType> existingTypes, ImportMode mode) {
         List<ItemError> errors = new ArrayList<>();
         Set<String> identifiers = new HashSet<>();

@@ -13,9 +13,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 
+/**
+ * JWT 的签发与校验（HS 系列对称签名）。令牌携带用户 id、租户 id、用户名、角色与令牌类型，
+ * 由 {@link AuthController} 签发、{@link JwtAuthFilter} 校验。
+ */
 @Component
 public class JwtService {
 
+    /** 令牌类型：ACCESS 用于访问接口，REFRESH 仅用于换发；校验时必须匹配，防止互相冒用。 */
     public enum TokenType { ACCESS, REFRESH }
 
     private final JwtProperties props;
@@ -31,6 +36,7 @@ public class JwtService {
         this.key = Keys.hmacShaKeyFor(props.jwtSecret().getBytes(StandardCharsets.UTF_8));
     }
 
+    /** 签发指定类型的令牌，有效期取配置中对应类型的 TTL，时间基于注入的 Clock。 */
     public String issue(AuthPrincipal principal, TokenType type) {
         Instant now = clock.instant();
         Duration ttl = type == TokenType.ACCESS ? props.accessTtl() : props.refreshTtl();
@@ -46,6 +52,12 @@ public class JwtService {
                 .compact();
     }
 
+    /**
+     * 校验签名与有效期并还原身份。
+     *
+     * @param expected 期望的令牌类型
+     * @throws JwtException 签名错误、已过期、格式非法或类型不符（调用方应一并处理 IllegalArgumentException）
+     */
     public AuthPrincipal parse(String token, TokenType expected) {
         Claims claims = Jwts.parser()
                 .verifyWith(key)

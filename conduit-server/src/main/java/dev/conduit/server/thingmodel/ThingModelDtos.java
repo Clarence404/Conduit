@@ -3,6 +3,9 @@ package dev.conduit.server.thingmodel;
 import java.time.OffsetDateTime;
 import java.util.List;
 
+/**
+ * 物模型接口的请求与响应对象集合。
+ */
 public final class ThingModelDtos {
 
     private ThingModelDtos() {
@@ -17,6 +20,9 @@ public final class ThingModelDtos {
                                   Double minValue, Double maxValue, Integer decimals,
                                   List<EnumItemRequest> enumItems, String description) {
 
+        /**
+         * 复制一份并替换标识（修改属性时以路径参数为准）。
+         */
         PropertyRequest withIdentifier(String id) {
             return new PropertyRequest(id, name, dataType, unit, minValue, maxValue, decimals, enumItems, description);
         }
@@ -30,9 +36,15 @@ public final class ThingModelDtos {
         }
     }
 
+    /**
+     * 物模型导入/导出文档，properties 为属性列表。
+     */
     public record ThingModelDocument(List<PropertyRequest> properties) {
     }
 
+    /**
+     * 属性的响应视图（含创建、更新时间）。
+     */
     public record PropertyView(String identifier, String name, DataType dataType, String unit,
                                Double minValue, Double maxValue, Integer decimals, List<EnumItem> enumItems,
                                String description, OffsetDateTime createdAt, OffsetDateTime updatedAt) {

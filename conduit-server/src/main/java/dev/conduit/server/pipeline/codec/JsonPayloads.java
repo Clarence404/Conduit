@@ -10,7 +10,7 @@ import dev.conduit.server.pipeline.DecodeException;
 
 import java.io.IOException;
 
-/** JSON 解码器共用的解析与取值规则。 */
+/** JSON 类解码器（standard-json、flat-json）共用的解析与取值规则；仅包内使用。 */
 final class JsonPayloads {
 
     private JsonPayloads() {
@@ -22,6 +22,11 @@ final class JsonPayloads {
                 DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     }
 
+    /**
+     * 把报文解析为 JSON 对象节点。
+     *
+     * @throws DecodeException MALFORMED_JSON：语法错误、重复键、尾随字符，或根节点不是对象
+     */
     static JsonNode readObject(ObjectReader reader, byte[] payload) {
         JsonNode root;
         try {

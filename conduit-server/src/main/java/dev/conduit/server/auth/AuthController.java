@@ -21,6 +21,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Duration;
 
+/**
+ * 登录认证 REST 接口（UI 使用）：登录签发短期 access token（响应体）与长期 refresh token（HttpOnly Cookie），
+ * 并支持刷新、登出与查询当前用户。这些接口在 {@link SecurityConfig} 中免认证（me 除外）。
+ */
 @RestController
 @RequestMapping("/api/v1/auth")
 public class AuthController {
@@ -40,6 +44,10 @@ public class AuthController {
         this.props = props;
     }
 
+    /**
+     * 用户名密码登录。用户不存在、已停用或密码错误一律返回同一条 401，避免泄露账号是否存在。
+     * 成功时响应体带 access token，refresh token 通过 Cookie 下发。
+     */
     @PostMapping("/login")
     public ResponseEntity<TokenResponse> login(@Valid @RequestBody LoginRequest request) {
         AppUser user = users.selectOne(new LambdaQueryWrapper<AppUser>().eq(AppUser::getUsername, request.username()));
@@ -50,6 +58,10 @@ public class AuthController {
         return tokens(principalOf(user));
     }
 
+    /**
+     * 用 refresh Cookie 换发新的 access / refresh token（滚动续期）。Cookie 缺失、令牌无效或类型不符，
+     * 以及用户已被删除或停用，均返回 401；角色等信息以数据库最新值为准而非旧令牌。
+     */
     @PostMapping("/refresh")
     public ResponseEntity<TokenResponse> refresh(
             @CookieValue(name = REFRESH_COOKIE, required = false) String refreshToken) {
@@ -69,6 +81,7 @@ public class AuthController {
         return tokens(principalOf(user));
     }
 
+    /** 登出：仅通过 Max-Age=0 清除 refresh Cookie；令牌无服务端状态，已签发的 access token 到期前仍有效。 */
     @PostMapping("/logout")
     public ResponseEntity<Void> logout() {
         return ResponseEntity.noContent()
@@ -81,6 +94,7 @@ public class AuthController {
         return new UserView(principal.username(), principal.role());
     }
 
+    /** 为用户签发 access + refresh 令牌：refresh 写入 Cookie，access 与有效期（秒）放在响应体。 */
     private ResponseEntity<TokenResponse> tokens(AuthPrincipal principal) {
         String access = jwt.issue(principal, JwtService.TokenType.ACCESS);
         String refresh = jwt.issue(principal, JwtService.TokenType.REFRESH);
@@ -90,6 +104,7 @@ public class AuthController {
                         new UserView(principal.username(), principal.role())));
     }
 
+    /** refresh Cookie：HttpOnly、SameSite=Strict、仅发往 /api/v1/auth；Secure 由配置决定（生产应开启）。 */
     private ResponseCookie refreshCookie(String value, Duration maxAge) {
         return ResponseCookie.from(REFRESH_COOKIE, value)
                 .httpOnly(true)

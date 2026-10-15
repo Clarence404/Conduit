@@ -8,6 +8,11 @@ import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 
+/**
+ * 流水线后台消费线程，随应用生命周期启停（conduit.pipeline.enabled=false 时不创建）。
+ * 在一条虚拟线程中循环：定期认领遗留投递，再读取新消息交给 {@link PipelineRunner}；
+ * 循环内出现任何异常（如 Redis 不可用）都按 1s→30s 指数退避后继续，成功一轮后退避复位。
+ */
 @Component
 @ConditionalOnProperty(prefix = "conduit.pipeline", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class PipelineWorker implements SmartLifecycle {
@@ -29,6 +34,7 @@ public class PipelineWorker implements SmartLifecycle {
         this.clock = clock;
     }
 
+    /** 启动消费线程。 */
     @Override
     public void start() {
         running = true;
@@ -36,6 +42,7 @@ public class PipelineWorker implements SmartLifecycle {
         log.info("Pipeline worker started as consumer {}", props.consumer());
     }
 
+    /** 停止循环：中断线程并最多等待 5 秒；正在处理的批次若被中断，未 ACK 的投递留待之后认领。 */
     @Override
     public void stop() {
         running = false;
@@ -54,6 +61,10 @@ public class PipelineWorker implements SmartLifecycle {
         return running;
     }
 
+    /**
+     * 消费主循环：每隔 claimInterval 先把待认领的积压全部认领处理完，再读取新消息。
+     * 异常时退避重试；线程被中断或 running 变为 false 时退出。
+     */
     private void loop() {
         long nextClaimAt = 0;
         long backoff = INITIAL_BACKOFF_MS;

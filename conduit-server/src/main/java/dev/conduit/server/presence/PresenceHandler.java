@@ -22,6 +22,12 @@ public class PresenceHandler {
         this.store = store;
     }
 
+    /**
+     * 解析 PRESENCE_CONNECTED / PRESENCE_DISCONNECTED 消息的 JSON 并更新在线状态。
+     * 事件时间取 connected_at / disconnected_at，缺失或非数字时退回平台接收时间。
+     *
+     * @throws DecodeException payload 不是合法 JSON 对象（原因 MALFORMED_JSON，由流水线送入死信）
+     */
     public void handle(RawMessage message) {
         JsonNode root;
         try {

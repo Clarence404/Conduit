@@ -22,16 +22,22 @@ import java.util.Map;
  */
 public interface MessageBus {
 
+    /** 发布一条原始消息到上行流（传输层调用）。返回总线分配的消息 id。 */
     String publish(RawMessage message);
 
+    /** 确保消费组存在（幂等；组已存在时静默返回）。流不存在时会一并创建。 */
     void ensureGroup(String group);
 
+    /** 以消费者身份读取新消息，最多 count 条，最长阻塞 block；无新消息返回空列表。 */
     List<Delivery> read(String group, String consumer, int count, Duration block);
 
+    /** 认领空闲超过 minIdle 的未确认消息（崩溃或处理超时的遗留），用于重试；最多 count 条。 */
     List<Delivery> claimStale(String group, String consumer, Duration minIdle, int count);
 
+    /** 确认消息已处理完成；ids 为空时不做任何事。 */
     void ack(String group, List<String> ids);
 
+    /** 将消息送入死信流并确认原消息，使其不再被重新认领。reason 记录失败原因。 */
     void deadLetter(String group, Delivery delivery, String reason);
 
     /** 写一条死信记录（原始字段 + details + reason/originalId/deliveryCount/failedAt），不 ack。 */

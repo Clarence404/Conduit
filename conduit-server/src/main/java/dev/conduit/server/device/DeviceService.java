@@ -29,6 +29,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * 设备管理：创建、查询、修改、重置密钥、删除。设备属于当前租户（租户过滤由拦截器完成）；
+ * 在线状态来自 Redis Presence，最近上报时间来自最新值存储。涉及接入鉴权的变更要同步清除身份缓存。
+ */
 @Service
 public class DeviceService {
 
@@ -58,6 +62,9 @@ public class DeviceService {
         this.clock = clock;
     }
 
+    /**
+     * 创建设备：校验产品存在（不存在抛 404），生成 deviceKey 与明文密钥，库中只存加盐哈希。明文密钥只在返回值中出现这一次。
+     */
     public DeviceCreated create(CreateDeviceRequest request) {
         Product product = productService.require(request.productKey());
         String secret = keys.deviceSecret();
@@ -76,6 +83,9 @@ public class DeviceService {
         return new DeviceCreated(toViews(List.of(saved)).getFirst(), secret);
     }
 
+    /**
+     * 分页列出设备，按 id 倒序。productKey 非空时限定产品（不存在抛 404）；keyword 非空时模糊匹配名称或 deviceKey。page 从 1 开始。
+     */
     public PageView<DeviceView> list(String productKey, String keyword, int page, int size) {
         LambdaQueryWrapper<Device> query = new LambdaQueryWrapper<Device>().orderByDesc(Device::getId);
         if (productKey != null && !productKey.isBlank()) {
@@ -88,10 +98,16 @@ public class DeviceService {
         return new PageView<>(toViews(result.getRecords()), result.getTotal(), page, size);
     }
 
+    /**
+     * 查询单个设备（含在线状态与最近上报时间），不存在抛 404。
+     */
     public DeviceView get(String deviceKey) {
         return toViews(List.of(require(deviceKey))).getFirst();
     }
 
+    /**
+     * 修改名称与启用状态。只更新这两列（以及更新时间），不会覆盖并发重置的密钥；状态确有变化时清除身份缓存，使禁用/启用立即对鉴权生效。
+     */
     public DeviceView update(String deviceKey, UpdateDeviceRequest request) {
         Device d = require(deviceKey);
         boolean statusChanged = !d.getStatus().equals(request.status());
@@ -107,6 +123,9 @@ public class DeviceService {
         return toViews(List.of(require(deviceKey))).getFirst();
     }
 
+    /**
+     * 重置设备密钥：生成新密钥与盐，更新后清除身份缓存，旧密钥随之失效。返回新的明文密钥（仅此一次）。
+     */
     public SecretView resetSecret(String deviceKey) {
         Device d = require(deviceKey);
         String secret = keys.deviceSecret();
@@ -120,6 +139,9 @@ public class DeviceService {
         return new SecretView(deviceKey, secret);
     }
 
+    /**
+     * 删除设备。先删库，再尽力清理 Redis（身份缓存、最新值、在线状态）；Redis 清理失败只记录告警，不影响删除结果。InfluxDB 历史数据不删，随保留期过期。
+     */
     public void delete(String deviceKey) {
         Device d = require(deviceKey);
         devices.deleteById(d.getId());
@@ -128,6 +150,9 @@ public class DeviceService {
         bestEffort(deviceKey, "presence", () -> presence.delete(deviceKey));
     }
 
+    /**
+     * 执行清理动作，Redis 异常只记录日志，不向上抛出。
+     */
     private void bestEffort(String deviceKey, String keyName, Runnable cleanup) {
         try {
             cleanup.run();
@@ -136,6 +161,9 @@ public class DeviceService {
         }
     }
 
+    /**
+     * 按 deviceKey 取当前租户的设备实体，不存在（含属于其他租户）抛 404。供其他服务复用。
+     */
     public Device require(String deviceKey) {
         Device d = devices.selectOne(new LambdaQueryWrapper<Device>().eq(Device::getDeviceKey, deviceKey));
         if (d == null) {
@@ -144,6 +172,9 @@ public class DeviceService {
         return d;
     }
 
+    /**
+     * 批量转为响应视图：产品标识、在线状态、最近上报时间都各用一次批量查询取得，避免逐个设备查询。
+     */
     private List<DeviceView> toViews(List<Device> list) {
         if (list.isEmpty()) {
             return List.of();

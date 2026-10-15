@@ -10,9 +10,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 产品属性（物模型）的 MyBatis-Plus Mapper，受租户拦截器过滤。
+ */
 @Mapper
 public interface ProductPropertyMapper extends BaseMapper<ProductProperty> {
 
+    /**
+     * 统计某产品的属性数。
+     */
     default long countByProduct(long productId) {
         return selectCount(new LambdaQueryWrapper<ProductProperty>().eq(ProductProperty::getProductId, productId));
     }

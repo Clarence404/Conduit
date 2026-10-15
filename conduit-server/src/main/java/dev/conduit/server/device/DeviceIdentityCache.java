@@ -11,6 +11,10 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.Optional;
 
+/**
+ * 设备身份的 Redis 缓存（conduit:auth:{deviceKey}，TTL 5 分钟）。MQTT 鉴权与流水线按 deviceKey 高频查询身份，用它减轻 PostgreSQL 压力。
+ * 设备状态变更、重置密钥、删除时由 DeviceService 主动 evict；读取失败时降级由 DeviceIdentityLookup 处理。
+ */
 @Component
 public class DeviceIdentityCache {
 
@@ -26,10 +30,16 @@ public class DeviceIdentityCache {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 身份缓存的 Redis 键。
+     */
     public static String key(String deviceKey) {
         return "conduit:auth:" + deviceKey;
     }
 
+    /**
+     * 读缓存；未命中返回 empty。缓存内容损坏时记录告警、删除该条并按未命中处理。Redis 异常（DataAccessException）原样抛出。
+     */
     public Optional<DeviceIdentity> get(String deviceKey) {
         String json = redis.opsForValue().get(key(deviceKey));
         if (json == null) {
@@ -44,6 +54,9 @@ public class DeviceIdentityCache {
         }
     }
 
+    /**
+     * 写入缓存并设置 5 分钟 TTL。
+     */
     public void put(DeviceIdentity identity) {
         try {
             redis.opsForValue().set(key(identity.deviceKey()), objectMapper.writeValueAsString(identity), TTL);
@@ -52,6 +65,9 @@ public class DeviceIdentityCache {
         }
     }
 
+    /**
+     * 删除缓存项，使下次查询重新读库。
+     */
     public void evict(String deviceKey) {
         redis.delete(key(deviceKey));
     }

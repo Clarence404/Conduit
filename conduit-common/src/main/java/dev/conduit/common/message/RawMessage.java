@@ -6,6 +6,9 @@ import java.util.Objects;
 /**
  * 协议无关的原始消息。transport 只负责组装它，业务解析在 server 完成。
  *
+ * 由 transport 写入 Redis Streams 总线，server 流水线读取。构造时 payload / attributes 为 null 会被规范化为空，
+ * deviceKey 与 type 不可为 null。
+ *
  * @param productKey 产品 Key；上下线事件拿不到时为 null
  * @param deviceKey  设备 Key（等于 MQTT clientId）
  * @param payload    原始字节，不做任何解析

@@ -13,6 +13,7 @@ import java.util.Map;
 @RestController
 public class MqttAuthController {
 
+    /** EMQX 回调请求体：连接的 clientId、用户名与密码。 */
     public record MqttAuthRequest(String clientid, String username, String password) {
     }
 
@@ -24,6 +25,10 @@ public class MqttAuthController {
         this.props = props;
     }
 
+    /**
+     * 处理一次设备/transport 的连接鉴权。先以常量时间比较内部 token（缺失或不匹配抛 401，且未配置 token 时一律拒绝），
+     * 再交给 {@link MqttAuthService} 判定；允许时返回 is_superuser，供 EMQX 对 transport 放开 ACL。
+     */
     @PostMapping("/internal/mqtt/auth")
     public Map<String, Object> authenticate(
             @RequestHeader(value = "X-Conduit-Internal-Token", required = false) String token,

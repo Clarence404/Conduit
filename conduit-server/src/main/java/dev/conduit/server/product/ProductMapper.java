@@ -6,6 +6,9 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+/**
+ * 产品的 MyBatis-Plus Mapper，常规查询受租户拦截器过滤；下面两个方法是显式绕过租户过滤的内部专用查询。
+ */
 @Mapper
 public interface ProductMapper extends BaseMapper<Product> {
 

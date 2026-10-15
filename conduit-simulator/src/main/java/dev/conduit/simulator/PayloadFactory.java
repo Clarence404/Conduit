@@ -7,6 +7,7 @@ import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+/** 构造设备上报的 JSON 载荷（纯函数），对应平台的 standard-json 与 flat-json 两种解码器。 */
 public final class PayloadFactory {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -14,6 +15,7 @@ public final class PayloadFactory {
     private PayloadFactory() {
     }
 
+    /** 标准格式：{"id":..., "ts":..., "params":{测点: 值, ...}}。 */
     public static byte[] property(String id, long ts, Map<String, Object> params) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("id", id);

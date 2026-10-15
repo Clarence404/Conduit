@@ -17,12 +17,14 @@ public class SecretHasher {
 
     private final SecureRandom random = new SecureRandom();
 
+    /** 生成 16 字节随机盐，十六进制表示。 */
     public String newSalt() {
         byte[] salt = new byte[16];
         random.nextBytes(salt);
         return HexFormat.of().formatHex(salt);
     }
 
+    /** 计算 SHA-256(salt + secret) 并以十六进制返回。 */
     public String hash(String secret, String salt) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -32,6 +34,7 @@ public class SecretHasher {
         }
     }
 
+    /** 校验密钥是否与已存哈希一致，使用常量时间比较。 */
     public boolean matches(String secret, String salt, String expectedHash) {
         return MessageDigest.isEqual(
                 hash(secret, salt).getBytes(StandardCharsets.UTF_8),

@@ -12,6 +12,9 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
+/**
+ * 启动初始化：保证默认租户与初始管理员账号存在（幂等），使全新部署后即可登录 UI。
+ */
 @Component
 public class AdminBootstrap implements ApplicationRunner {
 
@@ -33,6 +36,11 @@ public class AdminBootstrap implements ApplicationRunner {
         this.encoder = encoder;
     }
 
+    /**
+     * 缺失时创建 default 租户与管理员；已存在则不改动（不会重置已有管理员的密码）。
+     *
+     * @throws IllegalStateException 管理员用户名或密码未配置，进程启动失败
+     */
     @Override
     public void run(ApplicationArguments args) {
         if (props.adminUsername() == null || props.adminUsername().isBlank()

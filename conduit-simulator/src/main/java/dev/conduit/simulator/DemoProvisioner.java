@@ -24,10 +24,15 @@ public final class DemoProvisioner {
     private DemoProvisioner() {
     }
 
+    /** 同 {@link #provision(ConduitApiClient, String, int, String)}，使用 standard-json 解码器。 */
     public static List<DeviceCredentials> provision(ConduitApiClient api, String productName, int count) {
         return provision(api, productName, count, "standard-json");
     }
 
+    /**
+     * 通过 REST 准备 count 台演示设备并返回其凭据：复用已有设备（按 deviceKey 排序取前 count 台，必要时改名并重置密钥），
+     * 不足则新建；已有设备多于 count 时多余的保持不动。产品不存在时按 codec 创建。
+     */
     public static List<DeviceCredentials> provision(ConduitApiClient api, String productName, int count,
                                                     String codec) {
         String productKey = api.findOrCreateProduct(productName, codec);
@@ -62,6 +67,7 @@ public final class DemoProvisioner {
         return true;
     }
 
+    /** 从 classpath 读取打包的演示物模型；找不到时抛 IllegalStateException。 */
     static JsonNode loadDemoThingModel() {
         try (InputStream in = DemoProvisioner.class.getClassLoader().getResourceAsStream(DEMO_THING_MODEL)) {
             if (in == null) {

@@ -23,6 +23,9 @@ public class InfluxDatabaseInitializer implements SmartInitializingSingleton {
         this.props = props;
     }
 
+    /**
+     * 启动时建库；库已存在则保持不变（保留期不会被修改）。InfluxDB 不可用时抛异常使启动失败。
+     */
     @Override
     public void afterSingletonsInstantiated() {
         client.createDatabaseIfMissing(props.database(), props.retention());

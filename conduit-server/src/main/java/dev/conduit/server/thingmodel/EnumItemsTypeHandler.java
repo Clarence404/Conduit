@@ -45,6 +45,9 @@ public class EnumItemsTypeHandler extends BaseTypeHandler<List<EnumItem>> {
         return parse(cs.getString(columnIndex));
     }
 
+    /**
+     * 解析 jsonb 文本；列为 NULL 返回 null（非枚举属性），JSON 非法抛 SQLException。
+     */
     private static List<EnumItem> parse(String json) throws SQLException {
         if (json == null) {
             return null;

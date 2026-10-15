@@ -5,6 +5,10 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
+/**
+ * 设备模拟器入口（演示/压测用，独立于平台进程）：通过 REST 准备产品、物模型与设备，
+ * 再用各设备凭据经 MQTT 连接 EMQX 周期上报，驱动整条 设备 -> EMQX -> transport -> 总线 -> server 链路。
+ */
 public final class SimulatorApplication {
 
     private static final Logger log = LoggerFactory.getLogger(SimulatorApplication.class);
@@ -30,6 +34,10 @@ public final class SimulatorApplication {
         System.exit(status);
     }
 
+    /**
+     * 主流程：读配置、登录（等待 server 就绪）、准备设备、产品无属性时导入演示物模型，然后开始模拟上报。
+     * 有限模式下返回即表示全部发送成功。
+     */
     private static void run() throws InterruptedException {
         SimulatorConfig config = SimulatorConfig.load();
         ConduitApiClient api = new ConduitApiClient(config.apiUrl());

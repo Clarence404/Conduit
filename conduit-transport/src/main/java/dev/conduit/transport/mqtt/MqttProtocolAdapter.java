@@ -32,6 +32,8 @@ import java.util.function.Supplier;
 
 /**
  * 以持久会话 + 共享订阅接收设备消息，XADD 成功后才回 PUBACK（手动 ACK），保证至少一次投递。
+ * 位于 设备 -MQTT-> EMQX -> transport -> Redis Streams 总线 这一段：订阅设备上行 topic 与 EMQX 的
+ * $SYS 上下线 topic，经 {@link TopicParser} 解析后组装 RawMessage 发布到总线。
  */
 public class MqttProtocolAdapter implements ProtocolAdapter {
 
@@ -72,6 +74,12 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
         return "mqtt";
     }
 
+    /**
+     * 连接 EMQX（MQTT 5，持久会话 cleanStart=false，断线自动重连）并等待首次订阅成功，最长 30 秒。
+     * 先注册全局回调再连接，以便接住重连后 broker 推送的积压消息。
+     *
+     * @throws IllegalStateException 连接失败、订阅失败或超时（已清理资源，transport 进程应启动失败）
+     */
     @Override
     public void start() {
         Mqtt5ClientBuilder builder = MqttClient.builder().useMqttVersion5()
@@ -118,6 +126,7 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
         log.info("MQTT adapter connected to {}:{} as {}", props.host(), props.port(), props.clientId());
     }
 
+    /** 停止：置停止标志、取消订阅重试、有界等待断开连接并关闭投递线程；未 ACK 的消息由 broker 经持久会话重投。 */
     @Override
     public void stop() {
         stopping = true;
@@ -126,6 +135,7 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
         deliveryExecutor.shutdownNow();
     }
 
+    /** start() 失败后的清理，动作与 stop() 相同。 */
     private void cleanupAfterFailedStart() {
         stopping = true;
         subscribeRetryExecutor.shutdownNow();
@@ -187,11 +197,13 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
         });
     }
 
+    /** 指数退避：initialBackoff * 2^attempt（指数封顶 5），上限 30 秒。订阅重试与总线发布重试共用。 */
     private Duration backoff(int attempt) {
         Duration delay = initialBackoff.multipliedBy(1L << Math.min(attempt, 5));
         return delay.compareTo(MAX_RETRY_DELAY) > 0 ? MAX_RETRY_DELAY : delay;
     }
 
+    /** 订阅设备上行 topic（共享订阅，多实例分摊）及 EMQX 的上下线系统 topic（普通订阅），均为 QoS 1。 */
     private CompletableFuture<?> subscribe() {
         return client.subscribeWith()
                 .addSubscription().topicFilter("$share/" + props.shareGroup() + "/conduit/+/+/up/#")
@@ -204,6 +216,11 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
                 .send();
     }
 
+    /**
+     * 处理一条收到的 MQTT 消息（在单线程投递线程上串行执行，保序）。
+     * 无法路由的 topic 与平台自身客户端（ownClientPrefix）的上下线事件直接 ACK 丢弃；
+     * 其余组装为 RawMessage 并阻塞重试发布到总线，发布成功后才 ACK。
+     */
     void onPublish(Mqtt5Publish publish) {
         String topic = publish.getTopic().toString();
         Optional<ParsedTopic> parsed = TopicParser.parse(topic);
@@ -254,6 +271,7 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
         }
     }
 
+    /** 是否为设备上下线事件（而非业务数据）。 */
     private static boolean isPresence(MessageType type) {
         return type == MessageType.PRESENCE_CONNECTED || type == MessageType.PRESENCE_DISCONNECTED;
     }

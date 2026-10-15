@@ -19,6 +19,7 @@ import java.util.UUID;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/** 集成测试基类：启动完整 Spring 上下文（Testcontainers 提供 PG / Redis / InfluxDB），提供 MockMvc 与直接写库造设备、定义属性等公共辅助。 */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
