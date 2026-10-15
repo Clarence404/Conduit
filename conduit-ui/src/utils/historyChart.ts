@@ -146,6 +146,8 @@ const TRANSPARENT_ICON = 'image://data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEK
 export function buildChartOption(s: SeriesView, ctx: ChartContext): EChartsCoreOption {
   const common = {
     animation: false,
+    // 透明背景：深色时 ECharts 内置 dark 主题自带深蓝背景，与页面底色不一致
+    backgroundColor: 'transparent',
     grid: { left: 64, right: 48, top: 24, bottom: 28 },
     // 不提供「还原」：每次 setOption 都会清空缩放历史，该按钮不起作用（重置缩放由面板按钮负责）。ECharts 无法移除内置 back 图标，换成透明 1x1 图片并清空标题
     toolbox: {

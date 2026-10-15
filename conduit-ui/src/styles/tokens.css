@@ -1,0 +1,97 @@
+/*
+ * Conduit 设计变量（--cd-*）与全局基础样式。
+ * 颜色优先引用 Element Plus 变量（--el-*），它们在 html.dark 下由 element-plus/theme-chalk/dark/css-vars.css 切换；
+ * 这里只定义 Element Plus 没有的值（间距、圆角、侧栏两种风格、登录页品牌区），并在 html.dark 下给出深色值。
+ * 应用组件的样式只使用这些变量，不写死颜色。
+ */
+:root {
+  --cd-space-1: 4px;
+  --cd-space-2: 8px;
+  --cd-space-3: 12px;
+  --cd-space-4: 16px;
+  --cd-space-5: 24px;
+  --cd-radius-sm: 4px;
+  --cd-radius: 8px;
+  --cd-radius-lg: 12px;
+  --cd-header-height: 56px;
+
+  --cd-page-bg: var(--el-bg-color-page);
+  --cd-panel-bg: var(--el-bg-color);
+  --cd-panel-border: var(--el-border-color-lighter);
+  --cd-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --cd-text-muted: var(--el-text-color-secondary);
+  --cd-online: var(--el-color-success);
+  --cd-offline: var(--el-text-color-placeholder);
+
+  /* 登录页左侧品牌区（浅色、深色主题下都是深色） */
+  --cd-brand-bg: #0f1c30;
+  --cd-brand-text: #e5ecf6;
+  --cd-brand-muted: #94a3b8;
+
+  --cd-sidebar-width: 208px;
+  --cd-sidebar-collapsed-width: 64px;
+  /* 侧栏深色风格：深蓝灰底，选中项主色底白字 */
+  --cd-sidebar-dark-bg: #1b2636;
+  --cd-sidebar-dark-text: #c5cdd9;
+  --cd-sidebar-dark-muted: #7c8899;
+  --cd-sidebar-dark-hover: #243247;
+  --cd-sidebar-dark-active-bg: var(--el-color-primary);
+  --cd-sidebar-dark-active-text: #ffffff;
+  --cd-sidebar-dark-border: transparent;
+  /* 侧栏浅色风格：白底，选中项浅蓝底蓝字（随主题切换） */
+  --cd-sidebar-light-bg: var(--el-bg-color);
+  --cd-sidebar-light-text: var(--el-text-color-regular);
+  --cd-sidebar-light-muted: var(--el-text-color-secondary);
+  --cd-sidebar-light-hover: var(--el-fill-color-light);
+  --cd-sidebar-light-active-bg: var(--el-color-primary-light-9);
+  --cd-sidebar-light-active-text: var(--el-color-primary);
+  --cd-sidebar-light-border: var(--el-border-color-light);
+}
+
+html.dark {
+  --cd-shadow: none;
+  --cd-brand-bg: #0a1220;
+  --cd-sidebar-dark-bg: #111a26;
+  --cd-sidebar-dark-hover: #1b2738;
+}
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  background: var(--cd-page-bg);
+  color: var(--el-text-color-primary);
+  font-family: var(--el-font-family);
+}
+
+a {
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* 内容面板：列表与卡片的统一底色、边框、圆角与内边距 */
+.cd-panel {
+  background: var(--cd-panel-bg);
+  border: 1px solid var(--cd-panel-border);
+  border-radius: var(--cd-radius);
+  box-shadow: var(--cd-shadow);
+  padding: var(--cd-space-4);
+}
+
+/* 表格下方的分页器：右对齐 */
+.cd-pager {
+  margin-top: var(--cd-space-4);
+  justify-content: flex-end;
+}
+
+/* 次要说明文字 */
+.cd-muted {
+  color: var(--cd-text-muted);
+  font-size: 12px;
+}
