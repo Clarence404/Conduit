@@ -1,5 +1,8 @@
-/** AppLayout 组件测试：菜单分组与按路由归属高亮、禁用的 V0.2-C 菜单、折叠并保存偏好、侧栏风格类名、面包屑、租户名称与退出登录 */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+/**
+ * AppLayout 组件测试：菜单分组与按路由归属高亮、禁用的 V0.2-C 菜单、折叠并保存偏好（点击与键盘 Enter/空格）、侧栏风格类名、
+ * 面包屑、租户名称与退出登录、折叠按钮与用户菜单的无障碍名称、窄屏强制折叠且不改动已保存的折叠偏好。
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
@@ -72,6 +75,24 @@ describe('AppLayout', () => {
     wrapper.unmount()
   })
 
+  it('toggles from the keyboard with Enter and Space, and labels the toggle and the user menu', async () => {
+    const { wrapper } = await mountAt('/devices')
+    const toggle = wrapper.find('.collapse-toggle')
+
+    expect(toggle.attributes('aria-label')).toBe('收起菜单')
+    await toggle.trigger('keydown', { key: 'Enter' })
+    expect(useUiStore().sidebarCollapsed).toBe(true)
+    expect(wrapper.find('.collapse-toggle').attributes('aria-label')).toBe('展开菜单')
+
+    const space = new KeyboardEvent('keydown', { key: ' ', cancelable: true, bubbles: true })
+    wrapper.find('.collapse-toggle').element.dispatchEvent(space)
+    expect(useUiStore().sidebarCollapsed).toBe(false)
+    expect(space.defaultPrevented).toBe(true)
+
+    expect(wrapper.find('.user').attributes('aria-label')).toBe('用户菜单')
+    wrapper.unmount()
+  })
+
   it('uses the dark sidebar by default and follows the sidebar style preference', async () => {
     const { wrapper } = await mountAt('/devices')
 
@@ -112,5 +133,32 @@ describe('AppLayout', () => {
     expect(wrapper.find('.el-menu-item.is-active').text()).toBe('首页')
     expect(wrapper.findAll('.breadcrumb .el-breadcrumb__inner').map((c) => c.text())).toEqual(['概览', '首页'])
     wrapper.unmount()
+  })
+  describe('on a narrow screen', () => {
+    const originalMatchMedia = window.matchMedia
+
+    beforeEach(() => {
+      window.matchMedia = ((query: string) => ({
+        matches: query === '(max-width: 819px)',
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })) as unknown as typeof window.matchMedia
+    })
+
+    afterEach(() => {
+      window.matchMedia = originalMatchMedia
+    })
+
+    it('forces the sidebar collapsed, hides the toggle and leaves the saved preference unchanged', async () => {
+      localStorage.setItem(UI_STORAGE_KEY, JSON.stringify({ sidebarCollapsed: false }))
+      const { wrapper } = await mountAt('/devices')
+
+      expect(wrapper.find('.el-menu').classes()).toContain('el-menu--collapse')
+      expect(wrapper.find('.collapse-toggle').exists()).toBe(false)
+      expect(useUiStore().sidebarCollapsed).toBe(false)
+      expect(JSON.parse(localStorage.getItem(UI_STORAGE_KEY)!).sidebarCollapsed).toBe(false)
+      wrapper.unmount()
+    })
   })
 })

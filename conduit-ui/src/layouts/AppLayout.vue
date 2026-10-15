@@ -77,8 +77,10 @@ function onCommand(command: string) {
         role="button"
         tabindex="0"
         :title="collapsed ? '展开菜单' : '收起菜单'"
+        :aria-label="collapsed ? '展开菜单' : '收起菜单'"
         @click="ui.toggleSidebar()"
         @keydown.enter="ui.toggleSidebar()"
+        @keydown.space.prevent="ui.toggleSidebar()"
       >
         <el-icon><Expand v-if="collapsed" /><Fold v-else /></el-icon>
         <span v-if="!collapsed">收起菜单</span>
@@ -99,7 +101,7 @@ function onCommand(command: string) {
           </el-popover>
           <el-tag v-if="auth.user?.tenantName" type="info" class="tenant">{{ auth.user.tenantName }}</el-tag>
           <el-dropdown trigger="click" @command="onCommand">
-            <span class="user" role="button" tabindex="0">
+            <span class="user" role="button" tabindex="0" aria-label="用户菜单">
               <el-avatar :size="28">{{ avatarText }}</el-avatar>
               <el-icon><ArrowDown /></el-icon>
             </span>
