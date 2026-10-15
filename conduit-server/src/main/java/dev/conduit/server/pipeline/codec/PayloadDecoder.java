@@ -8,11 +8,18 @@ package dev.conduit.server.pipeline.codec;
  */
 public interface PayloadDecoder {
 
-    /** 产品 codec 列存的值。 */
+    /** 解码器标识，即产品 codec 字段存储的值；全局唯一，重名使启动失败（见 DecoderRegistry）。 */
     String name();
 
     /** 下拉框显示名。 */
     String displayName();
 
+    /**
+     * 把原始报文解码为时间戳与测点值。应无状态、线程安全，由流水线线程直接调用。
+     *
+     * @param ctx     消息上下文（含接收时间，用于缺省 ts）
+     * @param payload 设备上报的原始字节
+     * @throws DecodeException 报文无法解码；属于不可恢复错误，消息进死信
+     */
     DecodedPayload decode(DecodeContext ctx, byte[] payload);
 }

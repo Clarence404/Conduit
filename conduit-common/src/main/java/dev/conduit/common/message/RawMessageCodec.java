@@ -17,6 +17,10 @@ public final class RawMessageCodec {
     private RawMessageCodec() {
     }
 
+    /**
+     * 编码为 Stream 字段：productKey 为空时省略 pk；payload 转 Base64；
+     * 附加属性以 {@code attr.} 为前缀逐项展开。
+     */
     public static Map<String, String> toFields(RawMessage message) {
         Map<String, String> fields = new LinkedHashMap<>();
         if (message.productKey() != null) {
@@ -30,6 +34,12 @@ public final class RawMessageCodec {
         return fields;
     }
 
+    /**
+     * 从 Stream 字段还原消息，{@link #toFields} 的逆操作。pk 可缺省（返回 null）。
+     *
+     * @throws IllegalArgumentException 必填字段缺失；type 非法、Base64 或数字格式错误时同样抛出
+     *                                  （对应的 valueOf / decode / parseLong 异常均为其子类）
+     */
     public static RawMessage fromFields(Map<String, String> fields) {
         String deviceKey = require(fields, DEVICE_KEY);
         MessageType type = MessageType.valueOf(require(fields, TYPE));

@@ -21,6 +21,10 @@ public class DeviceIdentityLookup {
         this.devices = devices;
     }
 
+    /**
+     * 按 deviceKey 查设备身份（跨租户）：先查缓存，未命中或 Redis 不可用时直查 PostgreSQL，再回填缓存。
+     * 回填失败只记录告警，不影响结果。设备不存在返回 empty（不缓存空结果）。
+     */
     public Optional<DeviceIdentity> find(String deviceKey) {
         try {
             Optional<DeviceIdentity> cached = cache.get(deviceKey);

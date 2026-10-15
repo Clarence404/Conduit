@@ -10,7 +10,10 @@ import org.springframework.stereotype.Component;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** 扁平格式：{"ts":毫秒, "Ua":220.1, ...}。顶层 ts 为时间戳，id 忽略，其余键均为测点，至少一个。 */
+/**
+ * 扁平 JSON 解码器（codec = flat-json），流水线「解码」步骤的一种实现。
+ * 格式：{"ts":毫秒, "Ua":220.1, ...}。顶层 ts 为时间戳，id 忽略，其余键均为测点，至少一个。
+ */
 @Component
 public class FlatJsonDecoder implements PayloadDecoder {
 
@@ -34,6 +37,12 @@ public class FlatJsonDecoder implements PayloadDecoder {
         return "扁平 JSON";
     }
 
+    /**
+     * 解析顶层对象：ts 经 TimestampPolicy 解析（缺省取 receivedAt），ts 与 id 之外的键作为测点。
+     *
+     * @throws DecodeException 非法 JSON（MALFORMED_JSON）；测点名非法、值类型不支持、没有任何测点（INVALID_PARAMS）；
+     *                         ts 非整数或超出时间窗口（TS_OUT_OF_RANGE）
+     */
     @Override
     public DecodedPayload decode(DecodeContext ctx, byte[] payload) {
         JsonNode root = JsonPayloads.readObject(reader, payload);

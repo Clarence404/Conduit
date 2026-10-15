@@ -33,11 +33,13 @@ public class ConduitApiClient {
         this.baseUrl = baseUrl;
     }
 
+    /** 登录并保存 accessToken，之后的请求自动带 Bearer 头；状态码非 200 抛 IllegalStateException。 */
     public void login(String username, String password) {
         JsonNode body = send("POST", "/api/v1/auth/login", Map.of("username", username, "password", password), 200);
         token = body.get("accessToken").asText();
     }
 
+    /** 同 {@link #findOrCreateProduct(String, String)}，新建时使用 standard-json 解码器。 */
     public String findOrCreateProduct(String name) {
         return findOrCreateProduct(name, "standard-json");
     }
@@ -63,10 +65,12 @@ public class ConduitApiClient {
                 .get("productKey").asText();
     }
 
+    /** 产品当前物模型中的属性数量；用于判断是否还需要导入物模型。 */
     public int propertyCount(String productKey) {
         return send("GET", "/api/v1/products/" + encode(productKey), null, 200).path("propertyCount").asInt();
     }
 
+    /** 导入物模型文档；mode 为服务端支持的导入模式（如 merge）。 */
     public void importThingModel(String productKey, JsonNode document, String mode) {
         send("PUT", "/api/v1/products/" + encode(productKey) + "/thing-model?mode=" + encode(mode), document, 200);
     }
@@ -79,6 +83,7 @@ public class ConduitApiClient {
         return listDevices(productKey).stream().map(DeviceSummary::deviceKey).toList();
     }
 
+    /** 分页拉取产品下全部设备（每页 100 条，直到取完）。 */
     public List<DeviceSummary> listDevices(String productKey) {
         List<DeviceSummary> devices = new ArrayList<>();
         for (int page = 1; ; page++) {
@@ -105,17 +110,23 @@ public class ConduitApiClient {
         send("DELETE", "/api/v1/products/" + encode(productKey), null, 204);
     }
 
+    /** 创建设备；明文密钥只在此刻返回一次，调用方需自行保存。 */
     public DeviceCredentials createDevice(String productKey, String name) {
         JsonNode body = send("POST", "/api/v1/devices", Map.of("productKey", productKey, "name", name), 201);
         return new DeviceCredentials(productKey, body.get("device").get("deviceKey").asText(),
                 body.get("deviceSecret").asText());
     }
 
+    /** 重置设备密钥并返回新的明文密钥（旧密钥立即失效）。 */
     public DeviceCredentials resetSecret(String productKey, String deviceKey) {
         JsonNode body = send("POST", "/api/v1/devices/" + encode(deviceKey) + "/reset-secret", null, 200);
         return new DeviceCredentials(productKey, deviceKey, body.get("deviceSecret").asText());
     }
 
+    /**
+     * 发送 JSON 请求并解析响应体。状态码与 expectedStatus 不符时抛 IllegalStateException（含响应体）；
+     * 204 之类空响应体由调用方忽略返回值。
+     */
     private JsonNode send(String method, String path, Object body, int expectedStatus) {
         try {
             HttpRequest.Builder request = HttpRequest.newBuilder(baseUrl.resolve(path))

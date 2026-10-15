@@ -2,7 +2,10 @@ package dev.conduit.server.pipeline;
 
 import java.util.Map;
 
-/** 消息本身有问题、重试也不会成功的错误，处理方式是进死信；details 会写入死信记录。 */
+/**
+ * 消息本身有问题、重试也不会成功的错误，处理方式是进死信；details 会写入死信记录。
+ * 由解码器、物模型校验与 {@link PipelineProcessor} 的身份检查抛出，在 PipelineProcessor 中捕获后记死信并 ACK。
+ */
 public class DecodeException extends RuntimeException {
 
     private final DeadReason reason;

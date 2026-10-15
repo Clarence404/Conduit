@@ -4,7 +4,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
- * @param username        为空表示匿名连接（仅测试环境）
+ * transport 连接 EMQX 的 MQTT 配置（前缀 conduit.transport.mqtt）。
+ *
+ * @param shareGroup         共享订阅组名，同组的多个 transport 实例分摊设备上行消息
+ * @param sessionExpirySeconds 持久会话过期秒数，断线期间 broker 保留积压消息的时长
+ * @param username       为空表示匿名连接（仅测试环境）
  * @param ownClientPrefix 平台内部客户端的 clientId 前缀，这些客户端的上下线事件不转发
  */
 @ConfigurationProperties(prefix = "conduit.transport.mqtt")

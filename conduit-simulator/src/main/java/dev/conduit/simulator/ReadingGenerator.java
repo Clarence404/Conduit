@@ -15,6 +15,11 @@ public class ReadingGenerator {
         this.energyKwh = 1000 + random.nextInt(9000);
     }
 
+    /**
+     * 生成下一次读数：三相电压 Ua/Ub/Uc、电流 Ia/Ib/Ic 以及累计正向电能 EPimp（kWh，严格递增）。
+     *
+     * @param intervalSeconds 距上次读数的秒数，用于按功率累加电能
+     */
     public Map<String, Object> next(double intervalSeconds) {
         Map<String, Object> reading = new LinkedHashMap<>();
         double powerW = 0;

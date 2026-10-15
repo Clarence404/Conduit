@@ -40,6 +40,9 @@ public class InfluxClient implements AutoCloseable {
     private final HttpClient http;
     private final ObjectMapper mapper = new ObjectMapper();
 
+    /**
+     * 构造客户端。baseUrl 末尾的斜杠会被去掉；token 以 Bearer 方式随每个请求发送。连接超时 5 秒，单请求超时 10 秒。
+     */
     public InfluxClient(URI baseUrl, String token) {
         String url = baseUrl.toString();
         this.baseUrl = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
@@ -66,6 +69,11 @@ public class InfluxClient implements AutoCloseable {
         throw new InfluxHttpException(status, response.body());
     }
 
+    /**
+     * 执行 SQL 查询（/api/v3/query_sql，JSON 格式），返回行列表（列名 → 值）。
+     * 响应体为空时返回空列表；非 200 抛 InfluxHttpException；响应不是预期的 JSON 数组时抛 IllegalStateException。
+     * SQL 经 URL 编码放在查询串中，调用方必须自行保证 SQL 已参数化/转义。
+     */
     public List<Map<String, Object>> querySql(String db, String sql) {
         HttpResponse<String> response = send(HttpRequest.newBuilder(
                 uri("/api/v3/query_sql", "db", db, "q", sql, "format", "json")).GET());
@@ -101,11 +109,17 @@ public class InfluxClient implements AutoCloseable {
         throw new InfluxHttpException(status, response.body());
     }
 
+    /**
+     * 关闭底层 HTTP 客户端；由 Spring 在容器销毁时调用。
+     */
     @Override
     public void close() {
         http.close();
     }
 
+    /**
+     * 解析「部分行被拒」的 400 响应。响应不是该格式（或 JSON 无法解析）时返回 null，由调用方按普通 HTTP 错误处理。
+     */
     private List<LineError> partialWriteErrors(String body) {
         try {
             JsonNode root = mapper.readTree(body);
@@ -122,6 +136,9 @@ public class InfluxClient implements AutoCloseable {
         }
     }
 
+    /**
+     * 拼接请求地址；query 为键值交替的可变参数，值做 URL 编码。
+     */
     private URI uri(String path, String... query) {
         StringBuilder sb = new StringBuilder(baseUrl).append(path);
         for (int i = 0; i < query.length; i += 2) {
@@ -131,6 +148,9 @@ public class InfluxClient implements AutoCloseable {
         return URI.create(sb.toString());
     }
 
+    /**
+     * 发送请求并补上超时与鉴权头。IO 失败抛 UncheckedIOException；线程被中断时恢复中断标志后同样抛 UncheckedIOException。
+     */
     private HttpResponse<String> send(HttpRequest.Builder request) {
         try {
             return http.send(request.timeout(REQUEST_TIMEOUT).header("Authorization", authorization).build(),

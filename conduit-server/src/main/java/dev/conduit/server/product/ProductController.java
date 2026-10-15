@@ -18,6 +18,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 产品管理 REST 接口（/api/v1/products），给 UI 的产品列表与详情页使用；业务逻辑在 ProductService。
+ */
 @RestController
 @RequestMapping("/api/v1/products")
 public class ProductController {

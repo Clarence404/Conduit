@@ -56,6 +56,11 @@ public class DeviceSimulator {
         this.format = format;
     }
 
+    /**
+     * 连接所有设备并按周期上报，阻塞到结束。messagesPerDevice &gt; 0 时为有限模式：每台发完即结束，
+     * 超过 completionTimeout 未完成或有消息最终发送失败则抛 IllegalStateException；否则无限运行直到被中断。
+     * 任一设备连接失败立即抛异常。结束时（含异常）关闭线程池并断开所有连接。
+     */
     public void run(List<DeviceCredentials> devices) throws InterruptedException {
         boolean finite = messagesPerDevice > 0;
         long intervalMs = interval.toMillis();
@@ -156,6 +161,10 @@ public class DeviceSimulator {
         }
     }
 
+    /**
+     * 以 QoS1 发布一条消息；失败（异常或 PUBACK 错误码）时间隔 1 秒重试，最多 10 次，
+     * 最终失败计入 failed。无论成败 onDone 恰好回调一次（调度器已关闭时除外）。
+     */
     private void publish(ScheduledExecutorService scheduler, Mqtt5AsyncClient client, String deviceKey,
                          String topic, byte[] payload, int attempt, Runnable onDone, AtomicInteger failed) {
         client.publishWith().topic(topic).qos(MqttQos.AT_LEAST_ONCE).payload(payload).send()
@@ -188,6 +197,7 @@ public class DeviceSimulator {
                 });
     }
 
+    /** 从发布结果中提取失败原因；成功（含 result 为 null）返回 null。 */
     private static String problemOf(Mqtt5PublishResult result) {
         if (result == null) {
             return null;

@@ -13,9 +13,14 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 import java.io.IOException;
 
+/** Spring Security 配置：无状态 JWT 认证，决定哪些接口免认证以及 401/403 的统一返回格式。 */
 @Configuration(proxyBeanMethods = false)
 public class SecurityConfig {
 
+    /**
+     * 构建过滤链：登录/刷新/登出、/internal/**（供 EMQX 回调，自行校验）、健康检查免认证，其余一律需要认证；
+     * 未认证返回 401、无权限返回 403，均为 problem+json；{@link JwtAuthFilter} 置于用户名密码过滤器之前。
+     */
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, JwtService jwt, ObjectMapper objectMapper)
             throws Exception {
@@ -39,6 +44,7 @@ public class SecurityConfig {
         return http.build();
     }
 
+    /** 直接向响应写入 RFC 7807 problem+json（过滤器层异常不经过 MVC 异常处理器）。 */
     private static void writeProblem(HttpServletResponse response, ObjectMapper objectMapper,
                                      HttpStatus status, String detail) throws IOException {
         response.setStatus(status.value());

@@ -29,8 +29,10 @@ public enum PayloadFormat {
         return codec;
     }
 
+    /** 按本格式编码一次上报；id 为消息标识，ts 为设备时间（毫秒），params 为测点读数。 */
     public abstract byte[] encode(String id, long ts, Map<String, Object> params);
 
+    /** 解析配置值 standard / flat（忽略大小写与首尾空白）；其他值抛 IllegalStateException。 */
     public static PayloadFormat parse(String value) {
         return switch (value.trim().toLowerCase(Locale.ROOT)) {
             case "standard" -> STANDARD;

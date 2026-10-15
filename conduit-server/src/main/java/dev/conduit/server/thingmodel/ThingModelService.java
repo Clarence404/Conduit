@@ -42,10 +42,16 @@ public class ThingModelService {
         this.clock = clock;
     }
 
+    /**
+     * 列出产品属性，按 id（创建顺序）升序。产品不存在抛 404。
+     */
     public List<PropertyView> list(String productKey) {
         return rows(products.require(productKey).getId()).stream().map(PropertyView::of).toList();
     }
 
+    /**
+     * 新增属性。校验失败抛 400；在事务内先锁产品行，再检查标识重复和 200 个上限（冲突抛 409），保证并发新增/导入也不会超限。提交后清除物模型缓存。
+     */
     public PropertyView create(String productKey, PropertyRequest request) {
         Product product = products.require(productKey);
         requireValid(request);
@@ -65,6 +71,9 @@ public class ThingModelService {
         return PropertyView.of(created);
     }
 
+    /**
+     * 修改属性。标识取路径参数；属性不存在抛 404，数据类型与现有不同抛 409，字段不合法抛 400。可清空的字段（单位、范围、说明等）传 null 即清空。成功后清除物模型缓存。
+     */
     public PropertyView update(String productKey, String identifier, PropertyRequest request) {
         Product product = products.require(productKey);
         ProductProperty row = requireRow(product.getId(), identifier);
@@ -81,17 +90,27 @@ public class ThingModelService {
         return PropertyView.of(properties.selectById(row.getId()));
     }
 
+    /**
+     * 删除属性；不存在抛 404。成功后清除物模型缓存。
+     */
     public void delete(String productKey, String identifier) {
         Product product = products.require(productKey);
         properties.deleteById(requireRow(product.getId(), identifier).getId());
         cache.evict(productKey);
     }
 
+    /**
+     * 导出产品的全部属性（仅 9 个可编辑字段，不含时间戳），可直接再导入。
+     */
     public ThingModelDocument export(String productKey) {
         return new ThingModelDocument(rows(products.require(productKey).getId()).stream()
                 .map(PropertyRequest::of).toList());
     }
 
+    /**
+     * 导入物模型，在单个事务内完成：锁产品行，先校验整份文件（任一错误抛 ItemErrorsException，未做任何修改），
+     * 再逐项新增或更新，REPLACE 模式最后删除文件中没有的属性。提交后清除缓存，返回导入后的全部属性。文档缺 properties 数组抛 400。
+     */
     public List<PropertyView> importModel(String productKey, ThingModelDocument document, ImportMode mode) {
         Product product = products.require(productKey);
         if (document == null || document.properties() == null) {
@@ -131,6 +150,9 @@ public class ThingModelService {
         return result.stream().map(PropertyView::of).toList();
     }
 
+    /**
+     * 由已通过校验的请求构造新属性实体。
+     */
     private static ProductProperty newRow(long productId, PropertyRequest request) {
         ProductProperty row = new ProductProperty();
         row.setProductId(productId);
@@ -140,6 +162,9 @@ public class ThingModelService {
         return row;
     }
 
+    /**
+     * 校验不通过时把全部错误用「；」拼成一条 400。
+     */
     private static void requireValid(PropertyRequest request) {
         List<String> errors = PropertyRules.check(request);
         if (!errors.isEmpty()) {
@@ -147,16 +172,25 @@ public class ThingModelService {
         }
     }
 
+    /**
+     * 读取产品的全部属性，按 id 升序。
+     */
     private List<ProductProperty> rows(long productId) {
         return properties.selectList(new LambdaQueryWrapper<ProductProperty>()
                 .eq(ProductProperty::getProductId, productId).orderByAsc(ProductProperty::getId));
     }
 
+    /**
+     * 按标识查属性，不存在返回 null。
+     */
     private ProductProperty findRow(long productId, String identifier) {
         return properties.selectOne(new LambdaQueryWrapper<ProductProperty>()
                 .eq(ProductProperty::getProductId, productId).eq(ProductProperty::getIdentifier, identifier));
     }
 
+    /**
+     * 按标识查属性，不存在抛 404。
+     */
     private ProductProperty requireRow(long productId, String identifier) {
         ProductProperty row = findRow(productId, identifier);
         if (row == null) {

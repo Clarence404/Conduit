@@ -9,6 +9,9 @@ import lombok.Data;
 
 import java.time.OffsetDateTime;
 
+/**
+ * 产品实体（表 product，带 tenant_id）：一类设备的模板，持有物模型（product_property）和解码器选择。设备（Device）归属于某个产品。
+ */
 @Data
 @TableName("product")
 public class Product {

@@ -19,6 +19,9 @@ import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.util.Map;
 
+/**
+ * 产品的增删改查。产品属于当前租户（租户过滤由拦截器完成）；物模型缓存在产品变更、删除时同步清除。
+ */
 @Service
 public class ProductService {
 
@@ -41,6 +44,9 @@ public class ProductService {
         this.clock = clock;
     }
 
+    /**
+     * 新建产品，productKey 由系统生成。codec 缺省为 standard-json；指定的解码器不存在抛 400。
+     */
     public ProductView create(SaveProductRequest request) {
         Product p = new Product();
         p.setProductKey(keys.productKey());
@@ -51,6 +57,9 @@ public class ProductService {
         return ProductView.of(products.selectById(p.getId()), 0);
     }
 
+    /**
+     * 分页列出当前租户的产品，按 id 倒序（新的在前）；属性数一次批量查询取得，避免逐个产品查询。page 从 1 开始。
+     */
     public PageView<ProductView> list(int page, int size) {
         Page<Product> result = products.selectPage(new Page<>(page, size),
                 new LambdaQueryWrapper<Product>().orderByDesc(Product::getId));
@@ -61,11 +70,17 @@ public class ProductService {
                 result.getTotal(), page, size);
     }
 
+    /**
+     * 查询单个产品，不存在抛 404。
+     */
     public ProductView get(String productKey) {
         Product p = require(productKey);
         return ProductView.of(p, (int) properties.countByProduct(p.getId()));
     }
 
+    /**
+     * 修改名称、描述（null 表示清空）；codec 为 null 时保持不变，不存在的解码器抛 400。修改后清除物模型缓存（缓存中含 codec）。
+     */
     public ProductView update(String productKey, SaveProductRequest request) {
         Product p = require(productKey);
         p.setName(request.name());
@@ -79,6 +94,9 @@ public class ProductService {
         return ProductView.of(p, (int) properties.countByProduct(p.getId()));
     }
 
+    /**
+     * 删除产品。产品下仍有设备抛 409；成功后清除物模型缓存。
+     */
     public void delete(String productKey) {
         Product p = require(productKey);
         boolean hasDevices = devices.exists(new LambdaQueryWrapper<Device>().eq(Device::getProductId, p.getId()));
@@ -89,6 +107,9 @@ public class ProductService {
         thingModels.evict(productKey);
     }
 
+    /**
+     * 按 productKey 取当前租户的产品实体，不存在（含属于其他租户）抛 404。供其他服务复用。
+     */
     public Product require(String productKey) {
         Product p = products.selectOne(new LambdaQueryWrapper<Product>().eq(Product::getProductKey, productKey));
         if (p == null) {
@@ -97,6 +118,9 @@ public class ProductService {
         return p;
     }
 
+    /**
+     * 校验解码器已注册，否则抛 400；返回原值。
+     */
     private String requireCodec(String codec) {
         if (!decoders.exists(codec)) {
             throw ApiException.badRequest("解码器不存在: " + codec);

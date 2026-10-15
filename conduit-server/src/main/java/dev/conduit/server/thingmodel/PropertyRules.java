@@ -25,6 +25,9 @@ final class PropertyRules {
     private PropertyRules() {
     }
 
+    /**
+     * 解析数据类型名称；null 或不是合法枚举名时返回 null（由 check 报校验错误），不抛异常。
+     */
     static DataType parseType(String value) {
         if (value == null) {
             return null;
@@ -82,6 +85,9 @@ final class PropertyRules {
         return errors;
     }
 
+    /**
+     * 校验枚举项：至少 1 个、至多 64 个，值必须是整数且不重复，名称非空。
+     */
     private static List<String> checkEnumItems(List<EnumItemRequest> items) {
         List<String> errors = new ArrayList<>();
         if (items.isEmpty()) {
@@ -110,6 +116,10 @@ final class PropertyRules {
         return errors;
     }
 
+    /**
+     * 把请求中的数值转为 long；只接受整数类型（Long/Integer/Short/Byte 以及不溢出的 BigInteger），
+     * 小数（如 1.5）、溢出值和 null 返回 null。
+     */
     static Long integerValue(Number n) {
         return switch (n) {
             case Long l -> l;
@@ -134,6 +144,9 @@ final class PropertyRules {
         target.setDescription(blankToNull(r.description()));
     }
 
+    /**
+     * 空白串视为 null，否则去掉首尾空白。
+     */
     private static String blankToNull(String s) {
         return s == null || s.isBlank() ? null : s.trim();
     }

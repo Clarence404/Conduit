@@ -8,6 +8,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 遥测写入器：把流水线产出的 TelemetryPoint 批量写入 InfluxDB 的 property 表（tag：tenant_id/product_key/device_key）。
+ * 位于流水线「物模型校验」之后、最新值更新之前。
+ */
 @Component
 public class TelemetryWriter {
 
@@ -56,6 +60,9 @@ public class TelemetryWriter {
         return new WriteResult(rejected);
     }
 
+    /**
+     * 发送并翻译异常：400（非逐行拒绝）转 IllegalStateException，其余 HTTP 错误和 IO 错误统一转 TelemetryUnavailableException。
+     */
     private List<InfluxClient.LineError> send(List<String> lines) {
         try {
             return client.writeLines(props.database(), lines);
@@ -69,6 +76,9 @@ public class TelemetryWriter {
         }
     }
 
+    /**
+     * 把遥测点转成行协议；tag 为 tenant_id、product_key、device_key。
+     */
     static String toLine(TelemetryPoint p) {
         Map<String, String> tags = new LinkedHashMap<>();
         tags.put("tenant_id", Long.toString(p.tenantId()));

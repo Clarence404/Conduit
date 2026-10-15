@@ -21,6 +21,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 设备管理 REST 接口（/api/v1/devices），给 UI 的设备列表与详情页使用；业务逻辑在 DeviceService。
+ */
 @RestController
 @RequestMapping("/api/v1/devices")
 public class DeviceController {
