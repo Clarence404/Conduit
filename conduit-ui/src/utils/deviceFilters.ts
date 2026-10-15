@@ -124,3 +124,18 @@ export function hiddenFilterCount(f: DeviceFilters): number {
 export function hasAnyFilter(f: DeviceFilters): boolean {
   return Boolean(f.productKey || f.keyword || f.online || f.status) || hiddenFilterCount(f) > 0
 }
+
+/** 两组筛选条件是否完全相同（按序列化结果比较） */
+export function sameDeviceFilters(a: DeviceFilters, b: DeviceFilters): boolean {
+  return JSON.stringify(toDeviceQuery(a)) === JSON.stringify(toDeviceQuery(b))
+}
+
+/**
+ * 路由 query 是否已是规范形式（等于其解析结果再序列化）：含非法值、重复键、无关键或多余空值时为 false，
+ * 页面据此用 router.replace 把 URL 改写成规范形式。
+ */
+export function isCanonicalQuery(query: Record<string, unknown>): boolean {
+  const canonical = toDeviceQuery(parseDeviceQuery(query))
+  const keys = Object.keys(query)
+  return keys.length === Object.keys(canonical).length && keys.every((k) => query[k] === canonical[k])
+}

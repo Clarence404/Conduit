@@ -293,7 +293,7 @@ describe('DevicesView', () => {
     wrapper.unmount()
   })
 
-  it('shows the count of active hidden filters and keeps the row expanded while any is active', async () => {
+  it('shows the applied hidden-filter count, not the edited one, and never collapses on edit', async () => {
     const { wrapper } = await mountView()
     const toggle = () => wrapper.find('[data-test="more-toggle"]')
     expect(toggle().text()).toContain('更多筛选')
@@ -304,11 +304,86 @@ describe('DevicesView', () => {
     const vm = wrapper.vm as unknown as { filters: { reported: string } }
     vm.filters.reported = 'RECENT'
     await settle()
-    expect(toggle().text()).toContain('(1)')
+    // 还没点查询：徽标不变，行保持展开
+    expect(toggle().text()).not.toContain('(')
+    expect(wrapper.find('[data-test="filter-reported"]').exists()).toBe(true)
 
+    await wrapper.find('.filter-bar').trigger('submit')
+    await settle()
+    expect(toggle().text()).toContain('(1)')
+    wrapper.unmount()
+  })
+
+  it('collapses with the toggle when no applied hidden filter is active', async () => {
+    const { wrapper } = await mountView()
+    const toggle = () => wrapper.find('[data-test="more-toggle"]')
     await toggle().trigger('click')
     await settle()
     expect(wrapper.find('[data-test="filter-reported"]').exists()).toBe(true)
+    await toggle().trigger('click')
+    await settle()
+    expect(wrapper.find('[data-test="filter-reported"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('disables the toggle while an applied hidden filter forces the row open, and keeps it open after reset', async () => {
+    const { wrapper } = await mountView('/devices?reported=NEVER')
+    const toggle = () => wrapper.find('[data-test="more-toggle"]')
+    expect(toggle().attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="filter-reported"]').exists()).toBe(true)
+
+    await wrapper.findAll('.filter-bar button').find((b) => b.text() === '重置')!.trigger('click')
+    await settle()
+    expect(toggle().attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-test="filter-reported"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('re-applies the filters when the route query changes while the page stays mounted', async () => {
+    const { wrapper, router } = await mountView('/devices?online=true&reported=NEVER')
+    expect(deviceApi.list).toHaveBeenCalledTimes(1)
+
+    await router.push('/devices')
+    await settle()
+
+    expect(deviceApi.list).toHaveBeenCalledTimes(2)
+    expect(deviceApi.list).toHaveBeenLastCalledWith({ page: 1, size: 10 })
+    expect(wrapper.find('[data-test="more-toggle"]').text()).not.toContain('(')
+
+    await router.push('/devices?status=DISABLED')
+    await settle()
+    expect(deviceApi.list).toHaveBeenLastCalledWith({ status: 'DISABLED', page: 1, size: 10 })
+    wrapper.unmount()
+  })
+
+  it('does not load twice or loop when search() writes the query itself', async () => {
+    const { wrapper } = await mountView()
+    await wrapper.find('.filter-bar .keyword input').setValue('电表')
+    await wrapper.find('.filter-bar').trigger('submit')
+    await settle()
+    expect(deviceApi.list).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('rewrites the URL to drop ignored invalid query values', async () => {
+    const { wrapper, router } = await mountView('/devices?online=true&status=bogus&createdFrom=x')
+    await settle()
+    expect(router.currentRoute.value.query).toEqual({ online: 'true' })
+    expect(deviceApi.list).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('shows the failure state, not the previous rows, when a later query fails', async () => {
+    vi.spyOn(ElMessage, 'error').mockImplementation(() => ({ close: () => {} }) as never)
+    const { wrapper } = await mountView()
+    expect(wrapper.find('.el-table').text()).toContain('1号楼配电室 电表01')
+
+    vi.mocked(deviceApi.list).mockRejectedValueOnce(new Error('在线状态暂不可用'))
+    await wrapper.find('.filter-bar').trigger('submit')
+    await settle()
+
+    expect(wrapper.find('.el-table').text()).not.toContain('1号楼配电室 电表01')
+    expect(wrapper.find('.el-empty').text()).toContain('加载失败')
     wrapper.unmount()
   })
 

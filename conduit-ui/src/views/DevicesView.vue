@@ -8,7 +8,7 @@
  * 因此 /devices?online=true 之类的链接可直接打开筛选结果；「更多筛选」里有条件生效时保持展开，开关上显示个数。
  */
 
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
@@ -22,8 +22,10 @@ import {
   emptyDeviceFilters,
   hasAnyFilter,
   hiddenFilterCount,
+  isCanonicalQuery,
   millisToDayRange,
   parseDeviceQuery,
+  sameDeviceFilters,
   toDeviceParams,
   toDeviceQuery,
 } from '@/utils/deviceFilters'
@@ -45,10 +47,18 @@ const filters = reactive(parseDeviceQuery(route.query))
 const applied = reactive(parseDeviceQuery(route.query))
 const filtered = computed(() => hasAnyFilter(applied))
 
-// 「更多筛选」：用户手动展开标记；隐藏条件里有生效项时强制展开
-const moreOpen = ref(false)
-const moreCount = computed(() => hiddenFilterCount(filters))
-const moreExpanded = computed(() => moreOpen.value || moreCount.value > 0)
+// 「更多筛选」：moreOpen 是手动展开标记；已应用的隐藏条件有生效项时强制展开（此时开关禁用）。
+// 角标个数与强制展开都只看已应用的条件；编辑隐藏字段不会收起，且会把 moreOpen 置为 true
+const moreOpen = ref(hiddenFilterCount(applied) > 0)
+const moreCount = computed(() => hiddenFilterCount(applied))
+const moreLocked = computed(() => moreCount.value > 0)
+const moreExpanded = computed(() => moreOpen.value || moreLocked.value)
+watch(
+  () => [filters.reported, filters.createdFrom],
+  () => {
+    moreOpen.value = true
+  },
+)
 
 /** 创建时间日期选择器的绑定值：与 filters 的毫秒区间互转（结束日含当天，所以 createdTo 取次日 0 点） */
 const createdRange = computed<[Date, Date] | null>({
@@ -88,10 +98,13 @@ async function loadProducts() {
   }
 }
 
-/** 应用输入框里的筛选条件（关键字去首尾空格），同步到路由 query，并回到第 1 页查询。 */
+/** 应用输入框里的筛选条件（关键字去首尾空格），同步到路由 query，并回到第 1 页查询。有隐藏条件生效时把展开标记置为 true，重置后行仍保持展开。 */
 function search() {
   filters.keyword = filters.keyword.trim()
   Object.assign(applied, filters)
+  if (hiddenFilterCount(applied) > 0) {
+    moreOpen.value = true
+  }
   void router.replace({ query: toDeviceQuery(applied) })
   return searchPage()
 }
@@ -210,10 +223,42 @@ async function remove(row: DeviceView) {
   }
 }
 
-/** 进入页面：产品列表与设备列表并行加载（产品名称只用于显示，晚到也会更新）。 */
+/** 若当前 URL 的 query 含被忽略的非法值/无关键，改写成规范形式（replace，不产生历史记录） */
+function normalizeUrl() {
+  if (!isCanonicalQuery(route.query)) {
+    void router.replace({ query: toDeviceQuery(parseDeviceQuery(route.query)) })
+  }
+}
+
+/**
+ * 路由 query 在页面不卸载的情况下变化（如已在 /devices?online=true 时点击侧边栏「设备」）：
+ * 解析结果与已应用的筛选不同就同步到输入与已应用并回到第 1 页查询。search() 自己写入 query 时解析结果与 applied 相同，
+ * 所以不会重复加载，也不会循环；离开本页时（路由已不是设备列表）忽略。
+ */
+watch(
+  () => route.query,
+  () => {
+    if (route.name !== 'devices') {
+      return
+    }
+    const parsed = parseDeviceQuery(route.query)
+    if (!sameDeviceFilters(parsed, applied)) {
+      Object.assign(filters, parsed)
+      Object.assign(applied, parsed)
+      if (hiddenFilterCount(applied) > 0) {
+        moreOpen.value = true
+      }
+      void searchPage()
+    }
+    normalizeUrl()
+  },
+)
+
+/** 进入页面：产品列表与设备列表并行加载（产品名称只用于显示，晚到也会更新），并把非法 query 改写干净。 */
 onMounted(() => {
   void loadProducts()
   void load()
+  normalizeUrl()
 })
 </script>
 
@@ -227,7 +272,7 @@ onMounted(() => {
     </PageHeader>
 
     <div class="cd-panel">
-      <FilterBar :expanded="moreExpanded" :more-count="moreCount" @search="search" @reset="reset" @toggle="moreOpen = !moreOpen">
+      <FilterBar :expanded="moreExpanded" :more-count="moreCount" :locked="moreLocked" @search="search" @reset="reset" @toggle="moreOpen = !moreOpen">
         <el-form-item label="关键字">
           <el-input v-model="filters.keyword" class="keyword" placeholder="名称或设备 Key" clearable />
         </el-form-item>

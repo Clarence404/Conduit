@@ -4,6 +4,8 @@ import {
   dayRangeToMillis,
   emptyDeviceFilters,
   hiddenFilterCount,
+  isCanonicalQuery,
+  sameDeviceFilters,
   hasAnyFilter,
   millisToDayRange,
   parseDeviceQuery,
@@ -101,5 +103,20 @@ describe('counts', () => {
     expect(hasAnyFilter(emptyDeviceFilters())).toBe(false)
     expect(hasAnyFilter({ ...emptyDeviceFilters(), status: 'ENABLED' })).toBe(true)
     expect(hasAnyFilter({ ...emptyDeviceFilters(), createdFrom: 1, createdTo: 2 })).toBe(true)
+  })
+})
+
+describe('canonical query and equality', () => {
+  it('knows whether a query already equals its serialised parse', () => {
+    expect(isCanonicalQuery({})).toBe(true)
+    expect(isCanonicalQuery({ online: 'true' })).toBe(true)
+    expect(isCanonicalQuery({ online: 'true', status: 'bogus' })).toBe(false)
+    expect(isCanonicalQuery({ foo: 'x' })).toBe(false)
+    expect(isCanonicalQuery({ online: ['true', 'false'] })).toBe(false)
+  })
+
+  it('compares filters by value', () => {
+    expect(sameDeviceFilters(emptyDeviceFilters(), emptyDeviceFilters())).toBe(true)
+    expect(sameDeviceFilters(emptyDeviceFilters(), { ...emptyDeviceFilters(), online: 'true' })).toBe(false)
   })
 })

@@ -87,3 +87,4 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-15 前端：品牌标志为「字母 C 信号」（`ConduitLogo`，`tone` auto/dark-bg，深色侧栏与登录品牌区用 dark-bg；favicon 为 `public/favicon.svg`，线宽加粗）；应用外壳恰好一屏高（100vh/100dvh），侧栏与顶栏固定，只有 el-main 滚动；表格行高约 44px、主内容内边距 16px，使 10 行列表页在 1080p 屏无需滚动。
 - 2026-10-15 部署与开发模式：Compose 默认只起基础设施，应用栈走 `app` profile（模拟器 `demo`），EMQX 鉴权回调地址可配置（`CONDUIT_AUTH_URL`）；开发时应用在 IDE 本地运行，实施计划不含部署步骤，验收用测试与 API 检查，部署仅按所有者要求通过 `deploy/build-local.sh`。
 - 2026-10-15：设备列表筛选——主行关键字/产品/在线状态/启用状态，「更多筛选」含最后上报与创建时间（本地日界、左闭右开毫秒）；已应用筛选经 router.replace 同步到 query（productKey、keyword、online、status、reported、createdFrom、createdTo），非法值忽略；首页「设备」「在线设备」卡片链接到列表。
+- 2026-10-15：设备列表筛选修正——路由 query 在页面内变化时重新应用；「更多筛选」角标与强制展开只看已应用条件；useTable 加载失败清空数据（各列表显示「加载失败」而非旧数据）；非法 query 值用 replace 改写掉。
