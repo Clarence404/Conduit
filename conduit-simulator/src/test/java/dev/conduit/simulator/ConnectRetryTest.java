@@ -2,6 +2,9 @@ package dev.conduit.simulator;
 
 import org.junit.jupiter.api.Test;
 
+import org.slf4j.Logger;
+
+import java.lang.reflect.Proxy;
 import java.net.ConnectException;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -80,5 +83,44 @@ class ConnectRetryTest {
         assertThat(ConnectRetry.describe(new ExecutionException(new ConnectException("Connection refused"))))
                 .isEqualTo("ConnectException: Connection refused");
         assertThat(ConnectRetry.describe(new TimeoutException("slow"))).isEqualTo("TimeoutException: slow");
+        assertThat(ConnectRetry.describe(new TimeoutException())).isEqualTo("TimeoutException");
+        assertThat(ConnectRetry.describe(new ExecutionException(new TimeoutException()))).isEqualTo("TimeoutException");
+    }
+
+    /** 记录一次日志调用：级别（方法名）与是否带 Throwable 参数。 */
+    private record LogEvent(String level, boolean hasThrowable) {
+    }
+
+    /** 用动态代理实现 slf4j Logger，记录所有 warn/error/info 调用。 */
+    private static Logger recordingLogger(List<LogEvent> events) {
+        return (Logger) Proxy.newProxyInstance(Logger.class.getClassLoader(), new Class<?>[]{Logger.class},
+                (proxy, method, args) -> {
+                    String name = method.getName();
+                    if (name.equals("warn") || name.equals("error") || name.equals("info")) {
+                        boolean throwable = args != null && args.length > 0
+                                && args[args.length - 1] instanceof Throwable;
+                        events.add(new LogEvent(name, throwable));
+                    }
+                    Class<?> type = method.getReturnType();
+                    return type == boolean.class ? Boolean.TRUE : null;
+                });
+    }
+
+    @Test
+    void logsTwoWarningsWithoutStackTracesFor14FailuresThenSuccess() throws Exception {
+        List<LogEvent> events = new ArrayList<>();
+        ConnectRetry retry = new ConnectRetry(15, Duration.ofSeconds(2), sleeps::add, recordingLogger(events));
+
+        String result = retry.call("device dk", () -> {
+            if (attempts.incrementAndGet() <= 14) {
+                throw new ExecutionException(new ConnectException("Connection refused"));
+            }
+            return "ok";
+        });
+
+        assertThat(result).isEqualTo("ok");
+        assertThat(events).filteredOn(e -> e.level().equals("warn")).hasSize(2)
+                .noneMatch(LogEvent::hasThrowable);
+        assertThat(events).noneMatch(e -> e.level().equals("error"));
     }
 }

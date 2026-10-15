@@ -56,6 +56,8 @@ public class DeviceSimulator {
     }
 
     /**
+     * 完整构造器：指定上报格式，并可选择是否附带运行状态 st。
+     *
      * @param messagesPerDevice 每台设备的上报条数，0 表示一直运行
      * @param operatingState    是否附带运行状态 st；只有产品物模型中 st 为 ENUM 时才应开启（列类型全表共享，
      *                          无物模型的产品会把 st 存成浮点列，与演示产品的整数列冲突）
@@ -78,7 +80,10 @@ public class DeviceSimulator {
     }
 
     /**
-     * 连接全部设备并开始上报。有限模式下等全部消息完成（或超时）后返回，否则一直运行。
+     * 连接所有设备并按周期上报，阻塞到结束。messagesPerDevice &gt; 0 时为有限模式：每台发完即结束，
+     * 超过 completionTimeout 未完成或有消息最终发送失败则抛 IllegalStateException；否则无限运行直到被中断。
+     * 每台设备的首次连接按 connectRetry 重试（默认间隔 2 秒、最多 15 次），仍连不上则抛异常；
+     * 结束时（含异常）关闭线程池并断开所有连接。
      *
      * @throws IllegalStateException 某台设备重试后仍连不上、超时未完成或有消息最终发送失败
      */
@@ -187,6 +192,7 @@ public class DeviceSimulator {
         });
     }
 
+    /** 构造一台设备的 MQTT5 客户端（以 deviceKey 为用户名、密钥为密码，开启自动重连）。 */
     private Mqtt5AsyncClient buildClient(DeviceCredentials d) {
         return MqttClient.builder().useMqttVersion5()
                 .identifier(d.deviceKey())
@@ -206,6 +212,10 @@ public class DeviceSimulator {
         }
     }
 
+    /**
+     * 以 QoS1 发布一条消息；失败（异常或 PUBACK 错误码）时间隔 1 秒重试，最多 10 次，
+     * 最终失败计入 failed。无论成败 onDone 恰好回调一次（调度器已关闭时除外）。
+     */
     private void publish(ScheduledExecutorService scheduler, Mqtt5AsyncClient client, String deviceKey,
                          String topic, byte[] payload, int attempt, Runnable onDone, AtomicInteger failed) {
         client.publishWith().topic(topic).qos(MqttQos.AT_LEAST_ONCE).payload(payload).send()
@@ -238,6 +248,7 @@ public class DeviceSimulator {
                 });
     }
 
+    /** 从发布结果中提取失败原因；成功（含 result 为 null）返回 null。 */
     private static String problemOf(Mqtt5PublishResult result) {
         if (result == null) {
             return null;

@@ -17,7 +17,6 @@ final class ConnectRetry {
     static final Duration DELAY = Duration.ofSeconds(2);
     static final int WARN_EVERY = 5;
 
-    private static final Logger log = LoggerFactory.getLogger(ConnectRetry.class);
 
     /** 一次连接尝试。 */
     @FunctionalInterface
@@ -34,12 +33,19 @@ final class ConnectRetry {
     private final int maxAttempts;
     private final Duration delay;
     private final Sleeper sleeper;
+    private final Logger log;
 
     ConnectRetry() {
         this(MAX_ATTEMPTS, DELAY, d -> Thread.sleep(d.toMillis()));
     }
 
     ConnectRetry(int maxAttempts, Duration delay, Sleeper sleeper) {
+        this(maxAttempts, delay, sleeper, LoggerFactory.getLogger(ConnectRetry.class));
+    }
+
+    /** 可注入日志器的构造器，测试用它捕获日志输出。 */
+    ConnectRetry(int maxAttempts, Duration delay, Sleeper sleeper, Logger log) {
+        this.log = log;
         this.maxAttempts = maxAttempts;
         this.delay = delay;
         this.sleeper = sleeper;
@@ -79,9 +85,10 @@ final class ConnectRetry {
         return failedAttempts % WARN_EVERY == 0;
     }
 
-    /** 失败原因的简短描述；ExecutionException 取其 cause，便于看出真正的连接错误。 */
+    /** 失败原因的简短描述；ExecutionException 取其 cause，便于看出真正的连接错误；无消息时只给类名。 */
     static String describe(Exception e) {
         Throwable t = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
-        return t.getClass().getSimpleName() + ": " + t.getMessage();
+        String name = t.getClass().getSimpleName();
+        return t.getMessage() == null ? name : name + ": " + t.getMessage();
     }
 }
