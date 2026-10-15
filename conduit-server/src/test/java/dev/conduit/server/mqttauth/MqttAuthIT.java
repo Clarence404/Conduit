@@ -63,17 +63,17 @@ class MqttAuthIT extends IntegrationTestBase {
     }
 
     @Test
-    void allowsConnectorAsSuperuser() throws Exception {
-        auth("test-internal-token", "conduit-connector-1", "conduit-connector", "connector-pass")
+    void allowsTransportAsSuperuser() throws Exception {
+        auth("test-internal-token", "conduit-transport-1", "conduit-transport", "transport-pass")
                 .andExpect(jsonPath("$.result").value("allow"))
                 .andExpect(jsonPath("$.is_superuser").value(true));
     }
 
     @Test
-    void deniesConnectorWithWrongPasswordOrClientId() throws Exception {
-        auth("test-internal-token", "conduit-connector-1", "conduit-connector", "nope")
+    void deniesTransportWithWrongPasswordOrClientId() throws Exception {
+        auth("test-internal-token", "conduit-transport-1", "conduit-transport", "nope")
                 .andExpect(jsonPath("$.result").value("deny"));
-        auth("test-internal-token", "evil", "conduit-connector", "connector-pass")
+        auth("test-internal-token", "evil", "conduit-transport", "transport-pass")
                 .andExpect(jsonPath("$.result").value("deny"));
     }
 

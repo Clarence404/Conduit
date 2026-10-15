@@ -1,4 +1,4 @@
-package dev.conduit.connector.mqtt;
+package dev.conduit.transport.mqtt;
 
 import com.hivemq.client.mqtt.datatypes.MqttTopic;
 import com.hivemq.client.mqtt.mqtt5.lifecycle.Mqtt5ClientConnectedContext;
@@ -41,7 +41,7 @@ class MqttProtocolAdapterTest {
         publish = mock(Mqtt5Publish.class);
         when(publish.getTopic()).thenReturn(MqttTopic.of("conduit/pk1/dk1/up/property"));
         when(publish.getPayloadAsBytes()).thenReturn(new byte[]{1});
-        var props = new MqttConnectorProperties("localhost", 1883, "conduit-connector-ut",
+        var props = new MqttTransportProperties("localhost", 1883, "conduit-transport-ut",
                 null, null, "conduit", 300, "conduit-");
         adapter = new MqttProtocolAdapter(props, bus,
                 Clock.fixed(Instant.ofEpochMilli(1), ZoneOffset.UTC), Duration.ofMillis(1));

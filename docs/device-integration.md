@@ -29,14 +29,14 @@ sequenceDiagram
     autonumber
     participant Dev as 设备
     participant EMQX
-    participant Conn as conduit-connector
+    participant Transport as conduit-transport
     participant Bus as Redis Stream
     participant Server as conduit-server
     participant Store as InfluxDB / Redis
     Dev->>EMQX: PUBLISH QoS1 conduit/{productKey}/{deviceKey}/up/property
-    EMQX->>Conn: ACL 检查后交给共享订阅
-    Conn->>Bus: XADD conduit:stream:up
-    Conn-->>EMQX: PUBACK（写入成功后才确认）
+    EMQX->>Transport: ACL 检查后交给共享订阅
+    Transport->>Bus: XADD conduit:stream:up
+    Transport-->>EMQX: PUBACK（写入成功后才确认）
     EMQX-->>Dev: PUBACK
     Server->>Bus: 消费组读取
     Server->>Server: 按产品解码器解码，按物模型逐测点校验
@@ -44,7 +44,7 @@ sequenceDiagram
     Server->>Bus: XACK
 ```
 
-设备上下线不需要设备自己上报：EMQX 的连接、断开事件经 connector 进入同一条总线，由 server 更新在线状态。
+设备上下线不需要设备自己上报：EMQX 的连接、断开事件经 transport 进入同一条总线，由 server 更新在线状态。
 
 ## 2. 准备：产品和设备
 
@@ -209,7 +209,7 @@ docker compose -f deploy/docker-compose.yml exec redis \
 
 **发出去的消息没有收到 PUBACK**
 
-平台下游（Redis）暂时不可用时，connector 会暂缓确认，设备侧表现为 PUBACK 变慢。恢复后会继续确认，消息不会丢失。设备应等待 PUBACK，不要因为超时就丢弃数据。
+平台下游（Redis）暂时不可用时，transport 会暂缓确认，设备侧表现为 PUBACK 变慢。恢复后会继续确认，消息不会丢失。设备应等待 PUBACK，不要因为超时就丢弃数据。
 
 ## 9. 当前限制
 

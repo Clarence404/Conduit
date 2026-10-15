@@ -3,20 +3,20 @@ server:
 
 spring:
   application:
-    name: conduit-connector
+    name: conduit-transport
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
 conduit:
-  connector:
+  transport:
     mqtt:
       host: ${EMQX_HOST:localhost}
       port: ${EMQX_PORT:1883}
-      client-id: ${CONNECTOR_CLIENT_ID:conduit-connector-1}
-      username: ${CONNECTOR_MQTT_USERNAME:}
-      password: ${CONNECTOR_MQTT_PASSWORD:}
+      client-id: ${TRANSPORT_CLIENT_ID:conduit-transport-1}
+      username: ${TRANSPORT_MQTT_USERNAME:}
+      password: ${TRANSPORT_MQTT_PASSWORD:}
 
 management:
   endpoints:

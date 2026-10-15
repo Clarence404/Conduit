@@ -6,8 +6,8 @@ conduit:
     jwt-secret: test-jwt-secret-test-jwt-secret-0123456789
   internal:
     token: test-internal-token
-    connector-username: conduit-connector
-    connector-password: connector-pass
+    transport-username: conduit-transport
+    transport-password: transport-pass
   pipeline:
     enabled: false
     consumer: test-consumer

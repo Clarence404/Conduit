@@ -1,4 +1,4 @@
-package dev.conduit.connector.mqtt;
+package dev.conduit.transport.mqtt;
 
 import com.hivemq.client.mqtt.MqttClient;
 import com.hivemq.client.mqtt.lifecycle.MqttClientConnectedContext;
@@ -10,7 +10,7 @@ import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5Publish;
 import dev.conduit.common.bus.MessageBus;
 import dev.conduit.common.message.MessageType;
 import dev.conduit.common.message.RawMessage;
-import dev.conduit.connector.adapter.ProtocolAdapter;
+import dev.conduit.transport.adapter.ProtocolAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,7 +38,7 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
     private static final Logger log = LoggerFactory.getLogger(MqttProtocolAdapter.class);
     private static final Duration MAX_RETRY_DELAY = Duration.ofSeconds(30);
 
-    private final MqttConnectorProperties props;
+    private final MqttTransportProperties props;
     private final MessageBus bus;
     private final Clock clock;
     private final Duration initialBackoff;
@@ -56,11 +56,11 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
 
     private volatile Mqtt5AsyncClient client;
 
-    public MqttProtocolAdapter(MqttConnectorProperties props, MessageBus bus, Clock clock) {
+    public MqttProtocolAdapter(MqttTransportProperties props, MessageBus bus, Clock clock) {
         this(props, bus, clock, Duration.ofSeconds(1));
     }
 
-    MqttProtocolAdapter(MqttConnectorProperties props, MessageBus bus, Clock clock, Duration initialBackoff) {
+    MqttProtocolAdapter(MqttTransportProperties props, MessageBus bus, Clock clock, Duration initialBackoff) {
         this.props = props;
         this.bus = bus;
         this.clock = clock;

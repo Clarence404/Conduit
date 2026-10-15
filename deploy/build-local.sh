@@ -65,7 +65,7 @@ EOF
   $DOCKER build -q -t "$1:latest" "$ctx" >/dev/null
 }
 build_java conduit-conduit-server conduit-server/target/conduit-server.jar
-build_java conduit-conduit-connector conduit-connector/target/conduit-connector.jar
+build_java conduit-conduit-transport conduit-transport/target/conduit-transport.jar
 build_java conduit-simulator conduit-simulator/target/conduit-simulator-exec.jar
 
 WEB="$WORK/img-web"

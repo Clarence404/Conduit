@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Conduit Transport (local)" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="dev.conduit.transport.TransportApplication" />
+    <module name="conduit-transport" />
+    <option name="VM_PARAMETERS" value="-Dspring.profiles.active=local" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
