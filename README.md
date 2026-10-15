@@ -105,9 +105,20 @@ docker compose -f deploy/docker-compose.yml --profile demo up -d --build
 | `API_PORT`（8091） | REST API |
 | `MQTT_PORT`（1883） | MQTT |
 | `EMQX_DASHBOARD_PORT`（18083） | EMQX 控制台 |
-| `INFLUX_PORT`（8096） | InfluxDB |
+| `INFLUX_PORT`（8096） | InfluxDB 3 Core HTTP API（容器内 8181，需 token） |
 
 PostgreSQL 与 Redis 不对外暴露。
+
+### InfluxDB 3 Core
+
+- 镜像 `influxdb:3.12.0-core`，数据库 `telemetry`，保留 30 天（conduit-server 启动时建库）。
+- `INFLUX_TOKEN` 必须以 `apiv3_` 开头，容器启动时据此生成离线管理员 token。首次启动时写入库中，之后修改 INFLUX_TOKEN 不会生效：需停止服务、删除 influx3-data 卷（时序数据随之清空）后重新启动。
+- 从 V0.1（InfluxDB 2.7）升级：新版本使用新卷 `influx3-data`，旧卷 `conduit_influx-data` 中的历史数据**不迁移**；确认不需要后可执行 `docker volume rm conduit_influx-data`。
+- 查询示例：
+
+  ```bash
+  curl -s -H "Authorization: Bearer <INFLUX_TOKEN>" --get "http://<docker-host>:8096/api/v3/query_sql"     --data-urlencode "db=telemetry" --data-urlencode "format=json"     --data-urlencode "q=SELECT time, device_key, \"Ua\" FROM property ORDER BY time DESC LIMIT 5"
+  ```
 
 ## 设备接入
 
@@ -165,7 +176,7 @@ server、connector、simulator 和前端都可以直接在 IDEA 里运行，连�
        connector-password: <CONNECTOR_MQTT_PASSWORD>
      influx:
        url: http://<docker-host>:8096
-       token: <INFLUX_TOKEN>
+       token: <INFLUX_TOKEN>   # apiv3_ 开头
    ```
 
    ```yaml

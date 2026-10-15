@@ -31,23 +31,26 @@ services:
     restart: unless-stopped
 
   influxdb:
-    image: influxdb:2.7.11
+    image: influxdb:3.12.0-core
+    # 启动时由 INFLUX_TOKEN 生成离线管理员 token 文件（只有库里还没有管理员 token 时才生效），再启动服务
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        case "$${INFLUX_TOKEN}" in apiv3_*) ;; *) echo "INFLUX_TOKEN must start with apiv3_" >&2; exit 1;; esac;
+        umask 077
+        && printf '{"token":"%s","name":"_admin"}' "$${INFLUX_TOKEN}" > /tmp/admin-token.json
+        && exec influxdb3 serve --node-id node0 --object-store file --data-dir /var/lib/influxdb3/data
+        --admin-token-file /tmp/admin-token.json --disable-authz health,ping
     environment:
-      DOCKER_INFLUXDB_INIT_MODE: setup
-      DOCKER_INFLUXDB_INIT_USERNAME: conduit
-      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD:?INFLUX_PASSWORD is required}
-      DOCKER_INFLUXDB_INIT_ORG: conduit
-      DOCKER_INFLUXDB_INIT_BUCKET: telemetry
-      DOCKER_INFLUXDB_INIT_RETENTION: 30d
-      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN:?INFLUX_TOKEN is required}
+      INFLUX_TOKEN: ${INFLUX_TOKEN:?INFLUX_TOKEN is required}
     ports:
-      - "${BIND_ADDR:-127.0.0.1}:${INFLUX_PORT:-8096}:8086"
+      - "${BIND_ADDR:-127.0.0.1}:${INFLUX_PORT:-8096}:8181"
     volumes:
-      - influx-data:/var/lib/influxdb2
+      - influx3-data:/var/lib/influxdb3
     healthcheck:
-      test: ["CMD", "influx", "ping"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8181/health"]
       interval: 5s
-      retries: 20
+      retries: 30
     restart: unless-stopped
 
   emqx:
@@ -87,7 +90,7 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       REDIS_HOST: redis
-      INFLUX_URL: http://influxdb:8086
+      INFLUX_URL: http://influxdb:8181
       INFLUX_TOKEN: ${INFLUX_TOKEN}
       CONDUIT_ADMIN_USERNAME: ${CONDUIT_ADMIN_USERNAME:-admin}
       CONDUIT_ADMIN_PASSWORD: ${CONDUIT_ADMIN_PASSWORD:?CONDUIT_ADMIN_PASSWORD is required}
@@ -181,5 +184,5 @@ services:
 volumes:
   pg-data:
   redis-data:
-  influx-data:
+  influx3-data:
   emqx-data:

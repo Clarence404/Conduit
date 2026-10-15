@@ -31,7 +31,6 @@
 - 引导（bootstrap）并发启动存在竞态
 - 身份缓存对字面量 `null` 的处理
 - LIKE 通配符未转义
-- 逐点 Influx 回退为 O(N)，且存在 413 问题
 - 多实例下的 claim 限制
 - 禁用设备不会被 EMQX 踢下线
 - 缺少 MAX-delivery 边界测试

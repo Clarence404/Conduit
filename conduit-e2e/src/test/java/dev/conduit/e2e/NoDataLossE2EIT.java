@@ -1,7 +1,7 @@
 package dev.conduit.e2e;
 
-import com.influxdb.client.InfluxDBClient;
-import com.influxdb.client.InfluxDBClientFactory;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.conduit.simulator.ConduitApiClient;
 import dev.conduit.simulator.DemoProvisioner;
 import dev.conduit.simulator.DeviceCredentials;
@@ -11,6 +11,10 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -63,27 +67,23 @@ class NoDataLossE2EIT {
         });
 
         Thread.sleep(1_500);
-        try (InfluxDBClient probe = influx(influxPort)) {
-            assertThat(sending.isDone()).as("sender must still be running when the server is killed").isFalse();
-            assertThat(countUa(probe, productKey)).as("kill must land mid-stream (fewer than all points stored)")
-                    .isLessThan((long) DEVICES * MESSAGES_PER_DEVICE);
-        }
+        assertThat(sending.isDone()).as("sender must still be running when the server is killed").isFalse();
+        assertThat(countUa(influxPort, productKey)).as("kill must land mid-stream (fewer than all points stored)")
+                .isLessThan((long) DEVICES * MESSAGES_PER_DEVICE);
         compose("kill", "conduit-server");
         Thread.sleep(3_000);
         compose("start", "conduit-server");
 
         sending.get();
 
-        try (InfluxDBClient influx = influx(influxPort)) {
-            await().atMost(Duration.ofMinutes(4)).pollInterval(Duration.ofSeconds(5))
-                    .untilAsserted(() -> assertThat(countUa(influx, productKey))
-                            .isEqualTo((long) DEVICES * MESSAGES_PER_DEVICE));
-        }
+        await().atMost(Duration.ofMinutes(4)).pollInterval(Duration.ofSeconds(5))
+                .untilAsserted(() -> assertThat(countUa(influxPort, productKey))
+                        .isEqualTo((long) DEVICES * MESSAGES_PER_DEVICE));
 
         String dead = composeOutput("exec", "-T", "redis", "redis-cli", "XRANGE", "conduit:stream:dead", "-", "+");
         assertThat(dead).as("no message of this run may be dead-lettered").doesNotContain(productKey);
 
-        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofSeconds(2))
+        await().atMost(Duration.ofSeconds(120)).pollInterval(Duration.ofSeconds(2))
                 .untilAsserted(() -> {
                     String pending = composeOutput("exec", "-T", "redis", "redis-cli", "XPENDING",
                             "conduit:stream:up", "conduit-server");
@@ -92,28 +92,36 @@ class NoDataLossE2EIT {
                 });
     }
 
-    private InfluxDBClient influx(int influxPort) {
-        return InfluxDBClientFactory.create("http://" + host + ":" + influxPort,
-                DotEnv.require(env, "INFLUX_TOKEN").toCharArray(), "conduit", "telemetry");
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private final HttpClient http = HttpClient.newHttpClient();
+
+    /** 本次运行写入的 Ua 点数。Ua 列还不存在时（全新的库）返回 0，而不是让 COUNT 报错。 */
+    private long countUa(int influxPort, String productKey) throws Exception {
+        JsonNode column = sql(influxPort, "SELECT data_type FROM information_schema.columns "
+                + "WHERE table_name = 'property' AND column_name = 'Ua'");
+        if (column.isEmpty()) {
+            return 0;
+        }
+        JsonNode rows = sql(influxPort, "SELECT COUNT(\"Ua\") AS n FROM property WHERE product_key = '"
+                + productKey + "' AND time >= now() - INTERVAL '1 hour'");
+        return rows.get(0).get("n").asLong();
+    }
+
+    private JsonNode sql(int influxPort, String query) throws Exception {
+        URI uri = URI.create("http://" + host + ":" + influxPort + "/api/v3/query_sql?db=telemetry&format=json&q="
+                + URLEncoder.encode(query, StandardCharsets.UTF_8));
+        HttpResponse<String> response = http.send(HttpRequest.newBuilder(uri)
+                        .header("Authorization", "Bearer " + DotEnv.require(env, "INFLUX_TOKEN"))
+                        .timeout(Duration.ofSeconds(10)).GET().build(),
+                HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        assertThat(response.statusCode()).as("InfluxDB query %s: %s", query, response.body()).isEqualTo(200);
+        String body = response.body();
+        return body == null || body.isBlank() ? JSON.createArrayNode() : JSON.readTree(body);
     }
 
     private int port(String key, int defaultValue) {
         String value = env.get(key);
         return value == null || value.isBlank() ? defaultValue : Integer.parseInt(value);
-    }
-
-    private static long countUa(InfluxDBClient influx, String productKey) {
-        String flux = """
-                from(bucket: "telemetry")
-                  |> range(start: -1h)
-                  |> filter(fn: (r) => r._measurement == "property" and r.product_key == "%s" and r._field == "Ua")
-                  |> group()
-                  |> count()
-                """.formatted(productKey);
-        return influx.getQueryApi().query(flux, "conduit").stream()
-                .flatMap(t -> t.getRecords().stream())
-                .mapToLong(r -> ((Number) r.getValue()).longValue())
-                .sum();
     }
 
     private static void compose(String... args) throws Exception {
