@@ -101,3 +101,4 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-16：新增 V0.2-R 可靠性加固（V0.2-C 之后）：e2e 本地化；transport 多实例 + 会话不持久；EMQX 磁盘持久会话（待验证 5.8.6 支持）；e2e 增加杀 transport / 杀 EMQX 场景。讨论中确定的后续工作须当时写入路线图或 spec。
 - 2026-10-16 V0.2-C：多租户与用户管理——角色 `PLATFORM_ADMIN`/`TENANT_ADMIN`/`TENANT_VIEWER`（Flyway V3：平台管理员 `tenant_id` 为空、旧 `ADMIN` 迁为 `TENANT_ADMIN`、删除租户级联删除用户）；JWT 可空 `tid`、代入 `imp`、需改密码 `mcp`；`SecurityConfig` 按路径与方法的权限矩阵；强制改密码 403 `PASSWORD_CHANGE_REQUIRED`；平台接口 `/api/v1/platform/**`（概况、租户、进入租户）与用户管理 `/api/v1/users`；代入写请求 INFO 留痕；停用租户拒绝登录、续期与 MQTT 鉴权并以 `TENANT_DISABLED` 死信；前端 `usePermission` 按角色隐藏写操作、菜单与路由按身份（`2026-10-16-conduit-v0.2c-tenants-users-design.md`）。
 - 2026-10-16：V0.2-R 并入「模拟器多产品」：按各产品物模型生成数据，演示租户的设备也有数据。
+- 2026-10-16 V0.2-R 方向调整：EMQX 5.8.6 磁盘持久会话与共享订阅互斥（实测），改为「磁盘持久会话 + transport 单活多备（Redis 锁选主、同 clientId 接管）」；多实例共享订阅放弃，升级 EMQX 留待 V1.0。
