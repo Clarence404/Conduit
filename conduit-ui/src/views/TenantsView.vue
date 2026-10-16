@@ -68,10 +68,10 @@ function reset() {
   search()
 }
 
-/** 新建成功：提示并回到第 1 页（新租户在最前） */
+/** 新建成功：提示、清空筛选并回到第 1 页（新租户在最前；带着旧的关键字/状态筛选会让新租户看不到） */
 function onCreated(tenant: TenantView) {
   ElMessage.success(`已创建租户「${tenant.name}」，首个管理员登录后需修改密码`)
-  void searchTable()
+  reset()
 }
 
 /** 打开改名对话框 */

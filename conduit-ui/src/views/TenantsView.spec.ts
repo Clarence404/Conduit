@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ElementPlus, { ElMessageBox } from 'element-plus'
 import TenantsView from './TenantsView.vue'
+import TenantCreateDialog from '@/components/TenantCreateDialog.vue'
 import { platformApi } from '@/api/platform'
 import type { TenantView } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
@@ -201,6 +202,21 @@ describe('TenantsView', () => {
     await empty.findAll('button').find((b) => b.text() === '新建租户')!.trigger('click')
 
     expect(vm.createVisible).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('resets the applied filters after creating a tenant so the new one is visible', async () => {
+    const { wrapper, vm } = await mountView('/tenants?keyword=east')
+    vm.filters.status = 'DISABLED'
+    vm.search()
+    await settle()
+    expect(platformApi.listTenants).toHaveBeenLastCalledWith({ keyword: 'east', status: 'DISABLED', page: 1, size: 10 })
+
+    wrapper.findComponent(TenantCreateDialog).vm.$emit('created', tenant({ code: 'north', name: '验收租户（华北）' }))
+    await settle()
+
+    expect(platformApi.listTenants).toHaveBeenLastCalledWith({ keyword: undefined, status: undefined, page: 1, size: 10 })
+    expect(vm.filters).toEqual({ keyword: '', status: '' })
     wrapper.unmount()
   })
 })
