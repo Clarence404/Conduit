@@ -29,7 +29,7 @@ class DeviceIdentityLookupIT extends IntegrationTestBase {
 
     @Test
     void servesFromCacheWithoutDatabase() {
-        DeviceIdentity cached = new DeviceIdentity(unique("dk"), 99, "ENABLED", "h", "s", "pk");
+        DeviceIdentity cached = new DeviceIdentity(unique("dk"), 99, "ENABLED", "h", "s", "pk", "ACTIVE");
         cache.put(cached);
 
         assertThat(lookup.find(cached.deviceKey())).contains(cached);
@@ -45,7 +45,7 @@ class DeviceIdentityLookupIT extends IntegrationTestBase {
 
     @Test
     void evictRemovesCacheEntry() {
-        DeviceIdentity cached = new DeviceIdentity(unique("dk"), 1, "ENABLED", "h", "s", "pk");
+        DeviceIdentity cached = new DeviceIdentity(unique("dk"), 1, "ENABLED", "h", "s", "pk", "ACTIVE");
         cache.put(cached);
 
         cache.evict(cached.deviceKey());

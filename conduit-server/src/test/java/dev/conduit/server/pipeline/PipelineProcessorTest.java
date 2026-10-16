@@ -113,7 +113,7 @@ class PipelineProcessorTest {
     }
 
     private DeviceIdentity identity(String dk) {
-        return new DeviceIdentity(dk, 1L, "ENABLED", "h", "s", "pk");
+        return new DeviceIdentity(dk, 1L, "ENABLED", "h", "s", "pk", "ACTIVE");
     }
 
     private Delivery delivery(String id, String dk) {
@@ -282,6 +282,17 @@ class PipelineProcessorTest {
         processor.process(List.of(d));
 
         verifyDeadLettered(d, "UNKNOWN_CODEC");
+        verify(writer, never()).write(anyList());
+    }
+
+    @Test
+    void deviceOfADisabledTenantIsDeadLettered() {
+        when(identities.find("d1")).thenReturn(Optional.of(new DeviceIdentity("d1", 1L, "ENABLED", "h", "s", "pk", "DISABLED")));
+        Delivery d = delivery("1-0", "d1");
+
+        processor.process(List.of(d));
+
+        verifyDeadLettered(d, "TENANT_DISABLED");
         verify(writer, never()).write(anyList());
     }
 

@@ -12,6 +12,8 @@ public enum DeadReason {
     INVALID_PARAMS,
     UNKNOWN_DEVICE,
     DEVICE_DISABLED,
+    /** 设备所属租户已停用（已连接的设备在停用后继续上报）。 */
+    TENANT_DISABLED,
     PRODUCT_MISMATCH,
     TS_OUT_OF_RANGE,
     FIELD_TYPE_CONFLICT,
