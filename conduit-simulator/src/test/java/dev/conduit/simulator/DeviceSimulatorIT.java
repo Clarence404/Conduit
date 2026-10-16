@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -103,6 +104,33 @@ class DeviceSimulatorIT {
             JsonNode st = json.get("params").get(OperatingState.IDENTIFIER);
             assertThat(st.isIntegralNumber()).isTrue();
             assertThat(st.asLong()).isEqualTo(OperatingState.at(deviceKey, json.get("ts").asLong()));
+        }
+        subscriber.disconnect();
+    }
+
+    @Test
+    void eachSimulatedDeviceUsesItsOwnFormatAndReadings() throws Exception {
+        List<String> payloads = new CopyOnWriteArrayList<>();
+        Mqtt5BlockingClient subscriber = subscribe("it-subscriber-mixed", payloads);
+        List<SimulatedDevice> devices = List.of(
+                new SimulatedDevice(new DeviceCredentials("pk", "mixed-flat", "secret"), PayloadFormat.FLAT,
+                        (ts, seconds) -> new LinkedHashMap<>(Map.of("Ppv", 0.0))),
+                new SimulatedDevice(new DeviceCredentials("pk", "mixed-std", "secret"), PayloadFormat.STANDARD,
+                        (ts, seconds) -> new LinkedHashMap<>(Map.of("flow", 12.5))));
+
+        new DeviceSimulator(EMQX.getHost(), EMQX.getMappedPort(1883), Duration.ofMillis(50), 2,
+                Duration.ofSeconds(30)).runDevices(devices);
+
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(payloads).hasSize(4));
+        ObjectMapper mapper = new ObjectMapper();
+        for (String payload : payloads) {
+            JsonNode json = mapper.readTree(payload);
+            if (json.get("id").asText().startsWith("mixed-flat-")) {
+                assertThat(json.get("Ppv").asDouble()).isZero();
+                assertThat(json.has("params")).isFalse();
+            } else {
+                assertThat(json.get("params").get("flow").asDouble()).isEqualTo(12.5);
+            }
         }
         subscriber.disconnect();
     }

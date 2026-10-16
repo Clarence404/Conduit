@@ -3,11 +3,14 @@ package dev.conduit.simulator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
- * 设备模拟器入口（演示/压测用，独立于平台进程）：通过 REST 准备产品、物模型与设备，
- * 再用各设备凭据经 MQTT 连接 EMQX 周期上报，驱动整条 设备 -> EMQX -> transport -> 总线 -> server 链路。
+ * 设备模拟器入口（演示/压测用，独立于平台进程）：通过 REST 准备演示产品、物模型与设备；配置了平台管理员密码时，
+ * 再发现各租户有物模型的产品与启用设备（{@link SimulationPlanner}）；然后用各设备凭据经 MQTT 连接 EMQX 周期上报，
+ * 驱动整条 设备 -> EMQX -> transport -> 总线 -> server 链路。
  */
 public final class SimulatorApplication {
 
@@ -35,8 +38,8 @@ public final class SimulatorApplication {
     }
 
     /**
-     * 主流程：读配置、登录（等待 server 就绪）、准备设备、缺少演示属性时合并导入演示物模型，然后开始模拟上报。
-     * 有限模式下返回即表示全部发送成功。
+     * 主流程：读配置、登录（等待 server 就绪）、准备演示设备、缺少演示属性时合并导入演示物模型、
+     * 发现各租户的模拟设备，然后开始模拟上报。有限模式下返回即表示全部发送成功。
      */
     private static void run() throws InterruptedException {
         SimulatorConfig config = SimulatorConfig.load();
@@ -44,16 +47,22 @@ public final class SimulatorApplication {
         loginWithRetry(api, config);
 
         PayloadFormat format = config.payloadFormat();
-        List<DeviceCredentials> devices = DemoProvisioner.provision(api, config.productName(), config.deviceCount(),
+        List<DeviceCredentials> demo = DemoProvisioner.provision(api, config.productName(), config.deviceCount(),
                 format.codec());
-        log.info("Provisioned {} devices under product '{}'", devices.size(), config.productName());
-        if (!devices.isEmpty() && DemoProvisioner.ensureThingModel(api, devices.getFirst().productKey())) {
+        log.info("Provisioned {} devices under product '{}'", demo.size(), config.productName());
+        if (!demo.isEmpty() && DemoProvisioner.ensureThingModel(api, demo.getFirst().productKey())) {
             log.info("Imported demo thing model into product '{}'", config.productName());
         }
 
         // 演示产品的物模型含枚举 st，附带运行状态；e2e 等无物模型的产品不能发 st（见 DeviceSimulator 构造器说明）
+        List<SimulatedDevice> devices = new ArrayList<>();
+        demo.forEach(d -> devices.add(SimulatedDevice.demo(d, format, true)));
+        Set<String> demoProductKeys = demo.isEmpty() ? Set.of() : Set.of(demo.getFirst().productKey());
+        devices.addAll(SimulationPlanner.tenantDevices(config, () -> new ConduitApiClient(config.apiUrl()),
+                demoProductKeys));
+
         new DeviceSimulator(config.mqttHost(), config.mqttPort(), config.interval(), config.messagesPerDevice(),
-                DeviceSimulator.DEFAULT_COMPLETION_TIMEOUT, format, true).run(devices);
+                DeviceSimulator.DEFAULT_COMPLETION_TIMEOUT, format, true).runDevices(devices);
     }
 
     /** 一键启动时 server 可能还没就绪，最多等 2 分钟。 */
