@@ -1,0 +1,110 @@
+package dev.conduit.e2e;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * 测试机上的一个 java -jar 进程（server 或 transport）：可启动、强制结束（模拟崩溃）、再启动，并对其 HTTP 端口发 GET。
+ * 标准输出与错误追加到工作目录下的 console.log；环境变量在继承的基础上覆盖，并去掉 SPRING_PROFILES_ACTIVE。
+ */
+final class AppProcess {
+
+    private static final Logger log = LoggerFactory.getLogger(AppProcess.class);
+    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
+
+    private final String name;
+    private final Path jar;
+    private final Map<String, String> env;
+    private final int httpPort;
+    private final Path workDir;
+    private Process process;
+
+    AppProcess(String name, Path jar, Map<String, String> env, int httpPort, Path workDir) {
+        this.name = name;
+        this.jar = jar;
+        this.env = Map.copyOf(env);
+        this.httpPort = httpPort;
+        this.workDir = workDir;
+    }
+
+    String name() {
+        return name;
+    }
+
+    Path consoleLog() {
+        return workDir.resolve("console.log");
+    }
+
+    /** 启动进程（已在运行时什么也不做）；不等待就绪，由调用方轮询健康检查。 */
+    synchronized void start() throws IOException {
+        if (alive()) {
+            return;
+        }
+        Files.createDirectories(workDir);
+        String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+        List<String> command = new ArrayList<>(List.of(java, "-Xmx512m", "-jar", jar.toString(),
+                "--server.port=" + httpPort));
+        ProcessBuilder builder = new ProcessBuilder(command)
+                .directory(workDir.toFile())
+                .redirectErrorStream(true)
+                .redirectOutput(ProcessBuilder.Redirect.appendTo(consoleLog().toFile()));
+        builder.environment().remove("SPRING_PROFILES_ACTIVE");
+        builder.environment().putAll(env);
+        process = builder.start();
+        log.info("Started {} (pid {}) on port {}", name, process.pid(), httpPort);
+    }
+
+    /** 强制结束（不执行关闭钩子，不释放锁、不发 MQTT DISCONNECT），最多等 30 秒退出。 */
+    synchronized void kill() {
+        if (process == null || !process.isAlive()) {
+            return;
+        }
+        process.destroyForcibly();
+        try {
+            process.waitFor(30, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        log.info("Killed {} (pid {})", name, process.pid());
+    }
+
+    synchronized boolean alive() {
+        return process != null && process.isAlive();
+    }
+
+    /**
+     * GET http://localhost:{port}{path}。
+     *
+     * @return 响应体（任何状态码）；连接失败、超时或进程未运行时为 null
+     */
+    String get(String path) {
+        if (!alive()) {
+            return null;
+        }
+        try {
+            HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(
+                            URI.create("http://localhost:" + httpPort + path)).timeout(Duration.ofSeconds(3)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            return response.body();
+        } catch (IOException e) {
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+}

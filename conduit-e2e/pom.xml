@@ -10,6 +10,7 @@
     <version>0.1.0-SNAPSHOT</version>
   </parent>
 
+  <!-- 端到端测试（-Pe2e）：Testcontainers 临时环境 + 本地 jar 进程，需先 mvn -B -DskipTests install -->
   <artifactId>conduit-e2e</artifactId>
 
   <dependencies>
@@ -23,5 +24,33 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <conduit.root>${project.basedir}/..</conduit.root>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <conduit.root>${project.basedir}/..</conduit.root>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
 </project>
