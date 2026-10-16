@@ -8,6 +8,7 @@ const REASON_LABELS: Record<string, string> = {
   INVALID_PARAMS: '参数不合法',
   UNKNOWN_DEVICE: '未知设备',
   DEVICE_DISABLED: '设备已禁用',
+  TENANT_DISABLED: '租户已停用',
   PRODUCT_MISMATCH: '产品不匹配',
   TS_OUT_OF_RANGE: '时间戳越界',
   FIELD_TYPE_CONFLICT: '测点类型冲突',

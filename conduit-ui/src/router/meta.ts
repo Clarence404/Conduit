@@ -1,5 +1,5 @@
 /**
- * 路由元信息：页面名称（浏览器标题）、面包屑与侧栏菜单归属。
+ * 路由元信息：页面名称（浏览器标题）、面包屑、侧栏菜单归属，以及访问范围（租户页面 / 平台页面）与额外要求（管理用户）。
  * 真实路由表（router/index.ts）与测试用内存路由（test/viewTestUtils.ts）共用 ROUTE_META，保证两边一致。
  */
 import type { RouteLocationRaw, RouteMeta } from 'vue-router'
@@ -20,6 +20,13 @@ declare module 'vue-router' {
     breadcrumb?: BreadcrumbItem[]
     /** 侧栏中高亮的菜单路径：列表页与详情页归同一个菜单 */
     menu?: string
+    /**
+     * 访问范围：tenant 为租户页面（未代入的平台管理员会被带到租户管理）；platform 为平台页面（其他身份会被带到首页）；
+     * 不设表示所有登录用户（首页、404）。规则见 router/access.ts。
+     */
+    scope?: 'tenant' | 'platform'
+    /** 额外要求：manageUsers 只有租户管理员（含代入的平台管理员）可以进入 */
+    requires?: 'manageUsers'
   }
 }
 
@@ -27,17 +34,42 @@ declare module 'vue-router' {
 export const ROUTE_META = {
   home: { title: '首页', menu: '/home', breadcrumb: [{ label: '概览' }, { label: '首页' }] },
   login: { public: true, title: '登录' },
-  products: { title: '产品', menu: '/products', breadcrumb: [{ label: '设备接入' }, { label: '产品' }] },
+  products: {
+    title: '产品',
+    menu: '/products',
+    scope: 'tenant',
+    breadcrumb: [{ label: '设备接入' }, { label: '产品' }],
+  },
   'product-detail': {
     title: '产品详情',
     menu: '/products',
+    scope: 'tenant',
     breadcrumb: [{ label: '设备接入' }, { label: '产品', to: { name: 'products' } }],
   },
-  devices: { title: '设备', menu: '/devices', breadcrumb: [{ label: '设备接入' }, { label: '设备' }] },
+  devices: {
+    title: '设备',
+    menu: '/devices',
+    scope: 'tenant',
+    breadcrumb: [{ label: '设备接入' }, { label: '设备' }],
+  },
   'device-detail': {
     title: '设备详情',
     menu: '/devices',
+    scope: 'tenant',
     breadcrumb: [{ label: '设备接入' }, { label: '设备', to: { name: 'devices' } }],
+  },
+  tenants: {
+    title: '租户',
+    menu: '/tenants',
+    scope: 'platform',
+    breadcrumb: [{ label: '系统管理' }, { label: '租户' }],
+  },
+  users: {
+    title: '用户',
+    menu: '/users',
+    scope: 'tenant',
+    requires: 'manageUsers',
+    breadcrumb: [{ label: '系统管理' }, { label: '用户' }],
   },
   'not-found': { title: '页面不存在', breadcrumb: [{ label: '页面不存在' }] },
 } satisfies Record<string, RouteMeta>

@@ -34,7 +34,15 @@ describe('LoginView', () => {
     vi.mocked(authApi.login).mockResolvedValue({
       accessToken: 'token',
       expiresIn: 900,
-      user: { username: 'admin', role: 'ADMIN', tenantName: 'Default' },
+      user: {
+        username: 'admin',
+        displayName: null,
+        role: 'TENANT_ADMIN',
+        tenantCode: 'default',
+        tenantName: 'Default',
+        mustChangePassword: false,
+        impersonatedBy: null,
+      },
     })
   })
 

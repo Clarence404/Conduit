@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import MockAdapter from 'axios-mock-adapter'
-import { createHttp, REFRESH_URL, type TokenHolder } from './http'
+import { createHttp, PASSWORD_CHANGE_REQUIRED, REFRESH_URL, type TokenHolder } from './http'
 
 function holder(initial: string | null) {
   let token = initial
@@ -103,5 +103,42 @@ describe('createHttp', () => {
 
     expect(tokens.onAuthFailed).not.toHaveBeenCalled()
     expect(tokens.getToken()).toBe('old')
+  })
+
+  it('hands the refresh response to onRefreshed', async () => {
+    const onRefreshed = vi.fn()
+    const client = createHttp({ ...holder('old'), onRefreshed })
+    const m = new MockAdapter(client)
+    const user = { username: 'sysadmin', role: 'PLATFORM_ADMIN' }
+    m.onGet('/api/v1/x').reply((config) => (config.headers?.Authorization === 'Bearer new' ? [200, {}] : [401]))
+    m.onPost(REFRESH_URL).reply(200, { accessToken: 'new', expiresIn: 900, user })
+
+    await client.get('/api/v1/x')
+
+    expect(onRefreshed).toHaveBeenCalledWith({ accessToken: 'new', expiresIn: 900, user })
+  })
+
+  it('reports PASSWORD_CHANGE_REQUIRED and still rejects', async () => {
+    const onPasswordChangeRequired = vi.fn()
+    const client = createHttp({ ...holder('old'), onPasswordChangeRequired })
+    const m = new MockAdapter(client)
+    m.onGet('/api/v1/products').reply(403, { code: PASSWORD_CHANGE_REQUIRED, detail: '请先修改密码' })
+    m.onGet('/api/v1/users').reply(403, { detail: '无权限' })
+
+    await expect(client.get('/api/v1/products')).rejects.toBeTruthy()
+    await expect(client.get('/api/v1/users')).rejects.toBeTruthy()
+
+    expect(onPasswordChangeRequired).toHaveBeenCalledOnce()
+  })
+
+  it('sends the token to exit-tenant but not to login', async () => {
+    mock.onPost('/api/v1/auth/exit-tenant').reply((config) => [200, { auth: config.headers?.Authorization }])
+    mock.onPost('/api/v1/auth/login').reply((config) => [200, { auth: config.headers?.Authorization ?? null }])
+
+    const exit = await http.post('/api/v1/auth/exit-tenant')
+    const login = await http.post('/api/v1/auth/login', {})
+
+    expect(exit.data.auth).toBe('Bearer old')
+    expect(login.data.auth).toBeNull()
   })
 })

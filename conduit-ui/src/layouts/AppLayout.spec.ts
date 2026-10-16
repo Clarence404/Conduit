@@ -1,34 +1,39 @@
 /**
- * AppLayout 组件测试：菜单分组与按路由归属高亮、禁用的 V0.2-C 菜单、折叠并保存偏好（点击与键盘 Enter/空格）、侧栏风格类名、
- * 面包屑、租户名称与退出登录、折叠按钮与用户菜单的无障碍名称、窄屏强制折叠且不改动已保存的折叠偏好。
+ * AppLayout 组件测试：按身份给出的菜单（租户管理员、只读用户、平台管理员）与按路由归属高亮、折叠并保存偏好（点击与键盘 Enter/空格）、
+ * 侧栏风格类名、面包屑、租户名称、用户菜单的显示名称与角色、头像文字、退出登录、代入提示条、会话身份变化时离开不匹配的页面、
+ * 折叠按钮与用户菜单的无障碍名称、窄屏强制折叠且不改动已保存的折叠偏好、一屏高外壳。
  */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
-import { mount } from '@vue/test-utils'
+import { mount, type VueWrapper } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
-import { createPinia, setActivePinia } from 'pinia'
 import AppLayout from './AppLayout.vue'
 import { authApi } from '@/api/auth'
+import type { UserView } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 import { UI_STORAGE_KEY, useUiStore } from '@/stores/ui'
-import { createTestRouter, settle } from '@/test/viewTestUtils'
+import { createTestPinia, createTestRouter, settle } from '@/test/viewTestUtils'
 
-vi.mock('@/api/auth', () => ({ authApi: { login: vi.fn(), refresh: vi.fn(), logout: vi.fn() } }))
+vi.mock('@/api/auth', () => ({ authApi: { login: vi.fn(), refresh: vi.fn(), logout: vi.fn(), exitTenant: vi.fn() } }))
+vi.mock('@/api/me', () => ({ meApi: { update: vi.fn(), changePassword: vi.fn() } }))
+vi.mock('@/api/platform', () => ({ platformApi: { enter: vi.fn() } }))
 
-async function mountAt(path: string) {
-  const pinia = createPinia()
-  setActivePinia(pinia)
-  const auth = useAuthStore()
-  auth.token = 'token'
-  auth.user = { username: 'admin', role: 'ADMIN', tenantName: '默认租户' }
+const PLATFORM: Partial<UserView> = { username: 'sysadmin', role: 'PLATFORM_ADMIN', tenantCode: null, tenantName: null }
+
+async function mountAt(path: string, user: Partial<UserView> = {}) {
+  const pinia = createTestPinia(user)
   const router = createTestRouter()
   await router.push(path)
   await router.isReady()
   const wrapper = mount(AppLayout, { global: { plugins: [pinia, router, ElementPlus] }, attachTo: document.body })
   await settle()
   return { wrapper, router }
+}
+
+function menuLabels(wrapper: VueWrapper) {
+  return wrapper.findAll('.el-menu-item').map((i) => i.text())
 }
 
 describe('AppLayout', () => {
@@ -38,11 +43,12 @@ describe('AppLayout', () => {
     vi.mocked(authApi.logout).mockResolvedValue(undefined)
   })
 
-  it('groups the menu and highlights 设备 on a device detail page', async () => {
+  it('gives a tenant admin devices and users, and highlights 设备 on a device detail page', async () => {
     const { wrapper } = await mountAt('/devices/dk1')
 
     expect(wrapper.text()).toContain('设备接入')
     expect(wrapper.text()).toContain('系统管理')
+    expect(menuLabels(wrapper)).toEqual(['首页', '产品', '设备', '用户'])
     expect(wrapper.find('.el-menu-item.is-active').text()).toBe('设备')
     wrapper.unmount()
   })
@@ -54,14 +60,21 @@ describe('AppLayout', () => {
     wrapper.unmount()
   })
 
-  it('shows 用户 and 租户 disabled with the V0.2-C note', async () => {
-    const { wrapper } = await mountAt('/devices')
+  it('gives a viewer only the overview and devices', async () => {
+    const { wrapper } = await mountAt('/devices', { role: 'TENANT_VIEWER' })
 
-    const disabled = wrapper.findAll('.el-menu-item.is-disabled')
-    expect(disabled).toHaveLength(2)
-    expect(disabled[0].text()).toContain('用户')
-    expect(disabled[1].text()).toContain('租户')
-    disabled.forEach((d) => expect(d.text()).toContain('V0.2-C'))
+    expect(menuLabels(wrapper)).toEqual(['首页', '产品', '设备'])
+    expect(wrapper.text()).not.toContain('系统管理')
+    wrapper.unmount()
+  })
+
+  it('gives the platform admin the overview and the tenant list', async () => {
+    const { wrapper } = await mountAt('/tenants', PLATFORM)
+
+    expect(menuLabels(wrapper)).toEqual(['首页', '租户'])
+    expect(wrapper.find('.el-menu-item.is-active').text()).toBe('租户')
+    expect(wrapper.text()).not.toContain('设备接入')
+    expect(wrapper.find('.tenant').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -116,6 +129,16 @@ describe('AppLayout', () => {
     wrapper.unmount()
   })
 
+  it('names the user by display name and role', async () => {
+    const { wrapper } = await mountAt('/devices', { displayName: '华东运维 张工', role: 'TENANT_VIEWER' })
+    const vm = wrapper.vm as unknown as { userName: string; roleText: string }
+
+    expect(vm.userName).toBe('华东运维 张工')
+    expect(vm.roleText).toBe('只读用户')
+    expect(wrapper.find('.el-avatar').text()).toBe('华')
+    wrapper.unmount()
+  })
+
   it('logs out from the user menu and returns to the login page', async () => {
     const { wrapper, router } = await mountAt('/devices')
 
@@ -136,6 +159,35 @@ describe('AppLayout', () => {
     expect(wrapper.findAll('.breadcrumb .el-breadcrumb__inner').map((c) => c.text())).toEqual(['概览', '首页'])
     wrapper.unmount()
   })
+
+  it('shows the impersonation bar only while impersonating', async () => {
+    const plain = await mountAt('/devices')
+    expect(plain.wrapper.find('.impersonation-bar').exists()).toBe(false)
+    plain.wrapper.unmount()
+
+    const { wrapper } = await mountAt('/devices', { username: 'sysadmin', impersonatedBy: 'sysadmin', tenantName: '验收租户（华东）' })
+    expect(wrapper.find('.main > .impersonation-bar').text()).toContain('验收租户（华东）')
+    wrapper.unmount()
+  })
+
+  it('leaves a tenant page when the session turns into the platform admin', async () => {
+    const { wrapper, router } = await mountAt('/products', { username: 'sysadmin', impersonatedBy: 'sysadmin' })
+
+    useAuthStore().user = {
+      username: 'sysadmin',
+      displayName: null,
+      role: 'PLATFORM_ADMIN',
+      tenantCode: null,
+      tenantName: null,
+      mustChangePassword: false,
+      impersonatedBy: null,
+    }
+    await settle()
+
+    expect(router.currentRoute.value.name).toBe('tenants')
+    wrapper.unmount()
+  })
+
   describe('on a narrow screen', () => {
     const originalMatchMedia = window.matchMedia
 
