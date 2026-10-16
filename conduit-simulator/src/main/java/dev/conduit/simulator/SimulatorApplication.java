@@ -52,18 +52,18 @@ public final class SimulatorApplication {
             log.info("Provisioned {} devices under product '{}'", demo.size(), config.productName());
             if (!demo.isEmpty() && DemoProvisioner.ensureThingModel(api, demo.getFirst().productKey())) {
                 log.info("Imported demo thing model into product '{}'", config.productName());
-        }
+            }
 
-        // 演示产品的物模型含枚举 st，附带运行状态；e2e 等无物模型的产品不能发 st（见 DeviceSimulator 构造器说明）
-        List<SimulatedDevice> devices = new ArrayList<>();
-        demo.forEach(d -> devices.add(SimulatedDevice.demo(d, format, true)));
-        // 演示产品 Key 与设备数无关（deviceCount=0 时也要让发现跳过它）
-        Set<String> demoProductKeys = Set.of(api.findOrCreateProduct(config.productName(), format.codec()));
-        devices.addAll(SimulationPlanner.tenantDevices(config, () -> new ConduitApiClient(config.apiUrl()),
-                demoProductKeys));
+            // 演示产品的物模型含枚举 st，附带运行状态；e2e 等无物模型的产品不能发 st（见 DeviceSimulator 构造器说明）
+            List<SimulatedDevice> devices = new ArrayList<>();
+            demo.forEach(d -> devices.add(SimulatedDevice.demo(d, format, true)));
+            // 演示产品 Key 与设备数无关（deviceCount=0 时也要让发现跳过它）
+            Set<String> demoProductKeys = Set.of(api.findOrCreateProduct(config.productName(), format.codec()));
+            devices.addAll(SimulationPlanner.tenantDevices(config, () -> new ConduitApiClient(config.apiUrl()),
+                    demoProductKeys));
 
-        new DeviceSimulator(config.mqttHost(), config.mqttPort(), config.interval(), config.messagesPerDevice(),
-                DeviceSimulator.DEFAULT_COMPLETION_TIMEOUT, format, true).runDevices(devices);
+            new DeviceSimulator(config.mqttHost(), config.mqttPort(), config.interval(), config.messagesPerDevice(),
+                    DeviceSimulator.DEFAULT_COMPLETION_TIMEOUT, format, true).runDevices(devices);
         }
     }
 
