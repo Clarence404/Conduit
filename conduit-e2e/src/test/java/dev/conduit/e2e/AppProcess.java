@@ -32,6 +32,7 @@ final class AppProcess {
     private final int httpPort;
     private final Path workDir;
     private Process process;
+    private Thread shutdownHook;
 
     AppProcess(String name, Path jar, Map<String, String> env, int httpPort, Path workDir) {
         this.name = name;
@@ -65,6 +66,14 @@ final class AppProcess {
         builder.environment().remove("SPRING_PROFILES_ACTIVE");
         builder.environment().putAll(env);
         process = builder.start();
+        // 测试 JVM 被强行终止时也要带走子进程，避免遗留孤儿 java 进程；kill() 会撤销该钩子
+        Process started = process;
+        shutdownHook = new Thread(() -> {
+            if (started.isAlive()) {
+                started.destroyForcibly();
+            }
+        }, "kill-" + name);
+        Runtime.getRuntime().addShutdownHook(shutdownHook);
         log.info("Started {} (pid {}) on port {}", name, process.pid(), httpPort);
     }
 
@@ -79,7 +88,25 @@ final class AppProcess {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        log.info("Killed {} (pid {})", name, process.pid());
+        if (process.isAlive()) {
+            log.warn("{} (pid {}) is still alive 30 seconds after destroyForcibly", name, process.pid());
+        } else {
+            removeShutdownHook();
+            log.info("Killed {} (pid {})", name, process.pid());
+        }
+    }
+
+    /** 进程已结束时撤销关闭钩子（JVM 正在关闭时撤销会抛异常，忽略）。 */
+    private void removeShutdownHook() {
+        if (shutdownHook == null) {
+            return;
+        }
+        try {
+            Runtime.getRuntime().removeShutdownHook(shutdownHook);
+        } catch (IllegalStateException e) {
+            log.trace("JVM is shutting down, hook of {} stays", name);
+        }
+        shutdownHook = null;
     }
 
     synchronized boolean alive() {

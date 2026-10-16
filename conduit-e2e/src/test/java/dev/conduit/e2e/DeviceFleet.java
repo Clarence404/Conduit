@@ -23,6 +23,7 @@ final class DeviceFleet {
     private final int messagesPerDevice;
     private final Duration interval;
     private final AtomicInteger acked = new AtomicInteger();
+    private volatile boolean stopped;
 
     DeviceFleet(String host, int port, List<DeviceCredentials> credentials, int messagesPerDevice, Duration interval) {
         this.devices = credentials.stream().map(c -> new E2eDevice(host, port, c)).toList();
@@ -60,7 +61,11 @@ final class DeviceFleet {
             lastTs = ts;
             Map<String, Object> params = new LinkedHashMap<>();
             params.put("Ua", 220 + seq / 100.0);
-            device.publishUntilAcked(topic, PayloadFormat.STANDARD.encode(device.deviceKey() + "-" + seq, ts, params));
+            device.publishUntilAcked(topic, PayloadFormat.STANDARD.encode(device.deviceKey() + "-" + seq, ts, params),
+                    () -> stopped);
+            if (stopped) {
+                return;
+            }
             acked.incrementAndGet();
             next += interval.toMillis();
             long wait = next - System.currentTimeMillis();
@@ -68,6 +73,12 @@ final class DeviceFleet {
                 Thread.sleep(wait);
             }
         }
+    }
+
+    /** 让所有设备线程尽快退出发送循环并关闭连接（场景失败或结束时调用，幂等）。 */
+    void stop() {
+        stopped = true;
+        devices.forEach(E2eDevice::close);
     }
 
     int acked() {

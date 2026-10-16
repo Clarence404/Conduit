@@ -56,11 +56,13 @@ class ReliabilityE2EIT {
         }
     }
 
+    /** 每个场景开始前确保 server 与 transport 都在运行（上个场景可能留下被结束的进程）。 */
     @BeforeEach
     void everyProcessIsRunning() throws Exception {
         env.ensureRunning();
     }
 
+    /** 场景 1：发送中途强制结束 server，3 秒后重启，数据一条不丢。 */
     @Test
     @Order(1)
     void killingTheServerMidStreamLosesNothing() throws Exception {
@@ -71,6 +73,7 @@ class ReliabilityE2EIT {
         });
     }
 
+    /** 场景 2：强制结束主 transport，备用实例接管，数据一条不丢。 */
     @Test
     @Order(2)
     void killingTheLeaderTransportLetsTheStandbyTakeOver() throws Exception {
@@ -82,6 +85,7 @@ class ReliabilityE2EIT {
         });
     }
 
+    /** 场景 3：两个 transport 都被结束约 20 秒，由 EMQX 持久会话缓存消息，重启后补齐。 */
     @Test
     @Order(3)
     void killingEveryTransportIsCoveredByTheDurableSession() throws Exception {
@@ -93,6 +97,7 @@ class ReliabilityE2EIT {
         });
     }
 
+    /** 场景 4：重启 EMQX 容器，持久会话与积压消息保留，设备重连重发后数据不丢。 */
     @Test
     @Order(4)
     void restartingEmqxKeepsTheSessionAndTheBacklog() throws Exception {
@@ -108,6 +113,7 @@ class ReliabilityE2EIT {
      */
     private void runScenario(int n, Fault fault) throws Exception {
         ConduitApiClient api = env.api();
+        DeviceFleet started = null;
         String productKey = api.findOrCreateProduct("e2e 场景 " + n + " 电表", "standard-json");
         try {
             List<DeviceCredentials> devices = new ArrayList<>();
@@ -116,6 +122,7 @@ class ReliabilityE2EIT {
             }
             DeviceFleet fleet = new DeviceFleet(env.mqttHost(), env.mqttPort(), devices, MESSAGES_PER_DEVICE,
                     INTERVAL);
+            started = fleet;
             CompletableFuture<Void> sending = fleet.start();
             fleet.awaitAcked(100, Duration.ofSeconds(60));
             assertThat(sending.isDone()).as("the fault must land mid-stream").isFalse();
@@ -135,7 +142,10 @@ class ReliabilityE2EIT {
             assertThat(env.influxCount(productKey)).as("no extra points after the backlog drained")
                     .isEqualTo(fleet.total());
         } finally {
-            cleanUp(api, productKey);
+            if (started != null) {
+                started.stop();
+            }
+            cleanUp(env.api(), productKey);
         }
     }
 

@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
 
 /**
  * 测试代码扮演的一台真实设备：MQTT 5、不用自动重连，QoS1 发布后等待 PUBACK；异常、超时或 PUBACK 错误码时
@@ -46,13 +47,13 @@ final class E2eDevice implements AutoCloseable {
     }
 
     /**
-     * 发布一条 QoS1 消息直到收到成功的 PUBACK。
+     * 发布一条 QoS1 消息直到收到成功的 PUBACK；stopped 返回 true 时放弃并返回（由调用方检查）。
      *
      * @throws IllegalStateException 5 分钟内仍未成功
      */
-    void publishUntilAcked(String topic, byte[] payload) throws InterruptedException {
+    void publishUntilAcked(String topic, byte[] payload, BooleanSupplier stopped) throws InterruptedException {
         long deadline = System.nanoTime() + GIVE_UP_AFTER.toNanos();
-        while (true) {
+        while (!stopped.getAsBoolean()) {
             if (System.nanoTime() > deadline) {
                 throw new IllegalStateException("Device " + deviceKey() + " could not publish within " + GIVE_UP_AFTER);
             }

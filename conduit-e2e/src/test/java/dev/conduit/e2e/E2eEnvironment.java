@@ -18,7 +18,6 @@ import org.testcontainers.utility.DockerImageName;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.URI;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -192,6 +191,7 @@ final class E2eEnvironment implements AutoCloseable {
                     .withEnv("EMQX_DURABLE_SESSIONS__ENABLE", "true")
                     .withEnv("EMQX_CLUSTER__DISCOVERY_STRATEGY", "singleton")
                     .withEnv("EMQX_NODE__NAME", "emqx@127.0.0.1")
+                    .withEnv("EMQX_DASHBOARD__DEFAULT_PASSWORD", hex(16))
                     .waitingFor(Wait.forLogMessage(".*is running now.*", 1))
                     .withStartupTimeout(Duration.ofMinutes(2));
             try {
@@ -242,18 +242,22 @@ final class E2eEnvironment implements AutoCloseable {
         });
     }
 
+    /** 强制结束 server 进程（模拟崩溃）。 */
     void killServer() {
         server.kill();
     }
 
+    /** 强制结束指定进程（模拟崩溃）。 */
     void kill(AppProcess process) {
         process.kill();
     }
 
+    /** 强制结束全部 transport 进程。 */
     void killTransports() {
         transports.forEach(AppProcess::kill);
     }
 
+    /** 启动全部 transport（已在运行的不受影响），不等待就绪。 */
     void startTransports() throws IOException {
         for (AppProcess transport : transports) {
             transport.start();
@@ -322,21 +326,28 @@ final class E2eEnvironment implements AutoCloseable {
     /** InfluxDB 中该产品最近 1 小时的 Ua 点数；Ua 列还不存在（全新的库）时为 0。 */
     long influxCount(String productKey) throws Exception {
         JsonNode column = influxSql("SELECT data_type FROM information_schema.columns "
-                + "WHERE table_name = 'property' AND column_name = 'Ua'");
+                + "WHERE table_name = 'property' AND column_name = 'Ua'", Map.of());
         if (column.isEmpty()) {
             return 0;
         }
-        JsonNode rows = influxSql("SELECT COUNT(\"Ua\") AS n FROM property WHERE product_key = '" + productKey
-                + "' AND time >= now() - INTERVAL '1 hour'");
+        JsonNode rows = influxSql("SELECT COUNT(\"Ua\") AS n FROM property WHERE product_key = $pk "
+                + "AND time >= now() - INTERVAL '1 hour'", Map.of("pk", productKey));
         return rows.isEmpty() ? 0 : rows.get(0).get("n").asLong();
     }
 
-    private JsonNode influxSql(String query) throws Exception {
-        URI uri = URI.create(influxUrl() + "/api/v3/query_sql?db=telemetry&format=json&q="
-                + URLEncoder.encode(query, StandardCharsets.UTF_8));
-        HttpResponse<String> response = http.send(HttpRequest.newBuilder(uri)
+    /** 参数化 SQL 查询（POST /api/v3/query_sql，SQL 中用 $name 引用 params），与 server 的 InfluxClient 同一调用形式。 */
+    private JsonNode influxSql(String query, Map<String, Object> params) throws Exception {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("db", "telemetry");
+        payload.put("q", query);
+        payload.put("params", params);
+        payload.put("format", "json");
+        HttpResponse<String> response = http.send(HttpRequest.newBuilder(URI.create(influxUrl() + "/api/v3/query_sql"))
                         .header("Authorization", "Bearer " + influxToken)
-                        .timeout(Duration.ofSeconds(10)).GET().build(),
+                        .header("Content-Type", "application/json")
+                        .timeout(Duration.ofSeconds(10))
+                        .POST(HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(payload),
+                                StandardCharsets.UTF_8)).build(),
                 HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         if (response.statusCode() != 200) {
             throw new IllegalStateException("InfluxDB query failed with " + response.statusCode() + ": "
