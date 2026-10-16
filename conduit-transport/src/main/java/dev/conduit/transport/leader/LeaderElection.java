@@ -112,6 +112,8 @@ public class LeaderElection implements SmartLifecycle {
         boolean wasLeader = role == Role.LEADER;
         scheduler.shutdownNow();
         awaitQuietly(scheduler);
+        // 停调度期间进行中的抢锁可能刚刚成功；release 只删除仍是本实例 id 的键，多释放一次无害
+        wasLeader = wasLeader || role == Role.LEADER;
         term.incrementAndGet();
         role = Role.STANDBY;
         stopAdapters();
