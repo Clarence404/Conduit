@@ -2,7 +2,7 @@
 
 个人研究用的 IoT 平台：设备通过 MQTT 接入，数据经消息总线进入服务端，按产品物模型校验后写入时序库，前端查看设备、最新值与历史曲线。本文件记录**整体设计思路与编码约定**。
 
-**维护规则**：每次升级（新子项目、架构调整、重要修复）除了写 `docs/superpowers/` 下的 spec / plan 外，还必须把其中**决定性质的约定**（技术选型、模块职责、数据格式与语义、接口约定、界面与数据约定、部署方式等）同步更新到本文件对应章节，并在第 4 节「决定记录」追加一条；与本文件冲突的旧内容直接改掉，不留过期描述。
+**维护规则**：每次升级（新子项目、架构调整、重要修复）除了写 `docs/superpowers/` 下的 spec / plan 外，还必须把其中**决定性质的约定**（技术选型、模块职责、数据格式与语义、接口约定、界面与数据约定、部署方式等）同步更新到本文件对应章节，并在第 4 节「决定记录」追加一条；与本文件冲突的旧内容直接改掉，不留过期描述。讨论中确定的后续工作与方向性判断（即使暂不实施）也要当时写进路线图（`docs/superpowers/specs/2026-10-14-conduit-v0.1-design.md` 第 2 节）或对应 spec，不能只记在对话或个人记忆里。
 
 ## 1. 整体设计
 
@@ -97,3 +97,4 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-15：编排可同步到 Docker 宿主机 `/opt/conduit`（`deploy/sync-to-host.sh`，借临时容器 + docker cp 写入），供宿主机面板（1Panel）管理；仓库 `deploy/` 仍是唯一来源。
 - 2026-10-15：基础设施加入 InfluxDB 3 Explorer（`influxdata/influxdb3-ui:1.11.0`，端口 `INFLUX_EXPLORER_PORT` 默认 8888，admin 模式，预置连接 compose 内的 InfluxDB 与 `telemetry` 库，数据卷 `influx-explorer-data`）。
 - 2026-10-15：沿消息链路补全 DEBUG/TRACE 日志与 REST 访问日志（`RequestLogFilter`），日志约定见 2.2。
+- 2026-10-16：新增 V0.2-R 可靠性加固（V0.2-C 之后）：e2e 本地化；transport 多实例 + 会话不持久；EMQX 磁盘持久会话（待验证 5.8.6 支持）；e2e 增加杀 transport / 杀 EMQX 场景。讨论中确定的后续工作须当时写入路线图或 spec。
