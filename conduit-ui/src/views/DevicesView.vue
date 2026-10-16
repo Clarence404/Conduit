@@ -48,6 +48,11 @@ const filters = reactive(parseDeviceQuery(route.query))
 // 最近一次查询所用的筛选条件：翻页、刷新、空态与新建默认产品都读它
 const applied = reactive(parseDeviceQuery(route.query))
 const filtered = computed(() => hasAnyFilter(applied))
+/** 空列表（无筛选）的说明：可写身份给出创建引导，只读身份只显示中性文字 */
+const emptyDescription = computed(() => {
+  if (!canWrite.value) return '暂无设备'
+  return products.value.length === 0 ? '还没有产品，先到「产品」页创建产品' : '还没有设备，先新建一台设备'
+})
 
 // 「更多筛选」：moreOpen 是手动展开标记；已应用的隐藏条件有生效项时强制展开（此时开关禁用）。
 // 角标个数与强制展开都只看已应用的条件；编辑隐藏字段不会收起，且会把 moreOpen 置为 true
@@ -369,7 +374,7 @@ onMounted(() => {
             <el-empty v-else-if="filtered" description="没有符合条件的设备">
               <el-button @click="reset">重置筛选</el-button>
             </el-empty>
-            <el-empty v-else :description="products.length === 0 ? '还没有产品，先到「产品」页创建产品' : '还没有设备，先新建一台设备'">
+            <el-empty v-else :description="emptyDescription">
               <template v-if="canWrite">
                 <el-button v-if="products.length === 0" type="primary" @click="router.push({ name: 'products' })">去创建产品</el-button>
                 <el-button v-else type="primary" @click="openCreate">新建设备</el-button>

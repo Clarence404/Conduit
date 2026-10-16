@@ -407,4 +407,17 @@ describe('DevicesView', () => {
     expect(labels).not.toContain('新建设备')
     wrapper.unmount()
   })
+
+  it('shows neutral empty-state text without create hints to a viewer, and the guide to an admin', async () => {
+    vi.mocked(deviceApi.list).mockResolvedValue({ items: [], total: 0, page: 1, size: 10 })
+    const viewer = await mountView('/devices', 'TENANT_VIEWER')
+    expect(viewer.wrapper.find('.el-empty').text()).toContain('暂无设备')
+    expect(viewer.wrapper.find('.el-empty').text()).not.toContain('新建')
+    expect(viewer.wrapper.find('.el-empty').text()).not.toContain('创建')
+    viewer.wrapper.unmount()
+
+    const admin = await mountView('/devices', 'TENANT_ADMIN')
+    expect(admin.wrapper.find('.el-empty').text()).toContain('还没有设备，先新建一台设备')
+    admin.wrapper.unmount()
+  })
 })

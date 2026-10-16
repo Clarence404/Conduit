@@ -263,4 +263,18 @@ describe('ProductDetailView', () => {
     expect(wrapper.find('.basic input').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
+
+  it('shows a viewer a neutral empty property text without the V0.1 hint or create buttons', async () => {
+    vi.mocked(thingModelApi.list).mockResolvedValue([])
+    const viewer = await mountAt('/products/pk1?tab=model', {}, { role: 'TENANT_VIEWER' })
+    const empty = viewer.wrapper.findAll('.el-empty').find((e) => e.text().includes('暂无属性'))
+    expect(empty).toBeDefined()
+    expect(empty!.text()).not.toContain('V0.1')
+    expect(empty!.findAll('button')).toHaveLength(0)
+    viewer.wrapper.unmount()
+
+    const admin = await mountAt('/products/pk1?tab=model', {}, { role: 'TENANT_ADMIN' })
+    expect(admin.wrapper.text()).toContain('未定义物模型时按 V0.1 规则')
+    admin.wrapper.unmount()
+  })
 })

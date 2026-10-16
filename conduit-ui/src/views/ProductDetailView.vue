@@ -304,7 +304,7 @@ onMounted(() => {
               <el-empty v-if="propertiesFailed" description="加载失败，点击重试">
                 <el-button type="primary" @click="loadProperties">重试</el-button>
               </el-empty>
-              <el-empty v-else description="暂无属性：未定义物模型时按 V0.1 规则接收数据（数值一律浮点）">
+              <el-empty v-else :description="canWrite ? '暂无属性：未定义物模型时按 V0.1 规则接收数据（数值一律浮点）' : '暂无属性'">
                 <el-button v-if="canWrite" type="primary" @click="openCreate">新增属性</el-button>
                 <el-button v-if="canWrite" @click="importVisible = true">导入物模型</el-button>
               </el-empty>
