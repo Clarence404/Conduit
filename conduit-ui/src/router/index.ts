@@ -25,7 +25,7 @@ export const routes: RouteRecordRaw[] = [
       {
         path: 'home',
         name: 'home',
-        component: () => import('@/views/HomeView.vue'),
+        component: () => import('@/views/HomeEntry.vue'),
         meta: ROUTE_META.home,
       },
       {
@@ -53,6 +53,12 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/DeviceDetailView.vue'),
         props: true,
         meta: ROUTE_META['device-detail'],
+      },
+      {
+        path: 'tenants',
+        name: 'tenants',
+        component: () => import('@/views/TenantsView.vue'),
+        meta: ROUTE_META.tenants,
       },
       {
         path: ':pathMatch(.*)*',
