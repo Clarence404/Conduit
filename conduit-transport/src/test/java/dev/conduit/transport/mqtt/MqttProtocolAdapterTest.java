@@ -183,6 +183,8 @@ class MqttProtocolAdapterTest {
     private static class FakeConnectAdapter extends MqttProtocolAdapter {
         final List<Mqtt5AsyncClient> clients = new ArrayList<>();
         final List<CompletableFuture<Mqtt5ConnAck>> connects = new ArrayList<>();
+        /** 非 null 时 subscribe 返回它，由测试控制 SUBACK 何时到达。 */
+        volatile CompletableFuture<Mqtt5SubAck> subAck;
 
         FakeConnectAdapter(MessageBus bus) {
             super(new MqttTransportProperties("localhost", 1883, "conduit-transport-ut", null, null, 86400,
@@ -193,6 +195,7 @@ class MqttProtocolAdapterTest {
         synchronized Mqtt5AsyncClient buildClient(Mqtt5ClientBuilder builder) {
             Mqtt5AsyncClient client = mock(Mqtt5AsyncClient.class);
             when(client.disconnect()).thenReturn(CompletableFuture.completedFuture(null));
+            when(client.getState()).thenReturn(com.hivemq.client.mqtt.MqttClientState.CONNECTED);
             clients.add(client);
             return client;
         }
@@ -206,6 +209,9 @@ class MqttProtocolAdapterTest {
 
         @Override
         CompletableFuture<Mqtt5SubAck> subscribe(Mqtt5AsyncClient client) {
+            if (subAck != null) {
+                return subAck;
+            }
             Mqtt5SubAck ack = mock(Mqtt5SubAck.class);
             when(ack.getReasonCodes()).thenReturn(List.of(Mqtt5SubAckReasonCode.GRANTED_QOS_1));
             return CompletableFuture.completedFuture(ack);
@@ -259,6 +265,40 @@ class MqttProtocolAdapterTest {
         fake.connects.get(0).complete(mock(Mqtt5ConnAck.class));
 
         verify(client, timeout(1000).atLeastOnce()).disconnect();
+    }
+
+    @Test
+    void isNotConnectedBetweenConnackAndAGrantedSuback() throws Exception {
+        FakeConnectAdapter fake = new FakeConnectAdapter(bus);
+        fake.subAck = new CompletableFuture<>();
+        Thread starter = Thread.startVirtualThread(fake::start);
+        org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(2)).until(() -> fake.connectCount() == 1);
+
+        fake.connects.get(0).complete(mock(Mqtt5ConnAck.class));
+        Thread.sleep(100);
+        assertThat(fake.isConnected()).as("connected but not yet subscribed").isFalse();
+
+        Mqtt5SubAck ack = mock(Mqtt5SubAck.class);
+        when(ack.getReasonCodes()).thenReturn(List.of(Mqtt5SubAckReasonCode.GRANTED_QOS_1));
+        fake.subAck.complete(ack);
+        starter.join(2000);
+        assertThat(fake.isConnected()).isTrue();
+
+        fake.onDisconnected(fake.currentSession(), disconnected(MqttDisconnectSource.SERVER,
+                new IllegalStateException("lost")));
+        assertThat(fake.isConnected()).as("ready is cleared on disconnect").isFalse();
+        fake.stop();
+    }
+
+    @Test
+    void startGivesUpBeforeConnectingWhenItIsNoLongerValid() {
+        FakeConnectAdapter fake = new FakeConnectAdapter(bus);
+
+        assertThatThrownBy(() -> fake.start(() -> false)).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("no longer valid");
+
+        assertThat(fake.connectCount()).isZero();
+        assertThat(fake.isConnected()).isFalse();
     }
 
     @Test

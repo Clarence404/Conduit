@@ -34,6 +34,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 /**
  * MQTT 协议适配器：以固定 clientId、cleanStart=false 的会话普通订阅设备上行 topic 与 EMQX 的 $SYS 上下线 topic，
@@ -69,14 +70,17 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
         volatile Mqtt5AsyncClient client;
         volatile boolean stopping;
         volatile boolean needsRestart;
+        /** 连接成功且全部订阅都已被 broker 接受（SUBACK 通过 requireGranted）后才置位；断开时清除。 */
+        volatile boolean ready;
         /** 连接请求的 future：HiveMQ 不会因超时或断开而取消它，关闭时需挂回调丢弃迟到的 CONNACK。 */
         volatile CompletableFuture<Mqtt5ConnAck> connectFuture;
         /** 会话关闭时完成，用来唤醒正在等待连接或订阅的 start。 */
         final CompletableFuture<Void> stopSignal = new CompletableFuture<>();
 
+        /** 是否已就绪：订阅已授予且连接仍在（只有连上而未订阅成功时不算）。 */
         boolean connected() {
             Mqtt5AsyncClient c = client;
-            return c != null && c.getState().isConnected();
+            return ready && c != null && c.getState().isConnected();
         }
     }
 
@@ -100,11 +104,16 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
      * 关闭上一次的连接（若有），新建客户端并连接 EMQX（MQTT 5，cleanStart=false，会话保留 sessionExpirySeconds），
      * 再同步订阅并检查 SUBACK。先注册全局回调再连接：恢复持久会话后 broker 会立即补发积压消息。
      *
-     * @throws IllegalStateException 连接或订阅失败、超时、被中断或被并发 stop；会话已清理
+     * @param stillValid 启动是否仍有效；登记会话后（发出 CONNECT 前）与订阅前各检查一次，失效则放弃
+     * @throws IllegalStateException 连接或订阅失败、超时、被中断、启动已失效或被并发 stop；会话已清理
      */
     @Override
-    public void start() {
+    public void start(BooleanSupplier stillValid) {
         Session s = register();
+        if (!stillValid.getAsBoolean()) {
+            abandon(s);
+            throw new IllegalStateException("MQTT adapter start is no longer valid");
+        }
         Mqtt5ClientBuilder builder = MqttClient.builder().useMqttVersion5()
                 .identifier(props.clientId())
                 .serverHost(props.host())
@@ -132,7 +141,11 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
                 throw new IllegalStateException("MQTT adapter was stopped while connecting");
             }
             await(s, connectFuture, CONNECT_TIMEOUT);
+            if (!stillValid.getAsBoolean()) {
+                throw new IllegalStateException("MQTT adapter start is no longer valid");
+            }
             requireGranted(await(s, subscribe(client), SUBSCRIBE_TIMEOUT));
+            s.ready = true;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             abandon(s);
@@ -177,6 +190,11 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
     public boolean needsRestart() {
         Session s = current.get();
         return s != null && s.needsRestart;
+    }
+
+    /** 当前登记的会话（测试接缝）。 */
+    Session currentSession() {
+        return current.get();
     }
 
     /** 新建并登记当前会话（测试接缝：单元测试不连接 broker，直接用会话驱动 onPublish / onDisconnected）。 */
@@ -282,6 +300,7 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
      * 其余情况（broker 重启、网络断开、会话被同 clientId 的新连接接管）置 needsRestart，由协调器决定是否重连。
      */
     void onDisconnected(Session s, MqttClientDisconnectedContext context) {
+        s.ready = false;
         if (s.stopping || context.getSource() == MqttDisconnectSource.USER) {
             log.debug("MQTT disconnected from {} by this adapter", endpoint());
             return;

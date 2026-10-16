@@ -45,6 +45,8 @@ public class LeaderElection implements SmartLifecycle {
     private final AtomicBoolean restarting = new AtomicBoolean();
     private volatile Role role = Role.STANDBY;
     private volatile boolean running;
+    /** 上一次抢锁是否因 Redis 不可用而失败：只在状态切换时打 WARN / INFO，其余失败降为 DEBUG，避免每 2 秒刷屏。仅调度线程读写。 */
+    private boolean redisAcquireFailing;
     private ScheduledExecutorService scheduler;
     private ExecutorService adapterExecutor;
 
@@ -106,9 +108,10 @@ public class LeaderElection implements SmartLifecycle {
             return;
         }
         running = false;
+        // 先记下角色再停调度：进行中的续期可能被中断，不能因此漏掉释放锁
+        boolean wasLeader = role == Role.LEADER;
         scheduler.shutdownNow();
         awaitQuietly(scheduler);
-        boolean wasLeader = role == Role.LEADER;
         term.incrementAndGet();
         role = Role.STANDBY;
         stopAdapters();
@@ -140,8 +143,17 @@ public class LeaderElection implements SmartLifecycle {
         try {
             acquired = lock.tryAcquire();
         } catch (RuntimeException e) {
-            log.warn("Cannot reach Redis to acquire the leader lock, staying standby: {}", e.getMessage());
+            if (!redisAcquireFailing) {
+                redisAcquireFailing = true;
+                log.warn("Cannot reach Redis to acquire the leader lock, staying standby: {}", e.getMessage());
+            } else {
+                log.debug("Redis still unreachable for the leader lock: {}", e.getMessage());
+            }
             return;
+        }
+        if (redisAcquireFailing) {
+            redisAcquireFailing = false;
+            log.info("Redis is reachable again, instance {} resumes acquiring the leader lock", lock.instanceId());
         }
         if (!acquired) {
             log.debug("Leader lock is held by another instance, {} stays standby", lock.instanceId());
@@ -213,6 +225,7 @@ public class LeaderElection implements SmartLifecycle {
         term.incrementAndGet();
         role = Role.STANDBY;
         stopAdapters();
+        log.info("Instance {} became standby", lock.instanceId());
         return false;
     }
 
@@ -225,22 +238,39 @@ public class LeaderElection implements SmartLifecycle {
 
     /**
      * 在任期 t 仍有效时反复尝试启动一个适配器，失败按 initialBackoff 起翻倍、最多 maxBackoff 退避。
-     * 启动成功后若发现已经下台（任期变化），立即停止它。线程被中断时放弃。
+     * 只有首次失败打 WARN，之后的重试打 DEBUG，成功后（若此前失败过）的 INFO 带上失败次数。
+     * 任期失效（下台或停止）时适配器自己会放弃启动，这里据此静默退出；启动成功后若发现已下台，立即停止它。线程被中断时放弃。
      */
     private void startAdapter(ProtocolAdapter adapter, long t) {
         for (int attempt = 0; running && term.get() == t; attempt++) {
             try {
-                adapter.start();
+                // 把任期校验交给适配器，使其在发出 CONNECT 与订阅前再确认一次，下台后不会再连上 broker
+                adapter.start(() -> running && term.get() == t);
                 if (!running || term.get() != t) {
                     adapter.stop();
                     return;
                 }
-                log.info("Protocol adapter {} connected on leader {}", adapter.name(), lock.instanceId());
+                if (attempt > 0) {
+                    log.info("Protocol adapter {} connected on leader {} after {} failed attempts", adapter.name(),
+                            lock.instanceId(), attempt);
+                } else {
+                    log.info("Protocol adapter {} connected on leader {}", adapter.name(), lock.instanceId());
+                }
                 return;
             } catch (RuntimeException e) {
+                if (!running || term.get() != t) {
+                    log.debug("Protocol adapter {} start abandoned after the term ended: {}", adapter.name(),
+                            e.getMessage());
+                    return;
+                }
                 Duration delay = backoff(attempt);
-                log.warn("Protocol adapter {} failed to start (attempt {}), retrying in {} ms: {}", adapter.name(),
-                        attempt + 1, delay.toMillis(), e.getMessage());
+                if (attempt == 0) {
+                    log.warn("Protocol adapter {} failed to start, retrying in {} ms: {}", adapter.name(),
+                            delay.toMillis(), e.getMessage());
+                } else {
+                    log.debug("Protocol adapter {} failed to start (attempt {}), retrying in {} ms: {}",
+                            adapter.name(), attempt + 1, delay.toMillis(), e.getMessage());
+                }
                 try {
                     Thread.sleep(delay);
                 } catch (InterruptedException ie) {

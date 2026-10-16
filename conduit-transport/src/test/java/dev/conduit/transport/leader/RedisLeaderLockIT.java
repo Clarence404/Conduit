@@ -30,10 +30,22 @@ class RedisLeaderLockIT {
     void onlyOneInstanceAcquiresAndTheValueIsItsId() {
         assertThat(a.tryAcquire()).isTrue();
         assertThat(b.tryAcquire()).isFalse();
-        assertThat(a.tryAcquire()).as("SET NX also refuses the holder").isFalse();
 
         assertThat(redis.opsForValue().get(key)).isEqualTo("instance-a");
         assertThat(redis.getExpire(key, TimeUnit.MILLISECONDS)).isBetween(1L, 2000L);
+    }
+
+    @Test
+    void theHolderReacquiresItsOwnLockAndRefreshesTheTtlWhileOthersStayRefused() throws Exception {
+        assertThat(a.tryAcquire()).isTrue();
+        Thread.sleep(700);
+        long before = redis.getExpire(key, TimeUnit.MILLISECONDS);
+
+        assertThat(a.tryAcquire()).as("the holder re-acquires its own lock").isTrue();
+
+        assertThat(redis.getExpire(key, TimeUnit.MILLISECONDS)).isGreaterThan(before);
+        assertThat(redis.opsForValue().get(key)).isEqualTo("instance-a");
+        assertThat(b.tryAcquire()).as("another instance is still refused").isFalse();
     }
 
     @Test

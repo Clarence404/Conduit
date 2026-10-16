@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -213,6 +214,9 @@ class LeaderElectionTest {
         public boolean tryAcquire() {
             synchronized (state) {
                 check();
+                if (id.equals(state.holder)) {
+                    return true;
+                }
                 if (state.holder != null) {
                     return false;
                 }
@@ -262,8 +266,11 @@ class LeaderElectionTest {
         }
 
         @Override
-        public void start() {
+        public void start(BooleanSupplier stillValid) {
             starts.incrementAndGet();
+            if (!stillValid.getAsBoolean()) {
+                throw new IllegalStateException("start no longer valid");
+            }
             if (failuresLeft.getAndDecrement() > 0) {
                 throw new IllegalStateException("broker unreachable");
             }
