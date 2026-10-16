@@ -1,6 +1,7 @@
 package dev.conduit.server.auth;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.JwtBuilder;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -14,8 +15,9 @@ import java.time.Instant;
 import java.util.Date;
 
 /**
- * JWT 的签发与校验（HS 系列对称签名）。令牌携带用户 id、租户 id、用户名、角色与令牌类型，
- * 由 {@link AuthController} 签发、{@link JwtAuthFilter} 校验。
+ * JWT 的签发与校验（HS 系列对称签名）。声明：sub 用户 id、tid 租户 id（平台管理员没有）、usr 用户名、role 有效角色、
+ * typ 令牌类型、imp 代入的平台管理员用户 id（仅代入时）、mcp 需要先修改密码（仅为 true 时）。
+ * 由 {@link SessionService} 签发、{@link JwtAuthFilter} 与刷新接口校验。
  */
 @Component
 public class JwtService {
@@ -36,20 +38,25 @@ public class JwtService {
         this.key = Keys.hmacShaKeyFor(props.jwtSecret().getBytes(StandardCharsets.UTF_8));
     }
 
-    /** 签发指定类型的令牌，有效期取配置中对应类型的 TTL，时间基于注入的 Clock。 */
+    /** 签发指定类型的令牌，有效期取配置中对应类型的 TTL；为空的可选声明（tid、imp）与为 false 的 mcp 不写入。 */
     public String issue(AuthPrincipal principal, TokenType type) {
         Instant now = clock.instant();
         Duration ttl = type == TokenType.ACCESS ? props.accessTtl() : props.refreshTtl();
-        return Jwts.builder()
+        JwtBuilder builder = Jwts.builder()
                 .subject(Long.toString(principal.userId()))
-                .claim("tid", principal.tenantId())
                 .claim("usr", principal.username())
                 .claim("role", principal.role())
-                .claim("typ", type.name())
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plus(ttl)))
-                .signWith(key)
-                .compact();
+                .claim("typ", type.name());
+        if (principal.tenantId() != null) {
+            builder.claim("tid", principal.tenantId());
+        }
+        if (principal.impersonatorId() != null) {
+            builder.claim("imp", principal.impersonatorId());
+        }
+        if (principal.mustChangePassword()) {
+            builder.claim("mcp", true);
+        }
+        return builder.issuedAt(Date.from(now)).expiration(Date.from(now.plus(ttl))).signWith(key).compact();
     }
 
     /**
@@ -70,8 +77,15 @@ public class JwtService {
         }
         return new AuthPrincipal(
                 Long.parseLong(claims.getSubject()),
-                ((Number) claims.get("tid")).longValue(),
+                optionalLong(claims.get("tid")),
                 claims.get("usr", String.class),
-                claims.get("role", String.class));
+                claims.get("role", String.class),
+                optionalLong(claims.get("imp")),
+                Boolean.TRUE.equals(claims.get("mcp", Boolean.class)));
+    }
+
+    /** 数值声明转 Long；声明不存在时为 null。 */
+    private static Long optionalLong(Object value) {
+        return value instanceof Number n ? n.longValue() : null;
     }
 }

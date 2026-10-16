@@ -9,8 +9,9 @@ import dev.conduit.server.tenant.TenantMapper;
 import dev.conduit.server.web.ApiException;
 import io.jsonwebtoken.JwtException;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -21,55 +22,54 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.Duration;
-
 /**
- * 登录认证 REST 接口（UI 使用）：登录签发短期 access token（响应体）与长期 refresh token（HttpOnly Cookie），
- * 并支持刷新、登出与查询当前用户。这些接口在 {@link SecurityConfig} 中免认证（me 除外）。
+ * 认证 REST 接口（UI 使用）：登录签发短期 access token（响应体）与长期 refresh token（HttpOnly Cookie），刷新、登出、
+ * 查询当前用户，以及平台管理员退出代入的租户。登录、刷新、登出公开，其余需要登录。
  */
 @RestController
 @RequestMapping("/api/v1/auth")
 public class AuthController {
 
-    static final String REFRESH_COOKIE = "conduit_refresh";
-    private static final String ACTIVE = "ACTIVE";
+    private static final Logger log = LoggerFactory.getLogger(AuthController.class);
 
     private final AppUserMapper users;
     private final TenantMapper tenants;
     private final PasswordEncoder encoder;
     private final JwtService jwt;
-    private final JwtProperties props;
+    private final SessionService sessions;
 
     public AuthController(AppUserMapper users, TenantMapper tenants, PasswordEncoder encoder, JwtService jwt,
-                          JwtProperties props) {
+                          SessionService sessions) {
         this.users = users;
         this.tenants = tenants;
         this.encoder = encoder;
         this.jwt = jwt;
-        this.props = props;
+        this.sessions = sessions;
     }
 
     /**
-     * 用户名密码登录。用户不存在、已停用或密码错误一律返回同一条 401，避免泄露账号是否存在。
-     * 成功时响应体带 access token，refresh token 通过 Cookie 下发。
+     * 用户名密码登录。用户不存在或密码错误返回同一条 401「用户名或密码错误」（不泄露账号是否存在）；
+     * 密码正确后才检查账号禁用、租户停用（各自的 401）。需改密码的用户照常登录，令牌带 mcp。
      */
     @PostMapping("/login")
     public ResponseEntity<TokenResponse> login(@Valid @RequestBody LoginRequest request) {
         AppUser user = users.selectOne(new LambdaQueryWrapper<AppUser>().eq(AppUser::getUsername, request.username()));
-        if (user == null || !ACTIVE.equals(user.getStatus())
-                || !encoder.matches(request.password(), user.getPasswordHash())) {
+        if (user == null || !encoder.matches(request.password(), user.getPasswordHash())) {
+            log.debug("Login rejected for {}: bad credentials", request.username());
             throw ApiException.unauthorized("用户名或密码错误");
         }
-        return tokens(principalOf(user));
+        sessions.requireActive(user);
+        log.debug("Login succeeded for {} (role={})", user.getUsername(), user.getRole());
+        return sessions.issue(sessions.principalOf(user));
     }
 
     /**
-     * 用 refresh Cookie 换发新的 access / refresh token（滚动续期）。Cookie 缺失、令牌无效或类型不符，
-     * 以及用户已被删除或停用，均返回 401；角色等信息以数据库最新值为准而非旧令牌。
+     * 用 refresh Cookie 换发新的令牌（滚动续期），以数据库当前状态为准：用户禁用、租户停用 401，角色变化在此生效。
+     * 代入令牌：平台管理员仍可用时，目标租户可用则继续代入，已停用或已删除则退回平台管理员自己的令牌（INFO 日志）。
      */
     @PostMapping("/refresh")
     public ResponseEntity<TokenResponse> refresh(
-            @CookieValue(name = REFRESH_COOKIE, required = false) String refreshToken) {
+            @CookieValue(name = SessionService.REFRESH_COOKIE, required = false) String refreshToken) {
         if (refreshToken == null || refreshToken.isBlank()) {
             throw ApiException.unauthorized("缺少刷新凭证");
         }
@@ -79,56 +79,57 @@ public class AuthController {
         } catch (JwtException | IllegalArgumentException e) {
             throw ApiException.unauthorized("刷新凭证无效");
         }
-        AppUser user = users.selectById(principal.userId());
-        if (user == null || !ACTIVE.equals(user.getStatus())) {
+        if (principal.impersonating()) {
+            return refreshImpersonation(principal);
+        }
+        AppUser user = sessions.requireActive(users.selectById(principal.userId()));
+        return sessions.issue(sessions.principalOf(user));
+    }
+
+    /** 代入令牌的续期（规则见 {@link #refresh}）。 */
+    private ResponseEntity<TokenResponse> refreshImpersonation(AuthPrincipal principal) {
+        AppUser admin = users.selectById(principal.impersonatorId());
+        if (admin == null || !Roles.PLATFORM_ADMIN.equals(admin.getRole())) {
             throw ApiException.unauthorized("用户不可用");
         }
-        return tokens(principalOf(user));
+        sessions.requireActive(admin);
+        Tenant tenant = principal.tenantId() == null ? null : tenants.selectById(principal.tenantId());
+        if (tenant == null || !Tenant.ACTIVE.equals(tenant.getStatus())) {
+            log.info("Platform admin {} left tenant id={} on refresh: tenant {}", admin.getUsername(),
+                    principal.tenantId(), tenant == null ? "deleted" : "disabled");
+            return sessions.issue(sessions.principalOf(admin));
+        }
+        return sessions.issue(sessions.impersonation(admin, tenant));
     }
 
     /** 登出：仅通过 Max-Age=0 清除 refresh Cookie；令牌无服务端状态，已签发的 access token 到期前仍有效。 */
     @PostMapping("/logout")
     public ResponseEntity<Void> logout() {
         return ResponseEntity.noContent()
-                .header(HttpHeaders.SET_COOKIE, refreshCookie("", Duration.ZERO).toString())
+                .header(HttpHeaders.SET_COOKIE, sessions.clearedRefreshCookie().toString())
                 .build();
     }
 
-    /** 当前登录用户（含所属租户名称）。 */
+    /** 当前登录用户（含显示名称、租户、是否需改密码、代入者）。 */
     @GetMapping("/me")
     public UserView me(@AuthenticationPrincipal AuthPrincipal principal) {
-        return userView(principal);
-    }
-
-    /** 为用户签发 access + refresh 令牌：refresh 写入 Cookie，access 与有效期（秒）放在响应体。 */
-    private ResponseEntity<TokenResponse> tokens(AuthPrincipal principal) {
-        String access = jwt.issue(principal, JwtService.TokenType.ACCESS);
-        String refresh = jwt.issue(principal, JwtService.TokenType.REFRESH);
-        return ResponseEntity.ok()
-                .header(HttpHeaders.SET_COOKIE, refreshCookie(refresh, props.refreshTtl()).toString())
-                .body(new TokenResponse(access, props.accessTtl().toSeconds(), userView(principal)));
-    }
-
-    /** refresh Cookie：HttpOnly、SameSite=Strict、仅发往 /api/v1/auth；Secure 由配置决定（生产应开启）。 */
-    private ResponseCookie refreshCookie(String value, Duration maxAge) {
-        return ResponseCookie.from(REFRESH_COOKIE, value)
-                .httpOnly(true)
-                .secure(props.cookieSecure())
-                .sameSite("Strict")
-                .path("/api/v1/auth")
-                .maxAge(maxAge)
-                .build();
+        return sessions.userView(principal);
     }
 
     /**
-     * 组装给 UI 的用户视图：租户名称按 tenantId 查 tenant 表（该表不做租户行过滤）；租户不存在时名称为 null。
+     * 平台管理员退出代入的租户：换回自己的令牌，记一行 INFO。
+     *
+     * @throws ApiException 409：当前令牌不是代入令牌；401：平台管理员已被删除或禁用
      */
-    private UserView userView(AuthPrincipal principal) {
+    @PostMapping("/exit-tenant")
+    public ResponseEntity<TokenResponse> exitTenant(@AuthenticationPrincipal AuthPrincipal principal) {
+        if (!principal.impersonating()) {
+            throw ApiException.conflict("当前没有进入任何租户");
+        }
+        AppUser admin = sessions.requireActive(users.selectById(principal.impersonatorId()));
         Tenant tenant = tenants.selectById(principal.tenantId());
-        return new UserView(principal.username(), principal.role(), tenant == null ? null : tenant.getName());
-    }
-
-    private static AuthPrincipal principalOf(AppUser user) {
-        return new AuthPrincipal(user.getId(), user.getTenantId(), user.getUsername(), user.getRole());
+        log.info("Platform admin {} exited tenant {}", admin.getUsername(),
+                tenant == null ? String.valueOf(principal.tenantId()) : tenant.getCode());
+        return sessions.issue(sessions.principalOf(admin));
     }
 }
