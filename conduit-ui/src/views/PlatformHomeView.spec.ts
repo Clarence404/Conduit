@@ -103,4 +103,51 @@ describe('PlatformHomeView', () => {
     await vi.advanceTimersByTimeAsync(90_000)
     expect(platformApi.overview).toHaveBeenCalledTimes(2)
   })
+
+  it('shows a retryable failure state instead of the skeleton when the first load fails', async () => {
+    vi.mocked(platformApi.overview).mockRejectedValueOnce(new Error('服务暂不可用'))
+    const { wrapper } = await mountView()
+
+    expect(wrapper.find('.el-skeleton').exists()).toBe(false)
+    const empty = wrapper.find('.el-empty')
+    expect(empty.text()).toContain('加载失败，点击重试')
+
+    await empty.findAll('button').find((b) => b.text() === '重试')!.trigger('click')
+    await settle()
+
+    expect(platformApi.overview).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('.el-empty').exists()).toBe(false)
+    expect(tile(wrapper, 'tenants')).toContain('3')
+    wrapper.unmount()
+  })
+
+  it('keeps list semantics: each tenant row is a button inside a li, not a li with role=button', async () => {
+    const { wrapper, router } = await mountView()
+
+    expect(wrapper.findAll('.top-tenants li[role]')).toHaveLength(0)
+    const rows = wrapper.findAll('.top-tenants li > button.row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].attributes('type')).toBe('button')
+
+    await rows[1].trigger('click')
+    await settle()
+    expect(router.currentRoute.value.query).toEqual({ keyword: 'default' })
+    wrapper.unmount()
+  })
+
+  it('opens the tenant list from the tenant tile with Enter and Space', async () => {
+    const { wrapper, router } = await mountView()
+    const tenants = wrapper.find('[data-test="tile-tenants"]')
+    expect(tenants.attributes('role')).toBe('button')
+
+    await tenants.trigger('keydown', { key: ' ' })
+    await settle()
+    expect(router.currentRoute.value.name).toBe('tenants')
+
+    await router.push('/home')
+    await tenants.trigger('keydown', { key: 'Enter' })
+    await settle()
+    expect(router.currentRoute.value.name).toBe('tenants')
+    wrapper.unmount()
+  })
 })
