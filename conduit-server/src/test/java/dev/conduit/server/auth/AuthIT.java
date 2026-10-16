@@ -38,7 +38,7 @@ class AuthIT extends IntegrationTestBase {
         mvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, bearer(loginAsAdmin())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value("admin"))
-                .andExpect(jsonPath("$.role").value("ADMIN"))
+                .andExpect(jsonPath("$.role").value("TENANT_ADMIN"))
                 .andExpect(jsonPath("$.tenantName").value("Default"));
     }
 

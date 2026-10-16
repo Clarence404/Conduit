@@ -115,7 +115,7 @@ class DeviceApiIT extends IntegrationTestBase {
     void disablingEvictsIdentityCache() throws Exception {
         String dk = create("d");
         String hashBefore = jdbc.queryForObject("select secret_hash from device where device_key = ?", String.class, dk);
-        identityCache.put(new DeviceIdentity(dk, 1, "ENABLED", "h", "s", productKey));
+        identityCache.put(new DeviceIdentity(dk, 1, "ENABLED", "h", "s", productKey, "ACTIVE"));
 
         mvc.perform(put("/api/v1/devices/{dk}", dk).header(HttpHeaders.AUTHORIZATION, auth)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -143,7 +143,7 @@ class DeviceApiIT extends IntegrationTestBase {
     void resetSecretChangesHashAndEvictsCache() throws Exception {
         String dk = create("d");
         String before = jdbc.queryForObject("select secret_hash from device where device_key = ?", String.class, dk);
-        identityCache.put(new DeviceIdentity(dk, 1, "ENABLED", "h", "s", productKey));
+        identityCache.put(new DeviceIdentity(dk, 1, "ENABLED", "h", "s", productKey, "ACTIVE"));
 
         mvc.perform(post("/api/v1/devices/{dk}/reset-secret", dk).header(HttpHeaders.AUTHORIZATION, auth))
                 .andExpect(status().isOk())
@@ -160,7 +160,7 @@ class DeviceApiIT extends IntegrationTestBase {
         String dk = create("d");
         presence.apply(dk, true, 1000, "ip");
         latest.update(dk, 1000, Map.of("Ua", 1.0));
-        identityCache.put(new DeviceIdentity(dk, 1, "ENABLED", "h", "s", productKey));
+        identityCache.put(new DeviceIdentity(dk, 1, "ENABLED", "h", "s", productKey, "ACTIVE"));
 
         mvc.perform(delete("/api/v1/devices/{dk}", dk).header(HttpHeaders.AUTHORIZATION, auth))
                 .andExpect(status().isNoContent());

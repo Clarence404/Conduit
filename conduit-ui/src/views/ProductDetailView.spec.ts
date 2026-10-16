@@ -12,8 +12,8 @@ import { productApi } from '@/api/products'
 import { codecApi } from '@/api/codecs'
 import { thingModelApi } from '@/api/thingModel'
 import { deviceApi } from '@/api/devices'
-import type { ProductView, PropertyView } from '@/api/types'
-import { createTestRouter, settle } from '@/test/viewTestUtils'
+import type { ProductView, PropertyView, UserView } from '@/api/types'
+import { createTestPinia, createTestRouter, settle } from '@/test/viewTestUtils'
 
 vi.mock('@/api/products', () => ({
   productApi: { list: vi.fn(), get: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
@@ -68,7 +68,7 @@ function properties(count: number): PropertyView[] {
   }))
 }
 
-async function mountAt(path: string, stubs: Record<string, boolean> = {}) {
+async function mountAt(path: string, stubs: Record<string, boolean> = {}, user: Partial<UserView> = {}) {
   const router = createTestRouter()
   await router.push(path)
   await router.isReady()
@@ -76,7 +76,7 @@ async function mountAt(path: string, stubs: Record<string, boolean> = {}) {
   const push = vi.spyOn(router, 'push')
   const wrapper = mount(ProductDetailView, {
     props: { productKey: 'pk1' },
-    global: { plugins: [router, ElementPlus], stubs },
+    global: { plugins: [createTestPinia(user), router, ElementPlus], stubs },
     attachTo: document.body,
   })
   await settle()
@@ -250,5 +250,31 @@ describe('ProductDetailView', () => {
     expect((wrapper.vm as unknown as { propertyPage: number }).propertyPage).toBe(1)
     expect(table().props('data')).toHaveLength(10)
     wrapper.unmount()
+  })
+
+  it('shows a viewer the product read-only', async () => {
+    const { wrapper } = await mountAt('/products/pk1?tab=model', {}, { role: 'TENANT_VIEWER' })
+
+    const labels = wrapper.findAll('button').map((b) => b.text())
+    expect(labels).toContain('导出')
+    for (const hidden of ['导入', '新增属性', '编辑', '删除', '保存']) {
+      expect(labels).not.toContain(hidden)
+    }
+    expect(wrapper.find('.basic input').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('shows a viewer a neutral empty property text without the V0.1 hint or create buttons', async () => {
+    vi.mocked(thingModelApi.list).mockResolvedValue([])
+    const viewer = await mountAt('/products/pk1?tab=model', {}, { role: 'TENANT_VIEWER' })
+    const empty = viewer.wrapper.findAll('.el-empty').find((e) => e.text().includes('暂无属性'))
+    expect(empty).toBeDefined()
+    expect(empty!.text()).not.toContain('V0.1')
+    expect(empty!.findAll('button')).toHaveLength(0)
+    viewer.wrapper.unmount()
+
+    const admin = await mountAt('/products/pk1?tab=model', {}, { role: 'TENANT_ADMIN' })
+    expect(admin.wrapper.text()).toContain('未定义物模型时按 V0.1 规则')
+    admin.wrapper.unmount()
   })
 })

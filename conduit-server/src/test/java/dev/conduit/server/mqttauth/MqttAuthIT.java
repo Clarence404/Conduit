@@ -2,6 +2,7 @@ package dev.conduit.server.mqttauth;
 
 import dev.conduit.server.support.IntegrationTestBase;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
@@ -46,6 +47,36 @@ class MqttAuthIT extends IntegrationTestBase {
 
         auth("test-internal-token", d.deviceKey(), d.deviceKey(), d.secret())
                 .andExpect(jsonPath("$.result").value("deny"));
+    }
+
+    @Test
+    void deniesDevicesOfADisabledTenant() throws Exception {
+        long tenant = createTenant("mq-");
+        jdbc.update("update tenant set status = 'DISABLED' where id = ?", tenant);
+        TestDevice d = createDevice(tenant, "ENABLED");
+
+        auth("test-internal-token", d.deviceKey(), d.deviceKey(), d.secret())
+                .andExpect(jsonPath("$.result").value("deny"));
+    }
+
+    @Test
+    void disablingATenantTakesEffectDespiteTheCacheAndEnablingRestoresIt() throws Exception {
+        long tenant = createTenant("mq-");
+        String code = tenantCode(tenant);
+        TestDevice d = createDevice(tenant, "ENABLED");
+        String sys = loginAsPlatformAdmin();
+        auth("test-internal-token", d.deviceKey(), d.deviceKey(), d.secret())
+                .andExpect(jsonPath("$.result").value("allow"));
+
+        mvc.perform(post("/api/v1/platform/tenants/{c}/disable", code).header(HttpHeaders.AUTHORIZATION, bearer(sys)))
+                .andExpect(status().isOk());
+        auth("test-internal-token", d.deviceKey(), d.deviceKey(), d.secret())
+                .andExpect(jsonPath("$.result").value("deny"));
+
+        mvc.perform(post("/api/v1/platform/tenants/{c}/enable", code).header(HttpHeaders.AUTHORIZATION, bearer(sys)))
+                .andExpect(status().isOk());
+        auth("test-internal-token", d.deviceKey(), d.deviceKey(), d.secret())
+                .andExpect(jsonPath("$.result").value("allow"));
     }
 
     @Test

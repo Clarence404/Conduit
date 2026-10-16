@@ -135,6 +135,18 @@ class PipelineIT extends IntegrationTestBase {
     }
 
     @Test
+    void deviceOfADisabledTenantGoesToDeadLetter() {
+        long tenant = createTenant("pd-");
+        jdbc.update("update tenant set status = 'DISABLED' where id = ?", tenant);
+        TestDevice d = createDevice(tenant, "ENABLED");
+        String id = publish(d.productKey(), d.deviceKey(), MessageType.PROPERTY, "{\"params\":{\"Ua\":1}}");
+
+        runner.pollOnce();
+
+        assertThat(deadReason(id)).contains("TENANT_DISABLED");
+    }
+
+    @Test
     void productMismatchGoesToDeadLetter() {
         String id = publish("wrong-product", device.deviceKey(), MessageType.PROPERTY, "{\"params\":{\"Ua\":1}}");
 

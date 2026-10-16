@@ -4,8 +4,8 @@ import { mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import HomeView from './HomeView.vue'
 import { overviewApi } from '@/api/overview'
-import type { OverviewView } from '@/api/types'
-import { createTestRouter, settle } from '@/test/viewTestUtils'
+import type { OverviewView, Role } from '@/api/types'
+import { createTestPinia, createTestRouter, settle } from '@/test/viewTestUtils'
 
 vi.mock('@/api/overview', () => ({ overviewApi: { get: vi.fn() } }))
 
@@ -31,11 +31,11 @@ function overview(patch: Partial<OverviewView> = {}): OverviewView {
   }
 }
 
-async function mountView() {
+async function mountView(role: Role = 'TENANT_ADMIN') {
   const router = createTestRouter()
   await router.push('/home')
   await router.isReady()
-  const wrapper = mount(HomeView, { global: { plugins: [router, ElementPlus] }, attachTo: document.body })
+  const wrapper = mount(HomeView, { global: { plugins: [createTestPinia({ role }), router, ElementPlus] }, attachTo: document.body })
   await settle()
   return { wrapper, router }
 }
@@ -146,5 +146,17 @@ describe('HomeView', () => {
     await settle()
     expect(router.currentRoute.value.fullPath).toBe('/home')
     wrapper.unmount()
+  })
+
+  it('offers the create-product guide to an admin but not to a viewer when there is no product', async () => {
+    vi.mocked(overviewApi.get).mockResolvedValue(overview({ products: [] }))
+    const admin = await mountView('TENANT_ADMIN')
+    expect(admin.wrapper.find('.by-product').text()).toContain('去创建产品')
+    admin.wrapper.unmount()
+
+    const viewer = await mountView('TENANT_VIEWER')
+    expect(viewer.wrapper.find('.by-product').text()).toContain('还没有产品')
+    expect(viewer.wrapper.find('.by-product').text()).not.toContain('去创建产品')
+    viewer.wrapper.unmount()
   })
 })

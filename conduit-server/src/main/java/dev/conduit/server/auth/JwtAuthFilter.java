@@ -15,7 +15,10 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.List;
 
-/** 解析 Bearer access token，设置认证信息并绑定租户；token 无效时保持未认证，由入口点返回 401。 */
+/**
+ * 解析 Bearer access token，设置认证信息（权限为 ROLE_<有效角色>）并绑定租户；未代入的平台管理员没有租户，不绑定。
+ * token 无效时保持未认证，由入口点返回 401。
+ */
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwt;
@@ -25,7 +28,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     }
 
     /**
-     * 有合法 Bearer access token 时写入认证信息并绑定 TenantContext；令牌无效不报错，仅保持未认证。
+     * 有合法 Bearer access token 时写入认证信息，令牌带租户时绑定 TenantContext；令牌无效不报错，仅保持未认证。
      * 无论请求如何结束都会在 finally 中清除 TenantContext，避免线程复用时租户串用。
      */
     @Override
@@ -38,7 +41,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 var authentication = new UsernamePasswordAuthenticationToken(principal, null,
                         List.of(new SimpleGrantedAuthority("ROLE_" + principal.role())));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
-                TenantContext.set(principal.tenantId());
+                if (principal.tenantId() != null) {
+                    TenantContext.set(principal.tenantId());
+                }
             } catch (JwtException | IllegalArgumentException ignored) {
                 // 保持未认证
             }

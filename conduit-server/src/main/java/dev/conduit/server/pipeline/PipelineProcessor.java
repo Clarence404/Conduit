@@ -156,15 +156,18 @@ public class PipelineProcessor {
     }
 
     /**
-     * 属性消息的「解码 → 校验」阶段：依次检查设备存在、已启用、productKey 一致，取产品物模型与 codec 并解码、逐测点校验。
+     * 属性消息的「解码 → 校验」阶段：依次检查设备存在、所属租户已启用、设备已启用、productKey 一致，取产品物模型与 codec 并解码、逐测点校验。
      * 被剔除的测点计入指标，并随 PendingProperty 带到写库之后留痕。
      *
-     * @throws DecodeException UNKNOWN_DEVICE / DEVICE_DISABLED / PRODUCT_MISMATCH / UNKNOWN_CODEC、解码失败，
+     * @throws DecodeException UNKNOWN_DEVICE / TENANT_DISABLED / DEVICE_DISABLED / PRODUCT_MISMATCH / UNKNOWN_CODEC、解码失败，
      *                         或全部测点被拒绝（FIELD_REJECTED，details 含被拒详情）
      */
     private PendingProperty toPending(Delivery delivery, RawMessage message) {
         DeviceIdentity identity = identities.find(message.deviceKey())
                 .orElseThrow(() -> new DecodeException(DeadReason.UNKNOWN_DEVICE, message.deviceKey()));
+        if (!identity.tenantActive()) {
+            throw new DecodeException(DeadReason.TENANT_DISABLED, message.deviceKey());
+        }
         if (!identity.enabled()) {
             throw new DecodeException(DeadReason.DEVICE_DISABLED, message.deviceKey());
         }

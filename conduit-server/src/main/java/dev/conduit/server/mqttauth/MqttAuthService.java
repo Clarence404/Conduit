@@ -45,7 +45,7 @@ public class MqttAuthService {
      * 判定一次连接。参数任一为 null 即拒绝。
      * <ul>
      *   <li>用户名等于配置的 transport 用户名：须密码一致且 clientId 以 {@code conduit-} 开头，通过则为超级用户；</li>
-     *   <li>否则按设备处理：clientId 必须等于用户名（即 deviceKey），设备须存在、启用且密钥哈希匹配。</li>
+     *   <li>否则按设备处理：clientId 必须等于用户名（即 deviceKey），设备须存在、启用、所属租户启用且密钥哈希匹配。</li>
      * </ul>
      * 拒绝原因只记 debug 日志，不返回给调用方。
      */
@@ -73,6 +73,9 @@ public class MqttAuthService {
         DeviceIdentity d = identity.get();
         if (!d.enabled()) {
             return deny("device disabled", clientId);
+        }
+        if (!d.tenantActive()) {
+            return deny("tenant disabled", clientId);
         }
         if (!hasher.matches(password, d.secretSalt(), d.secretHash())) {
             return deny("wrong secret", clientId);

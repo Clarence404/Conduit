@@ -11,6 +11,7 @@ import { Box, Connection, Cpu, Warning } from '@element-plus/icons-vue'
 import { overviewApi } from '@/api/overview'
 import { problemMessage } from '@/api/errors'
 import type { OverviewView } from '@/api/types'
+import { usePermission } from '@/composables/usePermission'
 import { createVisiblePoller } from '@/composables/usePolling'
 import { createRequestSeq } from '@/utils/requestSeq'
 import { formatCount } from '@/utils/format'
@@ -24,6 +25,8 @@ const router = useRouter()
 const data = ref<OverviewView | null>(null)
 const seq = createRequestSeq()
 let errorShown = false
+
+const { canWrite } = usePermission()
 
 /** 在线率；在线数未知时为 null */
 const rate = computed(() => (data.value ? onlineRate(data.value.onlineCount, data.value.deviceCount) : null))
@@ -132,7 +135,7 @@ onBeforeUnmount(() => {
         <div class="list cd-panel by-product">
           <div class="list-head">按产品统计</div>
           <el-empty v-if="data.products.length === 0" description="还没有产品" :image-size="64">
-            <el-button type="primary" @click="router.push({ name: 'products' })">去创建产品</el-button>
+            <el-button v-if="canWrite" type="primary" @click="router.push({ name: 'products' })">去创建产品</el-button>
           </el-empty>
           <ul v-else>
             <li

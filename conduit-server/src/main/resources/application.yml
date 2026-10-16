@@ -27,6 +27,9 @@ conduit:
   bootstrap:
     admin-username: ${CONDUIT_ADMIN_USERNAME:admin}
     admin-password: ${CONDUIT_ADMIN_PASSWORD:}
+    # 平台管理员：库中没有任何平台管理员时按此创建；密码为空则不创建（只打 WARN）
+    platform-admin-username: ${CONDUIT_PLATFORM_ADMIN_USERNAME:sysadmin}
+    platform-admin-password: ${CONDUIT_PLATFORM_ADMIN_PASSWORD:}
   auth:
     jwt-secret: ${CONDUIT_JWT_SECRET:}
     access-ttl: 15m

@@ -2,6 +2,8 @@ conduit:
   bootstrap:
     admin-username: admin
     admin-password: admin-pass-123
+    platform-admin-username: sysadmin
+    platform-admin-password: sysadmin-pass-123
   auth:
     jwt-secret: test-jwt-secret-test-jwt-secret-0123456789
   internal:

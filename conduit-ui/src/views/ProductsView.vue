@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 产品列表页：服务端分页（useTable，默认每页 10 条）；支持新建、编辑、删除产品，行内按钮可直接进入产品详情的各个标签页，
- * 「设备（在线/总数）」点击进入产品详情的设备标签。首次加载显示骨架屏；没有产品时引导新建，加载失败时改为「加载失败，点击重试」。新建时可选解码器，编辑时不能改。
+ * 「设备（在线/总数）」点击进入产品详情的设备标签。首次加载显示骨架屏；没有产品时引导新建，加载失败时改为「加载失败，点击重试」。新建时可选解码器，编辑时不能改。只读身份（usePermission().canWrite 为 false）看不到新建、编辑、删除。
  */
 
 import { onMounted, reactive, ref } from 'vue'
@@ -17,9 +17,11 @@ import { codecLabel } from '@/utils/thingModel'
 import { PAGE_SIZES } from '@/utils/pagination'
 import { tabQuery, type ProductTab } from '@/utils/productTabs'
 import { useTable } from '@/composables/useTable'
+import { usePermission } from '@/composables/usePermission'
 import PageHeader from '@/components/PageHeader.vue'
 
 const router = useRouter()
+const { canWrite } = usePermission()
 
 const codecs = ref<CodecView[]>([])
 const { items, total, page, size, loading, loaded, failed, load, onSizeChange, onPageChange } = useTable<ProductView>(
@@ -118,7 +120,7 @@ onMounted(() => {
 <template>
   <div>
     <PageHeader title="产品" subtitle="一类设备的模板：定义物模型（属性）与解码器，设备归属于产品。">
-      <template #actions>
+      <template v-if="canWrite" #actions>
         <el-button type="primary" :icon="Plus" @click="openCreate">新建产品</el-button>
       </template>
     </PageHeader>
@@ -153,16 +155,16 @@ onMounted(() => {
             <template #default="{ row }">
               <el-button link type="primary" @click="openDetail(row)">详情</el-button>
               <el-button link type="primary" @click="openDetail(row, 'model')">物模型</el-button>
-              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
-              <el-button link type="danger" @click="remove(row)">删除</el-button>
+              <el-button v-if="canWrite" link type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-button v-if="canWrite" link type="danger" @click="remove(row)">删除</el-button>
             </template>
           </el-table-column>
           <template #empty>
             <el-empty v-if="failed" description="加载失败，点击重试">
               <el-button type="primary" @click="load">重试</el-button>
             </el-empty>
-            <el-empty v-else description="还没有产品，先创建一个产品">
-              <el-button type="primary" @click="openCreate">新建产品</el-button>
+            <el-empty v-else :description="canWrite ? '还没有产品，先创建一个产品' : '还没有产品'">
+              <el-button v-if="canWrite" type="primary" @click="openCreate">新建产品</el-button>
             </el-empty>
           </template>
         </el-table>

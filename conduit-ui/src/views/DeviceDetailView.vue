@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 设备详情页：上方设备信息卡（名称、在线与启用状态、所属产品、设备 Key、最后上报、创建日期，「连接参数」弹窗与「编辑」）；
+ * 设备详情页：上方设备信息卡（名称、在线与启用状态、所属产品、设备 Key、最后上报、创建日期，「连接参数」弹窗与「编辑」，「编辑」只对可写身份显示）；
  * 下方「最新值 | 历史」两个标签页，标签与 ?tab= 同步（router.replace，不产生历史记录）。
  * 最新值每 5 秒轮询，交给 LatestValuesPanel 以卡片或表格展示；点击卡片切到历史标签并只选中该测点（?tab=history&props=Ua）。
  * HistoryPanel 只在历史标签激活时挂载，从 ?props= 读取初始选中。设备名称写入面包屑与浏览器标题；
@@ -20,6 +20,7 @@ import { deviceTabFromQuery, deviceTabQuery, historyQuery, propsFromQuery, type 
 import { createRequestSeq } from '@/utils/requestSeq'
 import { usePolling } from '@/composables/usePolling'
 import { useBreadcrumb } from '@/composables/useBreadcrumb'
+import { usePermission } from '@/composables/usePermission'
 import DeviceInfoCard from '@/components/DeviceInfoCard.vue'
 import ConnectionDialog from '@/components/ConnectionDialog.vue'
 import LatestValuesPanel from '@/components/LatestValuesPanel.vue'
@@ -31,6 +32,7 @@ const props = defineProps<{ deviceKey: string }>()
 const route = useRoute()
 const router = useRouter()
 const { setName } = useBreadcrumb()
+const { canWrite } = usePermission()
 
 // 当前标签与 ?tab= 同步；用 replace 切换，不产生历史记录
 const activeTab = computed<DeviceTab>({
@@ -187,7 +189,13 @@ usePolling(loadLatest, 5000)
 
 <template>
   <div v-if="device" class="detail">
-    <DeviceInfoCard :device="device" :product-name="productName" @connection="connectionVisible = true" @edit="openEdit" />
+    <DeviceInfoCard
+      :device="device"
+      :product-name="productName"
+      :can-edit="canWrite"
+      @connection="connectionVisible = true"
+      @edit="openEdit"
+    />
 
     <div class="cd-panel">
       <el-tabs v-model="activeTab">

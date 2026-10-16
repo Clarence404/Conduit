@@ -7,11 +7,28 @@ export interface PageView<T> {
   size: number
 }
 
-/** 当前用户；tenantName 为所属租户名称（顶栏显示），租户不存在时为 null */
+/** 角色：平台管理员（不属于任何租户）、租户管理员、只读用户 */
+export type Role = 'PLATFORM_ADMIN' | 'TENANT_ADMIN' | 'TENANT_VIEWER'
+
+/** 租户内用户可以使用的角色 */
+export type TenantRole = 'TENANT_ADMIN' | 'TENANT_VIEWER'
+
+/** 用户与租户的状态：ACTIVE 启用；DISABLED 对用户是禁用、对租户是停用 */
+export type AccountStatus = 'ACTIVE' | 'DISABLED'
+
+/**
+ * 当前用户（登录、刷新、进入/退出租户、修改密码的响应，以及 GET /auth/me）。
+ * role 为有效角色（平台管理员代入租户时为 TENANT_ADMIN）；tenantCode/tenantName 对未代入的平台管理员为 null；
+ * impersonatedBy 为代入的平台管理员用户名，未代入为 null。
+ */
 export interface UserView {
   username: string
-  role: string
+  displayName: string | null
+  role: Role
+  tenantCode: string | null
   tenantName: string | null
+  mustChangePassword: boolean
+  impersonatedBy: string | null
 }
 
 export interface TokenResponse {
@@ -176,4 +193,108 @@ export interface OverviewView {
   deadLastHour: DeadSummary | null
   recentDevices: RecentDevice[]
   products: ProductStat[]
+}
+
+/** 平台概况里「设备最多的租户」的一项；onlineCount 在服务端 Redis 不可用时为 null */
+export interface TenantStat {
+  code: string
+  name: string
+  deviceCount: number
+  onlineCount: number | null
+}
+
+/** 平台概况（GET /platform/overview）；userCount 为租户用户数（不含平台管理员），topTenants 最多 5 个 */
+export interface PlatformOverview {
+  tenantCount: number
+  activeTenantCount: number
+  disabledTenantCount: number
+  userCount: number
+  productCount: number
+  deviceCount: number
+  onlineCount: number | null
+  topTenants: TenantStat[]
+}
+
+/** 租户（平台租户列表项与操作结果）；adminCount 含已禁用的租户管理员 */
+export interface TenantView {
+  code: string
+  name: string
+  status: AccountStatus
+  adminCount: number
+  userCount: number
+  productCount: number
+  deviceCount: number
+  onlineCount: number | null
+  createdAt: string
+}
+
+/** 租户列表查询：分页 + 可选的关键字（名称或编码）与状态 */
+export interface TenantQuery {
+  keyword?: string
+  status?: AccountStatus
+  page: number
+  size: number
+}
+
+/** 新租户的首个管理员（首次登录须修改密码） */
+export interface TenantAdminAccount {
+  username: string
+  displayName: string | null
+  password: string
+}
+
+/** 新建租户：编码（创建后不可改）、名称与首个管理员 */
+export interface CreateTenantRequest {
+  code: string
+  name: string
+  admin: TenantAdminAccount
+}
+
+/** 修改租户名称 */
+export interface UpdateTenantRequest {
+  name: string
+}
+
+/** 租户用户（用户管理列表项，以及平台查看某租户的用户） */
+export interface TenantUserView {
+  username: string
+  displayName: string | null
+  role: TenantRole
+  status: AccountStatus
+  mustChangePassword: boolean
+  createdAt: string
+}
+
+/** 用户列表查询：分页 + 可选的关键字（用户名或显示名称）、角色与状态 */
+export interface UserQuery {
+  keyword?: string
+  role?: TenantRole
+  status?: AccountStatus
+  page: number
+  size: number
+}
+
+/** 新建租户用户；password 为初始密码（首次登录须修改） */
+export interface CreateUserRequest {
+  username: string
+  displayName: string | null
+  role: TenantRole
+  password: string
+}
+
+/** 修改租户用户的显示名称与角色 */
+export interface UpdateUserRequest {
+  displayName: string | null
+  role: TenantRole
+}
+
+/** 修改自己的显示名称（null 或空白即清除） */
+export interface UpdateMeRequest {
+  displayName: string | null
+}
+
+/** 修改自己的密码 */
+export interface ChangePasswordRequest {
+  oldPassword: string
+  newPassword: string
 }
