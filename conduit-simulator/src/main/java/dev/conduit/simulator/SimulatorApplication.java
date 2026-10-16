@@ -43,15 +43,15 @@ public final class SimulatorApplication {
      */
     private static void run() throws InterruptedException {
         SimulatorConfig config = SimulatorConfig.load();
-        ConduitApiClient api = new ConduitApiClient(config.apiUrl());
-        loginWithRetry(api, config);
+        try (ConduitApiClient api = new ConduitApiClient(config.apiUrl())) {
+            loginWithRetry(api, config);
 
-        PayloadFormat format = config.payloadFormat();
-        List<DeviceCredentials> demo = DemoProvisioner.provision(api, config.productName(), config.deviceCount(),
-                format.codec());
-        log.info("Provisioned {} devices under product '{}'", demo.size(), config.productName());
-        if (!demo.isEmpty() && DemoProvisioner.ensureThingModel(api, demo.getFirst().productKey())) {
-            log.info("Imported demo thing model into product '{}'", config.productName());
+            PayloadFormat format = config.payloadFormat();
+            List<DeviceCredentials> demo = DemoProvisioner.provision(api, config.productName(), config.deviceCount(),
+                    format.codec());
+            log.info("Provisioned {} devices under product '{}'", demo.size(), config.productName());
+            if (!demo.isEmpty() && DemoProvisioner.ensureThingModel(api, demo.getFirst().productKey())) {
+                log.info("Imported demo thing model into product '{}'", config.productName());
         }
 
         // 演示产品的物模型含枚举 st，附带运行状态；e2e 等无物模型的产品不能发 st（见 DeviceSimulator 构造器说明）
@@ -64,6 +64,7 @@ public final class SimulatorApplication {
 
         new DeviceSimulator(config.mqttHost(), config.mqttPort(), config.interval(), config.messagesPerDevice(),
                 DeviceSimulator.DEFAULT_COMPLETION_TIMEOUT, format, true).runDevices(devices);
+        }
     }
 
     /** 一键启动时 server 可能还没就绪，最多等 2 分钟。 */

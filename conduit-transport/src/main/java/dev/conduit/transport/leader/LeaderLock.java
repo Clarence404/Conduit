@@ -9,7 +9,7 @@ public interface LeaderLock {
     /** 本实例的 id（锁的值），日志与健康检查中用于区分实例。 */
     String instanceId();
 
-    /** 尝试抢锁；锁已被任何实例（包括本实例）持有时返回 false。 */
+    /** 尝试抢锁：键里已是本实例 id 时刷新 TTL 并返回 true；键不存在时写入并返回 true；否则（被其他实例持有）返回 false。 */
     boolean tryAcquire();
 
     /** 续期；锁不存在或已被其他实例持有时返回 false。 */

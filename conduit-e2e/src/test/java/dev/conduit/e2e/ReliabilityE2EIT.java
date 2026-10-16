@@ -112,40 +112,41 @@ class ReliabilityE2EIT {
      * 无论成败都删除本场景的设备与产品。
      */
     private void runScenario(int n, Fault fault) throws Exception {
-        ConduitApiClient api = env.api();
-        DeviceFleet started = null;
-        String productKey = api.findOrCreateProduct("e2e 场景 " + n + " 电表", "standard-json");
-        try {
-            List<DeviceCredentials> devices = new ArrayList<>();
-            for (int i = 1; i <= DEVICES; i++) {
-                devices.add(api.createDevice(productKey, "e2e 场景%d 电表%02d".formatted(n, i)));
-            }
-            DeviceFleet fleet = new DeviceFleet(env.mqttHost(), env.mqttPort(), devices, MESSAGES_PER_DEVICE,
-                    INTERVAL);
-            started = fleet;
-            CompletableFuture<Void> sending = fleet.start();
-            fleet.awaitAcked(100, Duration.ofSeconds(60));
-            assertThat(sending.isDone()).as("the fault must land mid-stream").isFalse();
-            log.info("Scenario {}: injecting the fault after {} acknowledged messages", n, fleet.acked());
+        try (ConduitApiClient api = env.api()) {
+            DeviceFleet started = null;
+            String productKey = api.findOrCreateProduct("e2e 场景 " + n + " 电表", "standard-json");
+            try {
+                List<DeviceCredentials> devices = new ArrayList<>();
+                for (int i = 1; i <= DEVICES; i++) {
+                    devices.add(api.createDevice(productKey, "e2e 场景%d 电表%02d".formatted(n, i)));
+                }
+                DeviceFleet fleet = new DeviceFleet(env.mqttHost(), env.mqttPort(), devices, MESSAGES_PER_DEVICE,
+                        INTERVAL);
+                started = fleet;
+                CompletableFuture<Void> sending = fleet.start();
+                fleet.awaitAcked(100, Duration.ofSeconds(60));
+                assertThat(sending.isDone()).as("the fault must land mid-stream").isFalse();
+                log.info("Scenario {}: injecting the fault after {} acknowledged messages", n, fleet.acked());
 
-            fault.inject();
-            sending.get(5, TimeUnit.MINUTES);
-            log.info("Scenario {}: all {} messages acknowledged by EMQX", n, fleet.total());
+                fault.inject();
+                sending.get(5, TimeUnit.MINUTES);
+                log.info("Scenario {}: all {} messages acknowledged by EMQX", n, fleet.total());
 
-            await().atMost(Duration.ofMinutes(3)).pollInterval(Duration.ofSeconds(3))
-                    .untilAsserted(() -> assertThat(env.influxCount(productKey))
-                            .as("points of scenario %d in InfluxDB", n).isEqualTo(fleet.total()));
-            assertThat(env.deadLetters()).as("dead letters of scenario %d", n).doesNotContain(productKey);
-            await().atMost(E2eEnvironment.CLAIM_MIN_IDLE.plusSeconds(60)).pollInterval(Duration.ofSeconds(3))
-                    .untilAsserted(() -> assertThat(env.pendingCount())
-                            .as("pending entries in group conduit-server").isZero());
-            assertThat(env.influxCount(productKey)).as("no extra points after the backlog drained")
-                    .isEqualTo(fleet.total());
-        } finally {
-            if (started != null) {
-                started.stop();
-            }
-            cleanUp(env.api(), productKey);
+                await().atMost(Duration.ofMinutes(3)).pollInterval(Duration.ofSeconds(3))
+                        .untilAsserted(() -> assertThat(env.influxCount(productKey))
+                                .as("points of scenario %d in InfluxDB", n).isEqualTo(fleet.total()));
+                assertThat(env.deadLetters()).as("dead letters of scenario %d", n).doesNotContain(productKey);
+                await().atMost(E2eEnvironment.CLAIM_MIN_IDLE.plusSeconds(60)).pollInterval(Duration.ofSeconds(3))
+                        .untilAsserted(() -> assertThat(env.pendingCount())
+                                .as("pending entries in group conduit-server").isZero());
+                assertThat(env.influxCount(productKey)).as("no extra points after the backlog drained")
+                        .isEqualTo(fleet.total());
+            } finally {
+                if (started != null) {
+                    started.stop();
+                }
+                cleanUp(api, productKey);
+        }
         }
     }
 

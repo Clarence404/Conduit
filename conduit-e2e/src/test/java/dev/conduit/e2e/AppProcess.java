@@ -63,7 +63,12 @@ final class AppProcess {
                 .directory(workDir.toFile())
                 .redirectErrorStream(true)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(consoleLog().toFile()));
+        // 子进程默认继承调用者环境：清掉可能来自开发者 shell 的配置，避免泄漏进 e2e 进程（PATH、JAVA_HOME 等保留）
         builder.environment().remove("SPRING_PROFILES_ACTIVE");
+        builder.environment().remove("TRANSPORT_CLIENT_ID");
+        builder.environment().keySet().removeIf(k -> k.startsWith("TRANSPORT_MQTT_") || k.startsWith("CONDUIT_")
+                || k.startsWith("POSTGRES_") || k.startsWith("REDIS_") || k.startsWith("INFLUX_")
+                || k.startsWith("EMQX_") || k.startsWith("PIPELINE_"));
         builder.environment().putAll(env);
         process = builder.start();
         // 测试 JVM 被强行终止时也要带走子进程，避免遗留孤儿 java 进程；kill() 会撤销该钩子
