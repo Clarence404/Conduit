@@ -20,8 +20,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Conduit REST 的最小客户端，只覆盖模拟器与端到端测试需要的接口。 */
-public class ConduitApiClient {
+/**
+ * Conduit REST 的最小客户端，只覆盖模拟器与端到端测试需要的接口。登录后的令牌保存在实例中；
+ * 平台管理员进入租户后令牌换成代入令牌，退出后换回平台令牌，因此一个实例同一时刻只代表一个身份。
+ */
+public class ConduitApiClient implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(ConduitApiClient.class);
     private static final int PAGE_SIZE = 100;
@@ -30,6 +33,8 @@ public class ConduitApiClient {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final ObjectMapper mapper = new ObjectMapper();
     private String token;
+    private String username;
+    private String password;
 
     public ConduitApiClient(URI baseUrl) {
         this.baseUrl = baseUrl;
@@ -37,8 +42,24 @@ public class ConduitApiClient {
 
     /** 登录并保存 accessToken，之后的请求自动带 Bearer 头；状态码非 200 抛 IllegalStateException。 */
     public void login(String username, String password) {
+        this.username = username;
+        this.password = password;
         JsonNode body = send("POST", "/api/v1/auth/login", Map.of("username", username, "password", password), 200);
         token = body.get("accessToken").asText();
+    }
+
+    /** 用上次 login 保存的账号重新登录，换回该账号自己的令牌（如退出租户失败后丢弃代入令牌）；从未登录过抛 IllegalStateException。 */
+    public void relogin() {
+        if (username == null) {
+            throw new IllegalStateException("login has not been called");
+        }
+        login(username, password);
+    }
+
+    /** 释放底层 HTTP 客户端（JDK 21 的 HttpClient 持有连接与线程）。 */
+    @Override
+    public void close() {
+        http.close();
     }
 
     /** 同 {@link #findOrCreateProduct(String, String)}，新建时使用 standard-json 解码器。 */
@@ -94,6 +115,14 @@ public class ConduitApiClient {
     public record DeviceSummary(String deviceKey, String name, String status) {
     }
 
+    /** 租户列表中模拟器关心的字段。 */
+    public record TenantSummary(String code, String name, String status) {
+    }
+
+    /** 产品列表中模拟器关心的字段；propertyCount 为物模型属性数。 */
+    public record ProductSummary(String productKey, String name, String codec, int propertyCount) {
+    }
+
     public List<String> listDeviceKeys(String productKey) {
         return listDevices(productKey).stream().map(DeviceSummary::deviceKey).toList();
     }
@@ -104,12 +133,91 @@ public class ConduitApiClient {
         for (int page = 1; ; page++) {
             JsonNode result = send("GET", "/api/v1/devices?productKey=" + encode(productKey)
                     + "&page=" + page + "&size=" + PAGE_SIZE, null, 200);
-            result.get("items").forEach(item -> devices.add(new DeviceSummary(item.get("deviceKey").asText(),
-                    item.path("name").asText(""), item.path("status").asText("ENABLED"))));
+            result.get("items").forEach(item -> devices.add(summary(item)));
             if ((long) page * PAGE_SIZE >= result.get("total").asLong()) {
                 return devices;
             }
         }
+    }
+
+    /**
+     * 产品下最多 limit 台启用中的设备：请求带 status=ENABLED，并按返回项的 status 再过滤一次；取够即停止翻页。
+     */
+    public List<DeviceSummary> listEnabledDevices(String productKey, int limit) {
+        List<DeviceSummary> devices = new ArrayList<>();
+        for (int page = 1; devices.size() < limit; page++) {
+            JsonNode result = send("GET", "/api/v1/devices?productKey=" + encode(productKey)
+                    + "&status=ENABLED&page=" + page + "&size=" + PAGE_SIZE, null, 200);
+            for (JsonNode item : result.get("items")) {
+                DeviceSummary device = summary(item);
+                if (devices.size() < limit && "ENABLED".equals(device.status())) {
+                    devices.add(device);
+                }
+            }
+            if ((long) page * PAGE_SIZE >= result.get("total").asLong()) {
+                break;
+            }
+        }
+        return devices;
+    }
+
+    /** 全部启用中的租户（平台管理员）：请求带 status=ACTIVE，并按返回项的 status 再过滤一次。 */
+    public List<TenantSummary> listActiveTenants() {
+        List<TenantSummary> tenants = new ArrayList<>();
+        for (int page = 1; ; page++) {
+            JsonNode result = send("GET", "/api/v1/platform/tenants?status=ACTIVE&page=" + page + "&size="
+                    + PAGE_SIZE, null, 200);
+            for (JsonNode item : result.get("items")) {
+                String status = item.path("status").asText("");
+                if ("ACTIVE".equals(status)) {
+                    tenants.add(new TenantSummary(item.get("code").asText(), item.path("name").asText(""), status));
+                }
+            }
+            if ((long) page * PAGE_SIZE >= result.get("total").asLong()) {
+                return tenants;
+            }
+        }
+    }
+
+    /** 平台管理员进入租户：之后的请求使用代入令牌（以租户管理员身份操作该租户）。 */
+    public void enterTenant(String code) {
+        token = send("POST", "/api/v1/platform/tenants/" + encode(code) + "/enter", null, 200)
+                .get("accessToken").asText();
+        log.debug("Entered tenant {}", code);
+    }
+
+    /** 退出代入的租户：之后的请求换回平台管理员自己的令牌。 */
+    public void exitTenant() {
+        token = send("POST", "/api/v1/auth/exit-tenant", null, 200).get("accessToken").asText();
+        log.debug("Exited the impersonated tenant");
+    }
+
+    /** 当前租户的全部产品（分页取完）。 */
+    public List<ProductSummary> listProducts() {
+        List<ProductSummary> products = new ArrayList<>();
+        for (int page = 1; ; page++) {
+            JsonNode result = send("GET", "/api/v1/products?page=" + page + "&size=" + PAGE_SIZE, null, 200);
+            result.get("items").forEach(item -> products.add(new ProductSummary(item.get("productKey").asText(),
+                    item.path("name").asText(""), item.path("codec").asText(""), item.path("propertyCount").asInt())));
+            if ((long) page * PAGE_SIZE >= result.get("total").asLong()) {
+                return products;
+            }
+        }
+    }
+
+    /** 产品物模型的属性定义（类型、单位、上下限、小数位、枚举项），按接口返回顺序。 */
+    public List<PropertyDef> properties(String productKey) {
+        JsonNode list = send("GET", "/api/v1/products/" + encode(productKey) + "/properties", null, 200);
+        List<PropertyDef> defs = new ArrayList<>();
+        for (JsonNode p : list) {
+            List<PropertyDef.EnumOption> items = new ArrayList<>();
+            p.path("enumItems").forEach(e -> items.add(
+                    new PropertyDef.EnumOption(e.get("value").asLong(), e.path("label").asText(""))));
+            defs.add(new PropertyDef(p.get("identifier").asText(), p.path("name").asText(""),
+                    p.path("dataType").asText(""), textOrNull(p, "unit"), doubleOrNull(p, "minValue"),
+                    doubleOrNull(p, "maxValue"), intOrNull(p, "decimals"), items));
+        }
+        return defs;
     }
 
     /** 修改设备名称；接口要求同时提交状态，传入当前状态以保持不变。 */
@@ -139,6 +247,26 @@ public class ConduitApiClient {
         JsonNode body = send("POST", "/api/v1/devices/" + encode(deviceKey) + "/reset-secret", null, 200);
         log.debug("Device secret reset: deviceKey={}", deviceKey);
         return new DeviceCredentials(productKey, deviceKey, body.get("deviceSecret").asText());
+    }
+
+    private static DeviceSummary summary(JsonNode item) {
+        return new DeviceSummary(item.get("deviceKey").asText(), item.path("name").asText(""),
+                item.path("status").asText("ENABLED"));
+    }
+
+    private static String textOrNull(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asText();
+    }
+
+    private static Double doubleOrNull(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asDouble();
+    }
+
+    private static Integer intOrNull(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asInt();
     }
 
     /**

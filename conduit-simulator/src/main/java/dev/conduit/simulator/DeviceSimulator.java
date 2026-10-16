@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 每台设备一个 MQTT 连接，按固定周期以 QoS1 上报；各设备的首次上报在一个周期内均匀错开。
- * 首次连接失败时按 {@link ConnectRetry} 重试；operatingState 为 true 时每条上报附带运行状态 st（见 {@link OperatingState}）。
+ * 每台设备有自己的上报格式与读数来源（{@link SimulatedDevice}）；首次连接失败时按 {@link ConnectRetry} 重试。
  */
 public class DeviceSimulator {
 
@@ -56,10 +56,10 @@ public class DeviceSimulator {
     }
 
     /**
-     * 完整构造器：指定上报格式，并可选择是否附带运行状态 st。
+     * 完整构造器。format 与 operatingState 只用于 {@link #run(List)}（演示电表）；{@link #runDevices(List)} 按每台设备自己的设置。
      *
      * @param messagesPerDevice 每台设备的上报条数，0 表示一直运行
-     * @param operatingState    是否附带运行状态 st；只有产品物模型中 st 为 ENUM 时才应开启（列类型全表共享，
+     * @param operatingState    run(List) 时是否附带运行状态 st；只有产品物模型中 st 为 ENUM 时才应开启（列类型全表共享，
      *                          无物模型的产品会把 st 存成浮点列，与演示产品的整数列冲突）
      */
     public DeviceSimulator(String host, int port, Duration interval, int messagesPerDevice,
@@ -79,6 +79,11 @@ public class DeviceSimulator {
         return this;
     }
 
+    /** 以演示电表读数模拟这些设备（构造时的 format 与 operatingState），语义同 {@link #runDevices(List)}。 */
+    public void run(List<DeviceCredentials> devices) throws InterruptedException {
+        runDevices(devices.stream().map(d -> SimulatedDevice.demo(d, format, operatingState)).toList());
+    }
+
     /**
      * 连接所有设备并按周期上报，阻塞到结束。messagesPerDevice &gt; 0 时为有限模式：每台发完即结束，
      * 超过 completionTimeout 未完成或有消息最终发送失败则抛 IllegalStateException；否则无限运行直到被中断。
@@ -87,7 +92,7 @@ public class DeviceSimulator {
      *
      * @throws IllegalStateException 某台设备重试后仍连不上、超时未完成或有消息最终发送失败
      */
-    public void run(List<DeviceCredentials> devices) throws InterruptedException {
+    public void runDevices(List<SimulatedDevice> devices) throws InterruptedException {
         boolean finite = messagesPerDevice > 0;
         long intervalMs = interval.toMillis();
         AtomicInteger threadCounter = new AtomicInteger();
@@ -103,14 +108,14 @@ public class DeviceSimulator {
 
         try {
             List<Mqtt5AsyncClient> clients = new ArrayList<>();
-            for (DeviceCredentials d : devices) {
-                clients.add(connect(d, connected));
+            for (SimulatedDevice device : devices) {
+                clients.add(connect(device.credentials(), connected));
             }
 
             for (int i = 0; i < devices.size(); i++) {
-                DeviceCredentials d = devices.get(i);
+                SimulatedDevice device = devices.get(i);
+                DeviceCredentials d = device.credentials();
                 Mqtt5AsyncClient client = clients.get(i);
-                ReadingGenerator generator = new ReadingGenerator(d.deviceKey().hashCode());
                 String topic = "conduit/%s/%s/up/property".formatted(d.productKey(), d.deviceKey());
                 AtomicInteger sent = new AtomicInteger();
                 AtomicInteger completed = new AtomicInteger();
@@ -132,11 +137,8 @@ public class DeviceSimulator {
                         int seq = sent.incrementAndGet();
                         long ts = Math.max(System.currentTimeMillis(), lastTs.get() + 1);
                         lastTs.set(ts);
-                        Map<String, Object> reading = generator.next(intervalMs / 1000.0);
-                        if (operatingState) {
-                            reading.put(OperatingState.IDENTIFIER, OperatingState.at(d.deviceKey(), ts));
-                        }
-                        byte[] payload = format.encode(d.deviceKey() + "-" + seq, ts, reading);
+                        Map<String, Object> reading = device.readings().next(ts, intervalMs / 1000.0);
+                        byte[] payload = device.format().encode(d.deviceKey() + "-" + seq, ts, reading);
                         log.debug("Publishing {} seq={} ts={} bytes={}", d.deviceKey(), seq, ts, payload.length);
                         if (log.isTraceEnabled()) {
                             String body = new String(payload, StandardCharsets.UTF_8);
@@ -179,7 +181,7 @@ public class DeviceSimulator {
 
     /**
      * 连接一台设备，失败时按 connectRetry 重试。每次尝试新建客户端；失败的客户端立即断开（停止其自动重连），
-     * 成功的加入 connected，由 run 结束时统一断开。
+     * 成功的加入 connected，由 runDevices 结束时统一断开。
      *
      * @throws IllegalStateException 重试次数用尽
      */

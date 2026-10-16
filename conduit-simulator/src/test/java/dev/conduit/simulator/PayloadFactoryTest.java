@@ -9,6 +9,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** PayloadFactory 与 PayloadFormat 单元测试：两种载荷结构、格式与解码器名称的对应。 */
 class PayloadFactoryTest {
 
     @Test
@@ -47,5 +48,13 @@ class PayloadFactoryTest {
         assertThat(flat.get("Ua").asDouble()).isEqualTo(1.0);
         JsonNode standard = new ObjectMapper().readTree(PayloadFormat.STANDARD.encode("m", 1L, Map.of("Ua", 1.0)));
         assertThat(standard.get("params").get("Ua").asDouble()).isEqualTo(1.0);
+    }
+
+    @Test
+    void payloadFormatIsFoundByCodecName() {
+        assertThat(PayloadFormat.fromCodec("standard-json")).contains(PayloadFormat.STANDARD);
+        assertThat(PayloadFormat.fromCodec("flat-json")).contains(PayloadFormat.FLAT);
+        assertThat(PayloadFormat.fromCodec("modbus-hex")).isEmpty();
+        assertThat(PayloadFormat.fromCodec(null)).isEmpty();
     }
 }
