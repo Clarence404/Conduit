@@ -1,18 +1,18 @@
-# 构建上下文为仓库根目录，只供根 Dockerfile 构建 Java 应用使用：
-# 先排除全部，再只放行 Maven 需要的 pom.xml 与 conduit-* Java 模块
-*
-!pom.xml
-!conduit-*
-!docs/examples/demo-meter.thing-model.json
-
-# 前端有自己的 Dockerfile 和构建上下文（conduit-ui/）
-conduit-ui
-
-# 构建产物、IDE 文件与本地配置（含主机地址与口令）
-**/target
+# 构建上下文为仓库根目录（deploy/full/docker/ 下的 Dockerfile 使用）：
+# 排除依赖、构建产物、版本库、日志与本地配置，使上下文小且不带主机地址与口令。
+# 预编译产物在 deploy/full/artifacts/（由 deploy/package.sh 生成），最后一行保证它们始终进入上下文。
+.git
 **/node_modules
+**/target
+conduit-ui/dist
+logs
+.claude
+.superpowers
+.idea
 **/.idea
 **/*.iml
+**/.env
+**/.env.*
 **/application-local.yml
 **/simulator-local.properties
-**/.env*
+!deploy/full/artifacts/**

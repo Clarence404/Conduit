@@ -1,0 +1,189 @@
+# 全量包：基础服务（extends ../infra/docker-compose.yml）+ conduit-server、两个 transport、conduit-web 与演示模拟器。
+# 用法：cp .env.example .env 并修改口令，然后 docker compose up -d --build。
+# 应用镜像的产物来源由 .env 的 BUILD_FROM 决定：prebuilt（默认，用 artifacts/ 中由 deploy/package.sh 打好的产物）
+# 或 source（在宿主机上从源码编译，需联网）。构建上下文为仓库根目录（../..），见根目录 .dockerignore。
+# 基础服务的定义只在 ../infra/docker-compose.yml：其中的相对路径（EMQX 配置挂载）按 infra 文件所在目录解析，
+# 变量插值用本目录的 .env，所以本目录 .env 要包含 infra 必填的全部变量。项目名与数据卷和基础服务包相同，同一宿主机上二选一。
+name: conduit
+
+services:
+  postgres:
+    extends:
+      file: ../infra/docker-compose.yml
+      service: postgres
+
+  redis:
+    extends:
+      file: ../infra/docker-compose.yml
+      service: redis
+
+  influxdb:
+    extends:
+      file: ../infra/docker-compose.yml
+      service: influxdb
+
+  influxdb-explorer:
+    extends:
+      file: ../infra/docker-compose.yml
+      service: influxdb-explorer
+    # 与 infra 中的依赖相同，在此显式声明，不依赖 extends 是否继承 depends_on
+    depends_on:
+      influxdb:
+        condition: service_healthy
+
+  emqx:
+    extends:
+      file: ../infra/docker-compose.yml
+      service: emqx
+    environment:
+      # 全量包中鉴权回调固定指向容器内的 conduit-server（.env 中的同名变量只用于满足 infra 文件的必填检查）
+      CONDUIT_AUTH_URL: http://conduit-server:8080
+
+  conduit-server:
+    build:
+      context: ../..
+      dockerfile: deploy/full/docker/java.Dockerfile
+      args:
+        BUILD_FROM: ${BUILD_FROM:-prebuilt}
+        MODULE: conduit-server
+        JAR_NAME: conduit-server
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: redis
+      INFLUX_URL: http://influxdb:8181
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      CONDUIT_ADMIN_USERNAME: ${CONDUIT_ADMIN_USERNAME:-admin}
+      CONDUIT_ADMIN_PASSWORD: ${CONDUIT_ADMIN_PASSWORD:?CONDUIT_ADMIN_PASSWORD is required}
+      CONDUIT_PLATFORM_ADMIN_USERNAME: ${CONDUIT_PLATFORM_ADMIN_USERNAME:-sysadmin}
+      CONDUIT_PLATFORM_ADMIN_PASSWORD: ${CONDUIT_PLATFORM_ADMIN_PASSWORD:-}
+      CONDUIT_JWT_SECRET: ${CONDUIT_JWT_SECRET:?CONDUIT_JWT_SECRET is required}
+      CONDUIT_INTERNAL_TOKEN: ${CONDUIT_INTERNAL_TOKEN}
+      TRANSPORT_MQTT_USERNAME: ${TRANSPORT_MQTT_USERNAME:-conduit-transport}
+      TRANSPORT_MQTT_PASSWORD: ${TRANSPORT_MQTT_PASSWORD:?TRANSPORT_MQTT_PASSWORD is required}
+      PIPELINE_CLAIM_MIN_IDLE: ${PIPELINE_CLAIM_MIN_IDLE:-60s}
+      CONDUIT_LOG_DIR: /var/log/conduit
+    # Java 服务共用命名卷 conduit-logs 存放日志（JRE 镜像默认以 root 运行，可直接写入）
+    volumes:
+      - conduit-logs:/var/log/conduit
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${API_PORT:-8091}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      influxdb:
+        condition: service_healthy
+    healthcheck:
+      # JRE 镜像无 curl/wget：用 bash /dev/tcp 请求 readiness 探针，
+      # 只有 ApplicationRunner（含 AdminBootstrap）执行完毕后才返回 UP
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/8080
+          && printf 'GET /actuator/health/readiness HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3
+          && grep -q '"UP"' <&3
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 30
+    restart: unless-stopped
+
+  # transport 单活多备（V0.2-R）：两个实例经 Redis 锁 conduit:transport:leader 选主，只有主实例连接 EMQX；
+  # 两者共用 clientId conduit-transport（默认值），主实例故障后备实例最长 15 秒后接管同一个磁盘持久会话
+  conduit-transport: &transport
+    build:
+      context: ../..
+      dockerfile: deploy/full/docker/java.Dockerfile
+      args:
+        BUILD_FROM: ${BUILD_FROM:-prebuilt}
+        MODULE: conduit-transport
+        JAR_NAME: conduit-transport
+    # 给主实例留时间断开 MQTT 并释放选主锁（Compose 默认 10 秒），备实例才能立即接管
+    stop_grace_period: 20s
+    environment: &transport-env
+      REDIS_HOST: redis
+      EMQX_HOST: emqx
+      TRANSPORT_MQTT_USERNAME: ${TRANSPORT_MQTT_USERNAME:-conduit-transport}
+      TRANSPORT_MQTT_PASSWORD: ${TRANSPORT_MQTT_PASSWORD}
+      CONDUIT_LOG_DIR: /var/log/conduit
+    volumes:
+      - conduit-logs:/var/log/conduit
+    depends_on:
+      redis:
+        condition: service_healthy
+      emqx:
+        condition: service_healthy
+      conduit-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # 第二个 transport（与上面相同的构建与配置，镜像各自构建一次，第二次命中 BuildKit 缓存）：
+  # 日志写到共享卷的子目录，避免两个进程滚动同一个日志文件
+  conduit-transport-2:
+    <<: *transport
+    environment:
+      <<: *transport-env
+      CONDUIT_LOG_DIR: /var/log/conduit/transport-2
+
+  conduit-web:
+    build:
+      context: ../..
+      dockerfile: deploy/full/docker/web.Dockerfile
+      args:
+        BUILD_FROM: ${BUILD_FROM:-prebuilt}
+        VITE_MQTT_PORT: ${MQTT_PORT:-1883}
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-8090}:80"
+    depends_on:
+      - conduit-server
+    restart: unless-stopped
+
+  # 演示模拟器（默认启动）：自动创建「三相电表（演示）」产品与设备并按间隔上报；
+  # SIM_PLATFORM_PASSWORD 非空时再模拟 SIM_TENANTS 中各租户有物模型的产品（会重置这些设备的密钥）
+  simulator:
+    build:
+      context: ../..
+      dockerfile: deploy/full/docker/java.Dockerfile
+      args:
+        BUILD_FROM: ${BUILD_FROM:-prebuilt}
+        MODULE: conduit-simulator
+        JAR_NAME: conduit-simulator-exec
+    environment:
+      CONDUIT_API_URL: http://conduit-server:8080
+      CONDUIT_ADMIN_USERNAME: ${CONDUIT_ADMIN_USERNAME:-admin}
+      CONDUIT_ADMIN_PASSWORD: ${CONDUIT_ADMIN_PASSWORD}
+      MQTT_HOST: emqx
+      SIM_DEVICE_COUNT: ${SIM_DEVICE_COUNT:-100}
+      SIM_INTERVAL_MS: ${SIM_INTERVAL_MS:-10000}
+      SIM_PAYLOAD_FORMAT: ${SIM_PAYLOAD_FORMAT:-standard}
+      # 多租户模拟（V0.2-R）：平台管理员密码为空时只模拟演示产品；非空时模拟 SIM_TENANTS 中各租户有物模型的产品
+      SIM_PLATFORM_USERNAME: ${SIM_PLATFORM_USERNAME:-sysadmin}
+      SIM_PLATFORM_PASSWORD: ${SIM_PLATFORM_PASSWORD:-}
+      SIM_TENANTS: ${SIM_TENANTS:-*}
+      SIM_MAX_DEVICES_PER_PRODUCT: ${SIM_MAX_DEVICES_PER_PRODUCT:-100}
+      # 光伏、用电、用水的日曲线按本地时间计算
+      TZ: Asia/Shanghai
+      CONDUIT_LOG_DIR: /var/log/conduit
+    volumes:
+      - conduit-logs:/var/log/conduit
+    depends_on:
+      emqx:
+        condition: service_healthy
+      conduit-server:
+        condition: service_healthy
+      conduit-transport:
+        condition: service_started
+    restart: on-failure
+
+# extends 不带入顶层数据卷，这里按同名重新声明（项目名 conduit 下即 conduit_pg-data 等，与基础服务包共用）
+volumes:
+  pg-data:
+  redis-data:
+  influx3-data:
+  influx-explorer-data:
+  emqx-data:
+  conduit-logs:
