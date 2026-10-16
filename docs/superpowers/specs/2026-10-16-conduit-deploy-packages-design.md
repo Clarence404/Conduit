@@ -88,4 +88,4 @@ deploy/
 2. `BUILD_FROM=source`（`git archive` 的源码）：在宿主机上构建 conduit-server 与 conduit-web 镜像成功（Maven 依赖下载约 5.5 分钟）。
 3. 开发环境包：5 个服务健康，EMQX 磁盘持久会话生效、回调地址渲染正确，挂载的配置文件属主 0、权限 644。
 4. e2e 四个场景通过（读取 `deploy/dev/emqx/` 模板）。`mvn -B verify` 中 `LeaderElectionIT` 的正常停止交接用例间歇失败，为 V0.2-R 已知问题（见 backlog「V0.2-R 遗留」），与本次整理无关，单独处理。
-5. 开发基础设施切换到 `deploy/dev`：待所有者操作。
+5. 开发基础设施已切换到 `deploy/dev`（宿主机 `/opt/conduit`，旧编排备份在 `old-2026-10-16/`）：按项目名 `conduit` 停旧编排（不删卷），新 `.env` 沿用旧口令，启动后 5 个服务健康、无新增数据卷、EMQX 持久会话生效，本地 IDEA 中的 transport 自动重连并成为主实例。
