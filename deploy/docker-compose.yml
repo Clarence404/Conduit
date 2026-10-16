@@ -230,6 +230,13 @@ services:
       SIM_DEVICE_COUNT: ${SIM_DEVICE_COUNT:-100}
       SIM_INTERVAL_MS: ${SIM_INTERVAL_MS:-10000}
       SIM_PAYLOAD_FORMAT: ${SIM_PAYLOAD_FORMAT:-standard}
+      # 多租户模拟（V0.2-R）：平台管理员密码为空时只模拟演示产品；非空时模拟 SIM_TENANTS 中各租户有物模型的产品
+      SIM_PLATFORM_USERNAME: ${SIM_PLATFORM_USERNAME:-sysadmin}
+      SIM_PLATFORM_PASSWORD: ${SIM_PLATFORM_PASSWORD:-}
+      SIM_TENANTS: ${SIM_TENANTS:-*}
+      SIM_MAX_DEVICES_PER_PRODUCT: ${SIM_MAX_DEVICES_PER_PRODUCT:-100}
+      # 光伏、用电、用水的日曲线按本地时间计算
+      TZ: Asia/Shanghai
       CONDUIT_LOG_DIR: /var/log/conduit
     volumes:
       - conduit-logs:/var/log/conduit

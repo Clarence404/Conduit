@@ -9,7 +9,7 @@
 ### 1.1 组件与数据流
 
 ```
-设备 ──MQTT──> EMQX ──共享订阅──> conduit-transport ──XADD──> Redis Streams(conduit:stream:up)
+设备 ──MQTT──> EMQX ──持久会话──> conduit-transport ──XADD──> Redis Streams(conduit:stream:up)
                  │                                                  │
                  └─鉴权 HTTP 回调─> conduit-server <──消费组读取──────┘
                                        │
@@ -22,18 +22,27 @@ conduit-ui（Vue）──REST──> conduit-server
 | 模块 | 职责 |
 |---|---|
 | `conduit-common` | 跨进程共享：`MessageBus` 接口与 Redis Streams 实现、协议无关的 `RawMessage` |
-| `conduit-transport` | 协议接入层（对应 ThingsBoard 的 transport）：订阅 EMQX 共享主题，把设备报文原样组装成 `RawMessage` 发布到总线；不做业务解析 |
+| `conduit-transport` | 协议接入层（对应 ThingsBoard 的 transport）：单活多备（Redis 选主，只有主实例连接 EMQX），以固定 clientId 的磁盘持久会话普通订阅设备主题，把设备报文原样组装成 `RawMessage` 发布到总线；不做业务解析 |
 | `conduit-server` | 业务核心：EMQX 鉴权回调、总线消费流水线（解码 → 物模型校验 → 写时序库/最新值）、REST API、多租户与用户（平台管理员 / 租户管理员 / 只读用户、进入租户） |
-| `conduit-simulator` | 演示用设备模拟器：自动创建演示产品/设备、导入演示物模型、按间隔上报；演示设备附带枚举运行状态 st，首次连接 MQTT 失败每 2 秒重试、最多 15 次 |
+| `conduit-simulator` | 演示用设备模拟器：自动创建演示产品/设备、导入演示物模型、按间隔上报；演示设备附带枚举运行状态 st，首次连接 MQTT 失败每 2 秒重试、最多 15 次；配置平台管理员密码后模拟各租户的物模型产品 |
 | `conduit-ui` | 前端：Vue 3 + TypeScript + Element Plus + ECharts；统一框架（分组可折叠侧栏、面包屑顶栏、PageHeader）、首页总览、暗色模式、按角色的菜单与写操作、平台首页与租户/用户管理 |
-| `conduit-e2e` | 端到端测试（`-Pe2e`）：杀进程不丢数据 |
+| `conduit-e2e` | 端到端测试（`-Pe2e`）：Testcontainers 临时环境 + 本地 jar 进程，杀 server / 主 transport / 全部 transport、重启 EMQX 四个场景不丢数据 |
 | `deploy/` | Docker Compose（项目名 `conduit`）、`build-local.sh` |
 
 ### 1.2 关键设计决定
 
 - **消息总线**：经 `MessageBus` 接口，当前实现为 Redis Streams（消费组、`XPENDING` 认领、死信流 `conduit:stream:dead`）。将来评估 RabbitMQ（下行）、Kafka（大规模）时只换实现。
-- **投递语义**：至少一次。下游写入成功后才 ack；可恢复错误（时序库不可用、数据库连接失败等，判断时沿异常 cause 链查找）原地退避重试 1s→30s，不消耗投递次数；意外错误只把该条消息进死信 `PROCESSING_ERROR`；超过 5 次投递进死信 `MAX_DELIVERY_EXCEEDED`。
-- **多租户与用户**（V0.2-C）：所有业务表带 `tenant_id`，MyBatis-Plus 租户拦截器按令牌中的租户自动过滤；`tenant`、`app_user` 不过滤，按租户查用户必须显式带 `tenant_id`；跨租户查询（按 productKey 找产品、设备身份、平台统计 `PlatformStatsMapper`）必须显式标注 `@InterceptorIgnore` 并只在内部或平台接口使用，按租户检查数据用 `TenantContext.callAs`。角色 `PLATFORM_ADMIN`（不属于任何租户，`tenant_id` 为空，数据库约束保证）/ `TENANT_ADMIN` / `TENANT_VIEWER`；用户名 3～32 位字母开头（字母、数字、`_-.`）全平台唯一，密码 8～64 位含字母和数字（BCrypt），租户编码 `^[a-z][a-z0-9-]{1,31}$` 不可改；用户与租户状态 `ACTIVE`/`DISABLED`。启动时没有平台管理员则按 `CONDUIT_PLATFORM_ADMIN_USERNAME`（默认 `sysadmin`）/ `CONDUIT_PLATFORM_ADMIN_PASSWORD` 创建，密码为空只 WARN。默认租户 `default` 不能停用或删除；删除租户需无产品与设备，用户随之删除。租户用户保护：不能删除、禁用自己或改自己的角色，本租户最后一个启用的 `TENANT_ADMIN` 不能被降级、禁用或删除（租户行锁内检查）。停用租户时清除该租户设备的身份缓存 `conduit:auth:*`；设备身份带租户状态，MQTT 鉴权拒绝停用租户的设备，已连接设备的上报进死信 `TENANT_DISABLED`。
+- **投递语义**：至少一次。下游写入成功后才 ack；可恢复错误（时序库不可用、数据库连接失败等，判断时沿异常 cause 链查找）原地退避重试 1s→30s，不消耗投递次数；意外错误只把该条消息进死信 `PROCESSING_ERROR`；超过 5 次投递进死信 `MAX_DELIVERY_EXCEEDED`。 接入侧：EMQX 开启磁盘持久会话，transport 写入总线成功后才回 PUBACK，transport 离线期间的消息存 EMQX 磁盘（保留 1 天），重连后补发。
+- **transport 单活多备**（V0.2-R）：
+  - 会话与订阅：所有实例共用 clientId `conduit-transport`（`conduit.transport.mqtt.client-id`）、`cleanStart=false`、会话保留 86400 秒，普通订阅 `conduit/+/+/up/#`，订阅选项 `retainHandling=DO_NOT_SEND`（重连不重放保留消息）。EMQX 5.8.6 的磁盘持久会话拒绝共享订阅（原因码 158），所以放弃多实例分摊。
+  - 选主：Redis 键 `conduit:transport:leader`，抢锁是一段 Lua 脚本（键不存在则 `SET PX`；键里已是本实例 id 则刷新 TTL 并视为抢到，所以 Redis 抖动后原主立即拿回锁；否则拒绝），续期与释放同样 Lua 比对 id 后 `PEXPIRE` / `DEL`；ttl 15s，续期 5s，抢锁 2s。只有主实例连接 EMQX；续期失败立即断开并转为备用，正常停止时释放锁（compose 中两个 transport 均 `stop_grace_period: 20s`）。transport 的 Redis 命令超时为 2s。
+  - 重连：适配器不用 HiveMQ 自动重连。断线或会话被接管时，由选主协调器先续期确认仍持锁，再重新连接；SUBACK 含错误码视为失败。
+  - 日志：抢锁或适配器启动首次失败 WARN，后续重试 DEBUG，恢复与每次角色变化 INFO。
+  - 健康检查：`components.leader.details` 显示 `role` / `instanceId` / `connected`，`connected` 仅在已连接且订阅被批准后为 true。
+- **e2e**（V0.2-R）：`ReliabilityE2EIT` 在 Testcontainers 临时环境中运行。EMQX 开启持久会话，并固定一个 20000～29999 的随机宿主机端口，以便 docker restart 后端口不变。测试本地以 jar 启动 1 个 server、2 个 transport，配置全部经环境变量传入，口令每次随机生成；设备由测试代码扮演（QoS1 直到收到 PUBACK，断线重连）。四个场景各发 500 条，断言计数恰好、无死信、无待确认。运行需 `E2E_DEV_HOST`：先 `mvn -B -DskipTests install`，再 `mvn -B verify -Pe2e -pl conduit-e2e`。
+- **模拟器多租户**（V0.2-R）：
+  - 发现：`SIM_PLATFORM_PASSWORD` 非空时，用平台管理员（`SIM_PLATFORM_USERNAME`）发现 `SIM_TENANTS` 中启用租户的物模型产品与启用设备（每产品最多 `SIM_MAX_DEVICES_PER_PRODUCT` 台），并重置其密钥；任一租户失败只记 WARN。退出租户失败时用平台管理员重新登录，再失败则发现停止并保留已发现的部分；单台设备重置密钥失败只跳过该设备。
+  - 生成：按解码器选上报格式，按物模型规则生成数据（spec 5.2），取值满足上下限与小数位；日曲线按系统时区（Docker 中 `TZ=Asia/Shanghai`）。产品含 eday/etotal/发电/光伏/pv/solar 测点或辐照度测点即为光伏模型，其 kW/W 功率测点（如交流功率）按日照曲线（夜间为 0）并累加成日发电量，用电类模型的功率按用电曲线；有多个功率测点时取最大的一个，不求和。- **多租户与用户**（V0.2-C）：所有业务表带 `tenant_id`，MyBatis-Plus 租户拦截器按令牌中的租户自动过滤；`tenant`、`app_user` 不过滤，按租户查用户必须显式带 `tenant_id`；跨租户查询（按 productKey 找产品、设备身份、平台统计 `PlatformStatsMapper`）必须显式标注 `@InterceptorIgnore` 并只在内部或平台接口使用，按租户检查数据用 `TenantContext.callAs`。角色 `PLATFORM_ADMIN`（不属于任何租户，`tenant_id` 为空，数据库约束保证）/ `TENANT_ADMIN` / `TENANT_VIEWER`；用户名 3～32 位字母开头（字母、数字、`_-.`）全平台唯一，密码 8～64 位含字母和数字（BCrypt），租户编码 `^[a-z][a-z0-9-]{1,31}$` 不可改；用户与租户状态 `ACTIVE`/`DISABLED`。启动时没有平台管理员则按 `CONDUIT_PLATFORM_ADMIN_USERNAME`（默认 `sysadmin`）/ `CONDUIT_PLATFORM_ADMIN_PASSWORD` 创建，密码为空只 WARN。默认租户 `default` 不能停用或删除；删除租户需无产品与设备，用户随之删除。租户用户保护：不能删除、禁用自己或改自己的角色，本租户最后一个启用的 `TENANT_ADMIN` 不能被降级、禁用或删除（租户行锁内检查）。停用租户时清除该租户设备的身份缓存 `conduit:auth:*`；设备身份带租户状态，MQTT 鉴权拒绝停用租户的设备，已连接设备的上报进死信 `TENANT_DISABLED`。
 - **权限与会话**（V0.2-C）：JWT（access 15 分钟、refresh 7 天 HttpOnly Cookie）声明 `sub` 用户 id、`tid`（平台管理员没有）、`role`（有效角色）、`typ`，代入时加 `imp`（平台管理员 id），需改密码时加 `mcp`。登录拒绝禁用用户与停用租户；续期重读数据库（禁用、停用、角色变化最长 15 分钟生效），代入令牌续期时目标租户停用或删除则退回平台管理员自己的令牌。`SecurityConfig` 按路径与方法统一判断：`/platform/**` 仅平台管理员（代入令牌的有效角色是 `TENANT_ADMIN`，被拒），`/users/**` 租户管理员，其余 `/api/v1/**` GET 为租户管理员与只读用户、写为租户管理员，`/auth/**`、`/me/**` 所有登录用户，`/actuator/**` 除 health 外仅平台管理员；前端只隐藏入口。需改密码时（新用户、首个管理员、被重置密码）除 `GET /auth/me`、`PUT /me/password`、登录/刷新/登出外一律 403 `code=PASSWORD_CHANGE_REQUIRED`，`PUT /me/password` 返回新令牌。进入租户 `POST /platform/tenants/{code}/enter`（停用租户 409）与退出 `POST /auth/exit-tenant` 各记 INFO，代入期间每个写请求由 `ImpersonationLogFilter` 记一行 INFO（不记请求体），代入期间不能改密码。
 - **物模型**（V0.2-A）：产品定义属性（DOUBLE/INT/BOOL/TEXT/ENUM），上报按属性逐测点校验；不合格测点被剔除并记录 `FIELD_REJECTED`；没有物模型的产品按 V0.1 规则（数值一律浮点）。物模型缓存 60 秒，编辑后提交事务再失效。
 - **解码器**：`PayloadDecoder` SPI，按产品选择（`standard-json`、`flat-json`），名称重复启动即失败。
@@ -44,7 +53,7 @@ conduit-ui（Vue）──REST──> conduit-server
 - **在线状态**：Redis hash `conduit:presence:{deviceKey}`（online / since / clientIp / source / lastSeen），由 Lua 脚本 `presence-apply.lua` 原子写入。两个来源：①EMQX 上下线事件（权威，时间为 EMQX 时钟，只接受 `eventTime >= since` 的事件，`since` 是唯一的乱序保护）；②设备上报数据（补偿设备在 transport 订阅之前就已连接、没有连接事件），在数据落库并 ACK 后由流水线每批按设备 pipeline 一次写入（尽力而为，失败只记 WARN）。数据时间是 transport 的接收时间 `receivedAt`，与 EMQX 时钟不同源，所以**数据永远不推进 `since`**：无记录 → 置在线；已在线 → 不改（只刷新 lastSeen）；已离线 → 仅当 `ts > since + 10 秒宽限期`（`PresenceStore.DATA_ONLINE_GRACE_MILLIS`）才复活。记录由数据产生（source=data）时 `since` 不可信，EMQX 事件总是生效。上线事件无 IP 时保留原 IP。
 - **设备列表筛选**：`GET /api/v1/devices` 在 productKey / keyword 之外支持 `online`（true|false）、`status`（ENABLED|DISABLED，不区分大小写）、`reported`（RECENT=最近 1 小时内有上报 | STALE=有上报但更久 | NEVER=从未上报）、`createdFrom`（毫秒，含）、`createdTo`（毫秒，不含），范围 0～253402300799999，非法值 400。status / 创建时间 / 产品 / 关键字在 SQL 过滤；`online` 与 `reported` 依赖 Redis，走「SQL 取全部匹配设备 → 批量读 Redis → 内存过滤 → 内存分页」，`total` 为过滤后数量，Redis 不可用返回 503「在线状态暂不可用」，开销 O(设备数)（见 backlog）。`reported` 依据设备时间戳（最新值 `__last`），`online` 依据 receivedAt / 事件时间，两者可能不一致。
 - **日志**：所有 Java 服务写文件日志，目录由环境变量 `CONDUIT_LOG_DIR` 指定（默认 `logs`，相对工作目录），每服务一个文件 `<服务名>.log`；按天 + 按大小滚动（单文件 50MB、保留 14 天、总量 1GB，归档 `<名>.%d{yyyy-MM-dd}.%i.log.gz`），控制台输出不变。server / transport 通过 `application.yml` 的 `logging.file.name` 与 `logging.logback.rollingpolicy.*` 配置；simulator 用 logback-classic + 自带 `logback.xml`（不再用 slf4j-simple）；测试 profile 写 `target/test-logs`，e2e 用 `logback-test.xml` 只输出控制台。Docker 中三个服务共用命名卷 `conduit-logs`（`/var/log/conduit`）。
-- **部署**：Compose 默认只起基础设施（PostgreSQL、Redis、InfluxDB、EMQX）；conduit-server / transport / web 属于 `app` profile，模拟器属于 `demo` profile，完整部署需 `--profile app --profile demo`，只通过 `deploy/build-local.sh` 按需进行。Docker 宿主机无外网，该脚本在本机从干净检出构建 jar 与前端，宿主机只打复制产物的薄镜像。EMQX 鉴权回调地址由 `deploy/.env` 的 `CONDUIT_AUTH_URL` 配置（默认容器内 `http://conduit-server:8080`，server 在 IDE 中运行时改为 `http://<dev-host>:8080`）。
+- **部署**：Compose 默认只起基础设施（PostgreSQL、Redis、InfluxDB、EMQX）；conduit-server / transport / web 属于 `app` profile，模拟器属于 `demo` profile，完整部署需 `--profile app --profile demo`，只通过 `deploy/build-local.sh` 按需进行。Docker 宿主机无外网，该脚本在本机从干净检出构建 jar 与前端，宿主机只打复制产物的薄镜像。EMQX 鉴权回调地址由 `deploy/.env` 的 `CONDUIT_AUTH_URL` 配置（默认容器内 `http://conduit-server:8080`，server 在 IDE 中运行时改为 `http://<dev-host>:8080`）。 完整部署起两个 transport 服务（`conduit-transport`、`conduit-transport-2`，同一镜像、YAML 锚点复用配置，后者日志在 `conduit-logs` 卷的 `transport-2` 子目录；不用 `deploy.replicas`，避免两个进程滚动同一个日志文件）。EMQX 磁盘持久会话写在 compose 环境变量中（`EMQX_DURABLE_SESSIONS__ENABLE=true`、`EMQX_CLUSTER__DISCOVERY_STRATEGY=singleton`、`EMQX_NODE__NAME=emqx@127.0.0.1`），不在 base.hocon；固定节点名的副作用：控制台里改过的密码会恢复为 `.env` 值，首次重建后 EMQX 数据目录为全新。
 
 ### 1.3 版本路线
 
@@ -71,7 +80,7 @@ conduit-ui（Vue）──REST──> conduit-server
 
 ## 3. 本地开发
 
-见 README「开发」：开发模式是 Docker 宿主机只跑基础设施（`docker compose -f deploy/docker-compose.yml up -d`），server、transport、simulator、UI 在 IDEA 中运行（运行配置 `Conduit (local all)`），`deploy/.env` 的 `CONDUIT_AUTH_URL` 指向开发机。本地 transport 必须 `session-expiry-seconds: 0`；本地模拟器默认使用「三相电表（演示）」。本地 server 需在 `application-local.yml` 配 `conduit.bootstrap.platform-admin-password`（或环境变量 `CONDUIT_PLATFORM_ADMIN_PASSWORD`）才会创建平台管理员 `sysadmin`。实施计划不再包含部署步骤，本地日志在仓库根目录 `logs/`（`CONDUIT_LOG_DIR`），排查问题先看这里。验收用测试和对本地运行的整套服务做 API 检查；只有所有者要求时才用 `deploy/build-local.sh` 部署完整应用栈。
+见 README「开发」：开发模式是 Docker 宿主机只跑基础设施（`docker compose -f deploy/docker-compose.yml up -d`），server、transport、simulator、UI 在 IDEA 中运行（运行配置 `Conduit (local all)`），`deploy/.env` 的 `CONDUIT_AUTH_URL` 指向开发机。本地 transport 直接成为主实例，不要在 `application-local.yml` 中覆盖 `client-id` 或 `session-expiry-seconds`；本地模拟器默认使用「三相电表（演示）」，配置 `SIM_PLATFORM_PASSWORD` 后同时模拟各演示租户的产品。本地 server 需在 `application-local.yml` 配 `conduit.bootstrap.platform-admin-password`（或环境变量 `CONDUIT_PLATFORM_ADMIN_PASSWORD`）才会创建平台管理员 `sysadmin`。实施计划不再包含部署步骤，本地日志在仓库根目录 `logs/`（`CONDUIT_LOG_DIR`），排查问题先看这里。验收用测试和对本地运行的整套服务做 API 检查；只有所有者要求时才用 `deploy/build-local.sh` 部署完整应用栈。
 
 ## 4. 决定记录
 
@@ -102,3 +111,4 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-16 V0.2-C：多租户与用户管理——角色 `PLATFORM_ADMIN`/`TENANT_ADMIN`/`TENANT_VIEWER`（Flyway V3：平台管理员 `tenant_id` 为空、旧 `ADMIN` 迁为 `TENANT_ADMIN`、删除租户级联删除用户）；JWT 可空 `tid`、代入 `imp`、需改密码 `mcp`；`SecurityConfig` 按路径与方法的权限矩阵；强制改密码 403 `PASSWORD_CHANGE_REQUIRED`；平台接口 `/api/v1/platform/**`（概况、租户、进入租户）与用户管理 `/api/v1/users`；代入写请求 INFO 留痕；停用租户拒绝登录、续期与 MQTT 鉴权并以 `TENANT_DISABLED` 死信；前端 `usePermission` 按角色隐藏写操作、菜单与路由按身份（`2026-10-16-conduit-v0.2c-tenants-users-design.md`）。
 - 2026-10-16：V0.2-R 并入「模拟器多产品」：按各产品物模型生成数据，演示租户的设备也有数据。
 - 2026-10-16 V0.2-R 方向调整：EMQX 5.8.6 磁盘持久会话与共享订阅互斥（实测），改为「磁盘持久会话 + transport 单活多备（Redis 锁选主、同 clientId 接管）」；多实例共享订阅放弃，升级 EMQX 留待 V1.0。
+- 2026-10-16 V0.2-R：EMQX 开启磁盘持久会话（compose 环境变量，singleton，固定节点名 `emqx@127.0.0.1`）+ transport 单活多备（Redis 锁 `conduit:transport:leader`，固定 clientId `conduit-transport`、普通订阅，协调器负责重连）；完整部署两个 transport 服务（日志分目录，不用 replicas）；e2e 改为 Testcontainers 临时环境 + 本地 jar 进程的四个故障场景（`E2E_DEV_HOST`）；模拟器经平台管理员模拟各租户的物模型产品（`2026-10-16-conduit-v0.2r-reliability-design.md`）。
