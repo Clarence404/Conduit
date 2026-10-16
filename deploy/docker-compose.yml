@@ -90,6 +90,11 @@ services:
       # 鉴权回调地址：完整 Docker 部署用默认值；server 在 IDE 中运行时改为 http://<dev-host>:8080
       CONDUIT_AUTH_URL: ${CONDUIT_AUTH_URL:-http://conduit-server:8080}
       EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:?EMQX_DASHBOARD_PASSWORD is required}
+      # 磁盘持久会话（V0.2-R）：transport 离线期间的消息写入磁盘，保留 1 天（durable_sessions.message_retention_period 默认值）；
+      # 5.8.6 要求单节点发现策略 singleton，否则启动失败。固定节点名：默认按容器 IP 命名，IP 变化会换数据目录、丢失持久会话
+      EMQX_DURABLE_SESSIONS__ENABLE: "true"
+      EMQX_CLUSTER__DISCOVERY_STRATEGY: singleton
+      EMQX_NODE__NAME: emqx@127.0.0.1
     volumes:
       - emqx-data:/opt/emqx/data
     ports:
@@ -160,17 +165,19 @@ services:
       retries: 30
     restart: unless-stopped
 
-  conduit-transport:
+  # transport 单活多备（V0.2-R）：两个实例经 Redis 锁 conduit:transport:leader 选主，只有主实例连接 EMQX；
+  # 两者共用 clientId conduit-transport（默认值），主实例故障后备实例最长 15 秒后接管同一个磁盘持久会话
+  conduit-transport: &transport
     profiles: ["app"]
+    image: conduit-conduit-transport:latest
     build:
       context: ..
       dockerfile: Dockerfile
       args:
         MODULE: conduit-transport
-    environment:
+    environment: &transport-env
       REDIS_HOST: redis
       EMQX_HOST: emqx
-      TRANSPORT_CLIENT_ID: conduit-transport-1
       TRANSPORT_MQTT_USERNAME: ${TRANSPORT_MQTT_USERNAME:-conduit-transport}
       TRANSPORT_MQTT_PASSWORD: ${TRANSPORT_MQTT_PASSWORD}
       CONDUIT_LOG_DIR: /var/log/conduit
@@ -184,6 +191,13 @@ services:
       conduit-server:
         condition: service_healthy
     restart: unless-stopped
+
+  # 第二个 transport（与上面相同的镜像与配置）：日志写到共享卷的子目录，避免两个进程滚动同一个日志文件
+  conduit-transport-2:
+    <<: *transport
+    environment:
+      <<: *transport-env
+      CONDUIT_LOG_DIR: /var/log/conduit/transport-2
 
   conduit-web:
     profiles: ["app"]

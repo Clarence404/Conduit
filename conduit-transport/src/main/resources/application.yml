@@ -8,17 +8,32 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      # 选主续期依赖 Redis 及时返回：命令超时短于续期间隔，Redis 卡住时按续期失败处理（立即断开 MQTT）
+      timeout: 2s
 
 conduit:
   transport:
     mqtt:
       host: ${EMQX_HOST:localhost}
       port: ${EMQX_PORT:1883}
-      client-id: ${TRANSPORT_CLIENT_ID:conduit-transport-1}
+      # 所有 transport 实例共用同一 clientId：EMQX 磁盘持久会话按 clientId 保存积压，新主实例接管同一会话
+      client-id: ${TRANSPORT_CLIENT_ID:conduit-transport}
+      # 与 EMQX 持久会话消息保留期（durable_sessions.message_retention_period，默认 1 天）一致
+      session-expiry-seconds: 86400
       username: ${TRANSPORT_MQTT_USERNAME:}
       password: ${TRANSPORT_MQTT_PASSWORD:}
+    # 单活多备选主（Redis 锁）：只有主实例连接 EMQX，主实例故障后备实例最长 ttl 后接管
+    leader:
+      key: conduit:transport:leader
+      ttl: 15s
+      renew-interval: 5s
+      acquire-interval: 2s
 
 management:
+  endpoint:
+    health:
+      # components.leader.details 显示 role / instanceId / connected
+      show-details: always
   endpoints:
     web:
       exposure:
