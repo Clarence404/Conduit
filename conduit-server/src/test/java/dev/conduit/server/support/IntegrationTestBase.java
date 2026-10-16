@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -37,6 +38,12 @@ public abstract class IntegrationTestBase {
 
     @Autowired
     protected SecretHasher secretHasher;
+
+    @Autowired
+    protected PasswordEncoder passwordEncoder;
+
+    /** 测试用户统一的初始密码（符合密码规则）。 */
+    protected static final String TEST_PASSWORD = "Test-pass-123";
 
     /** 测试用设备凭据：租户、产品 Key、设备 Key 与明文密钥。 */
     protected record TestDevice(long tenantId, String productKey, String deviceKey, String secret) {
@@ -89,6 +96,19 @@ public abstract class IntegrationTestBase {
         String code = unique(codePrefix);
         return jdbc.queryForObject("insert into tenant (code, name) values (?, ?) returning id",
                 Long.class, code, code);
+    }
+
+    /**
+     * 直接写库在指定租户下建用户，用户名随机、密码为 TEST_PASSWORD。
+     *
+     * @return 用户名
+     */
+    protected String createUser(long tenantId, String role, boolean mustChangePassword) {
+        String username = unique("u");
+        jdbc.update("insert into app_user (tenant_id, username, password_hash, role, must_change_password) "
+                        + "values (?, ?, ?, ?, ?)",
+                tenantId, username, passwordEncoder.encode(TEST_PASSWORD), role, mustChangePassword);
+        return username;
     }
 
     protected String loginAsAdmin() throws Exception {
