@@ -67,14 +67,36 @@ public final class TenantDiscovery {
                 log.warn("Discovery failed in tenant {} ({}), skipping it: {}", tenant.code(), tenant.name(),
                         e.getMessage());
             } finally {
-                try {
-                    platform.exitTenant();
-                } catch (RuntimeException e) {
-                    log.warn("Cannot exit tenant {}: {}", tenant.code(), e.getMessage());
+                if (!leaveTenant(platform, tenant)) {
+                    log.warn("Cannot restore the platform admin identity after tenant {}, "
+                            + "stopping discovery with {} products found", tenant.code(), result.size());
+                    return result;
                 }
             }
         }
         return result;
+    }
+
+    /**
+     * 退出租户；退出失败时客户端仍持有代入令牌，会让后续租户全部 403，所以改为用平台管理员账号重新登录换回自己的令牌。
+     *
+     * @return 客户端已恢复为平台管理员身份；退出与重新登录都失败时为 false（调用方应停止发现）
+     */
+    private static boolean leaveTenant(ConduitApiClient platform, TenantSummary tenant) {
+        try {
+            platform.exitTenant();
+            return true;
+        } catch (RuntimeException e) {
+            log.warn("Cannot exit tenant {}, logging in again as the platform admin: {}", tenant.code(),
+                    e.getMessage());
+        }
+        try {
+            platform.relogin();
+            return true;
+        } catch (RuntimeException e) {
+            log.warn("Platform admin re-login failed: {}", e.getMessage());
+            return false;
+        }
     }
 
     /** 在已进入的租户内发现产品；单个产品失败只记 WARN 并跳过。 */
@@ -105,7 +127,13 @@ public final class TenantDiscovery {
                 }
                 List<DeviceCredentials> devices = new ArrayList<>();
                 for (DeviceSummary device : platform.listEnabledDevices(product.productKey(), maxDevicesPerProduct)) {
-                    devices.add(platform.resetSecret(product.productKey(), device.deviceKey()));
+                    try {
+                        devices.add(platform.resetSecret(product.productKey(), device.deviceKey()));
+                    } catch (RuntimeException e) {
+                        // 已重置的设备旧密钥已失效，必须保留它们的新密钥；只跳过失败的这一台
+                        log.warn("Cannot reset the secret of device {} (product {}), skipping the device: {}",
+                                device.deviceKey(), product.productKey(), e.getMessage());
+                    }
                 }
                 if (devices.isEmpty()) {
                     log.debug("Product {} has no enabled device, skipped", product.productKey());

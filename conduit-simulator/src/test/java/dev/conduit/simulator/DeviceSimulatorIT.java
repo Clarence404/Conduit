@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
-/** DeviceSimulator 对真实 EMQX 的集成测试：上报数量与时间戳、可选的运行状态 st、连接失败重试后退出。 */
+/** DeviceSimulator 对真实 EMQX 的集成测试：上报数量与时间戳、可选的运行状态 st、每台设备各自的上报格式与读数、连接失败重试后退出。 */
 @Testcontainers
 class DeviceSimulatorIT {
 
@@ -108,6 +108,7 @@ class DeviceSimulatorIT {
         subscriber.disconnect();
     }
 
+    /** 两台设备分别用 flat-json 与 standard-json 格式及各自的读数来源上报，载荷格式互不影响。 */
     @Test
     void eachSimulatedDeviceUsesItsOwnFormatAndReadings() throws Exception {
         List<String> payloads = new CopyOnWriteArrayList<>();

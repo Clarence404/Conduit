@@ -57,7 +57,8 @@ public final class SimulatorApplication {
         // 演示产品的物模型含枚举 st，附带运行状态；e2e 等无物模型的产品不能发 st（见 DeviceSimulator 构造器说明）
         List<SimulatedDevice> devices = new ArrayList<>();
         demo.forEach(d -> devices.add(SimulatedDevice.demo(d, format, true)));
-        Set<String> demoProductKeys = demo.isEmpty() ? Set.of() : Set.of(demo.getFirst().productKey());
+        // 演示产品 Key 与设备数无关（deviceCount=0 时也要让发现跳过它）
+        Set<String> demoProductKeys = Set.of(api.findOrCreateProduct(config.productName(), format.codec()));
         devices.addAll(SimulationPlanner.tenantDevices(config, () -> new ConduitApiClient(config.apiUrl()),
                 demoProductKeys));
 

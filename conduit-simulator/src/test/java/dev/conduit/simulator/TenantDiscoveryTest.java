@@ -31,6 +31,10 @@ class TenantDiscoveryTest {
     final List<String> authorized = new CopyOnWriteArrayList<>();
     final List<String> bodies = new CopyOnWriteArrayList<>();
     volatile boolean westProductsFail;
+    volatile boolean exitFails;
+    volatile boolean secondLoginFails;
+    volatile String resetFailsFor = "";
+    final java.util.concurrent.atomic.AtomicInteger logins = new java.util.concurrent.atomic.AtomicInteger();
 
     @BeforeEach
     void start() throws IOException {
@@ -57,7 +61,12 @@ class TenantDiscoveryTest {
         int status = 200;
         String body;
         if (call.equals("POST /api/v1/auth/login")) {
-            body = "{\"accessToken\":\"tok-platform\"}";
+            if (logins.incrementAndGet() > 1 && secondLoginFails) {
+                status = 401;
+                body = "{}";
+            } else {
+                body = "{\"accessToken\":\"tok-platform\"}";
+            }
         } else if (call.equals("GET /api/v1/platform/tenants")) {
             body = """
                     {"items":[{"code":"east","name":"华东电力","status":"ACTIVE"},
@@ -68,7 +77,12 @@ class TenantDiscoveryTest {
             String code = path.split("/")[5];
             body = "{\"accessToken\":\"imp-" + code + "\"}";
         } else if (call.equals("POST /api/v1/auth/exit-tenant")) {
-            body = "{\"accessToken\":\"tok-platform\"}";
+            if (exitFails) {
+                status = 500;
+                body = "{}";
+            } else {
+                body = "{\"accessToken\":\"tok-platform\"}";
+            }
         } else if (call.equals("GET /api/v1/products") && "Bearer imp-east".equals(auth)) {
             body = """
                     {"items":[{"productKey":"pk-meter","name":"10kV 进线电表","codec":"flat-json","propertyCount":3},
@@ -110,6 +124,10 @@ class TenantDiscoveryTest {
                      "total":1,"page":1,"size":100}""";
         } else if (call.startsWith("POST /api/v1/devices/") && call.endsWith("/reset-secret")) {
             String deviceKey = path.split("/")[4];
+            if (deviceKey.equals(resetFailsFor)) {
+                status = 500;
+                body = "{}";
+            } else
             body = "{\"deviceKey\":\"" + deviceKey + "\",\"deviceSecret\":\"s-" + deviceKey + "\"}";
         } else {
             status = 404;
@@ -178,6 +196,45 @@ class TenantDiscoveryTest {
         assertThat(calls).contains("POST /api/v1/platform/tenants/west/enter")
                 .doesNotContain("POST /api/v1/platform/tenants/off/enter");
         assertThat(calls).filteredOn("POST /api/v1/auth/exit-tenant"::equals).hasSize(2);
+    }
+
+    /** 退出租户失败（500）时用平台管理员账号重新登录换回平台令牌，下一个租户仍能被处理。 */
+    @Test
+    void aFailedExitReloginsSoTheNextTenantIsStillProcessed() {
+        exitFails = true;
+
+        List<TenantDiscovery.DiscoveredProduct> products = TenantDiscovery.discover(platformClient(),
+                TenantFilter.ALL, 100, Set.of("pk-demo"));
+
+        assertThat(products).extracting(TenantDiscovery.DiscoveredProduct::productKey)
+                .containsExactly("pk-meter", "pk-pv");
+        assertThat(authorized).contains("POST /api/v1/platform/tenants/west/enter Bearer tok-platform");
+        assertThat(logins.get()).isEqualTo(3);
+    }
+
+    /** 退出失败且重新登录也失败时停止发现后续租户，保留已发现的产品。 */
+    @Test
+    void discoveryStopsButKeepsResultsWhenTheReloginFailsToo() {
+        exitFails = true;
+        secondLoginFails = true;
+
+        List<TenantDiscovery.DiscoveredProduct> products = TenantDiscovery.discover(platformClient(),
+                TenantFilter.ALL, 100, Set.of("pk-demo"));
+
+        assertThat(products).extracting(TenantDiscovery.DiscoveredProduct::productKey).containsExactly("pk-meter");
+        assertThat(calls).doesNotContain("POST /api/v1/platform/tenants/west/enter");
+    }
+
+    /** 某台设备重置密钥失败时只跳过该设备，已重置的设备保留。 */
+    @Test
+    void aFailedSecretResetOnlySkipsThatDevice() {
+        resetFailsFor = "d-3";
+
+        List<TenantDiscovery.DiscoveredProduct> products = TenantDiscovery.discover(platformClient(),
+                TenantFilter.parse("east"), 100, Set.of("pk-demo"));
+
+        assertThat(products).singleElement().satisfies(p ->
+                assertThat(p.devices()).extracting(DeviceCredentials::deviceKey).containsExactly("d-1", "d-4"));
     }
 
     @Test

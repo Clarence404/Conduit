@@ -33,7 +33,14 @@ public final class SimulationPlanner {
             log.info("SIM_PLATFORM_PASSWORD is empty: simulating only the demo product '{}'", config.productName());
             return List.of();
         }
-        ConduitApiClient platform = clients.get();
+        try (ConduitApiClient platform = clients.get()) {
+            return plan(config, platform, demoProductKeys);
+        }
+    }
+
+    /** 用平台管理员客户端发现并组装设备；登录失败返回空列表。 */
+    private static List<SimulatedDevice> plan(SimulatorConfig config, ConduitApiClient platform,
+                                              Set<String> demoProductKeys) {
         try {
             platform.login(config.platformUsername(), config.platformPassword());
         } catch (RuntimeException e) {

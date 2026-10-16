@@ -24,7 +24,7 @@ import java.util.Set;
  * Conduit REST 的最小客户端，只覆盖模拟器与端到端测试需要的接口。登录后的令牌保存在实例中；
  * 平台管理员进入租户后令牌换成代入令牌，退出后换回平台令牌，因此一个实例同一时刻只代表一个身份。
  */
-public class ConduitApiClient {
+public class ConduitApiClient implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(ConduitApiClient.class);
     private static final int PAGE_SIZE = 100;
@@ -33,6 +33,8 @@ public class ConduitApiClient {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final ObjectMapper mapper = new ObjectMapper();
     private String token;
+    private String username;
+    private String password;
 
     public ConduitApiClient(URI baseUrl) {
         this.baseUrl = baseUrl;
@@ -40,8 +42,24 @@ public class ConduitApiClient {
 
     /** 登录并保存 accessToken，之后的请求自动带 Bearer 头；状态码非 200 抛 IllegalStateException。 */
     public void login(String username, String password) {
+        this.username = username;
+        this.password = password;
         JsonNode body = send("POST", "/api/v1/auth/login", Map.of("username", username, "password", password), 200);
         token = body.get("accessToken").asText();
+    }
+
+    /** 用上次 login 保存的账号重新登录，换回该账号自己的令牌（如退出租户失败后丢弃代入令牌）；从未登录过抛 IllegalStateException。 */
+    public void relogin() {
+        if (username == null) {
+            throw new IllegalStateException("login has not been called");
+        }
+        login(username, password);
+    }
+
+    /** 释放底层 HTTP 客户端（JDK 21 的 HttpClient 持有连接与线程）。 */
+    @Override
+    public void close() {
+        http.close();
     }
 
     /** 同 {@link #findOrCreateProduct(String, String)}，新建时使用 standard-json 解码器。 */
