@@ -2,9 +2,9 @@
 
 个人研究性质的 IoT 平台。V0.1 跑通「设备 MQTT 直连 → 接入 → 总线 → 处理 → 时序存储 → Web 展示」主链路。
 
-功能：产品与设备管理、MQTT 接入与鉴权、物模型逐测点校验与可插拔解码（V0.2-A）、设备历史曲线（V0.2-B：设备详情「历史」标签页，按时间范围自动聚合，多测点联动缩放）、前端体验优化（首页总览、分组侧栏与面包屑、设备指标卡片与迷你趋势线、暗色模式与侧栏风格切换）。
+功能：产品与设备管理、MQTT 接入与鉴权、物模型逐测点校验与可插拔解码（V0.2-A）、设备历史曲线（V0.2-B：设备详情「历史」标签页，按时间范围自动聚合，多测点联动缩放）、前端体验优化（首页总览、分组侧栏与面包屑、设备指标卡片与迷你趋势线、暗色模式与侧栏风格切换）、多租户与用户管理（V0.2-C：平台管理员管理租户并可进入租户代为操作，租户管理员管理本租户的产品、设备与用户，只读用户只能查看）。
 
-设计文档：`docs/superpowers/specs/2026-10-14-conduit-v0.1-design.md`（版本路线与 V0.1）、`docs/superpowers/specs/2026-10-15-conduit-v0.2a-thing-model-design.md`（V0.2-A 物模型与编解码）、`docs/superpowers/specs/2026-10-15-conduit-v0.2b-history-design.md`（V0.2-B 历史查询与曲线）、`docs/superpowers/specs/2026-10-15-conduit-ui-refresh-design.md`（前端体验优化）
+设计文档：`docs/superpowers/specs/2026-10-14-conduit-v0.1-design.md`（版本路线与 V0.1）、`docs/superpowers/specs/2026-10-15-conduit-v0.2a-thing-model-design.md`（V0.2-A 物模型与编解码）、`docs/superpowers/specs/2026-10-15-conduit-v0.2b-history-design.md`（V0.2-B 历史查询与曲线）、`docs/superpowers/specs/2026-10-15-conduit-ui-refresh-design.md`（前端体验优化）、`docs/superpowers/specs/2026-10-16-conduit-v0.2c-tenants-users-design.md`（V0.2-C 多租户与用户管理）
 
 设备接入指南（流程、连接参数、上报格式、示例代码、排错）：[`docs/device-integration.md`](docs/device-integration.md)
 
@@ -64,8 +64,10 @@ conduit/
 │   ├── adapter/                     ProtocolAdapter 接口；新增协议就是新增一个实现
 │   └── mqtt/                        MQTT 适配器：共享订阅、写入总线成功后才确认、topic 解析
 ├── conduit-server/                  dev.conduit.server（端口 8080），按业务领域分包
-│   ├── auth/                        登录、JWT、Spring Security 配置
-│   ├── tenant/                      租户上下文与租户隔离
+│   ├── auth/                        登录、JWT、权限矩阵、强制改密码、个人接口、代入留痕
+│   ├── tenant/                      租户上下文与租户隔离、租户编码规则
+│   ├── user/                        租户用户管理（/api/v1/users）
+│   ├── platform/                    平台管理员接口：平台概况、租户管理、进入租户
 │   ├── product/  device/            产品、设备的增删改查和接口
 │   ├── mqttauth/                    EMQX 鉴权回调
 │   ├── pipeline/                    数据流水线：消费总线、按物模型逐测点校验、重试、死信
@@ -74,7 +76,7 @@ conduit/
 │   ├── telemetry/                   InfluxDB 写入与历史查询（原始 / 自动聚合）、最新值存储与查询
 │   ├── presence/                    设备上下线状态
 │   ├── overview/                    首页总览接口：按租户统计设备、在线与最近 1 小时死信
-│   ├── security/  bootstrap/        密钥生成与哈希；启动时创建默认租户和管理员
+│   ├── security/  bootstrap/        密钥生成与哈希；启动时创建默认租户、租户管理员与平台管理员
 │   └── config/  web/                框架配置；统一错误响应、分页
 ├── conduit-simulator/               dev.conduit.simulator：通过 REST 开通设备，再按周期上报
 ├── conduit-e2e/                     端到端测试（-Pe2e 时才参与构建）
@@ -116,7 +118,7 @@ deploy/build-local.sh
 
 这是按需的完整部署入口，会带上 `--profile app --profile demo`。脚本从当前提交的干净检出构建 jar 和前端（未提交的修改与 `application-local.yml` 等本地配置不会进入镜像），在宿主机上只打复制产物的薄镜像，再执行 `up -d --no-build`。需要本机有 JDK 21 上的 Maven 和 Node.js 22，宿主机上已有 compose 用到的基础镜像（`eclipse-temurin:21.0.6_7-jre`、`nginx:1.27.4-alpine` 以及 postgres、redis、influxdb、emqx）。`--no-up` 只构建不启动；docker / compose 命令可用环境变量 `DOCKER`、`COMPOSE` 覆盖。
 
-完整部署起来后，浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录。模拟器会自动创建「三相电表（演示）」产品和设备（设备名形如「1号楼配电室 电表01」，每栋楼 10 台；已有设备的旧名称会在启动时改成这种格式，Key 不变），并在产品缺少演示物模型（docs/examples/demo-meter.thing-model.json）中的任一属性时以合并方式导入（已有部署因此会自动补上 V0.2-B 新增的枚举属性「运行状态」st：每台设备每个整点可能切换一次，多数时间为「运行」）（默认 100 台，每 10 秒上报一次，见 `SIM_DEVICE_COUNT` / `SIM_INTERVAL_MS`；上报格式由 `SIM_PAYLOAD_FORMAT`（`standard` / `flat`）指定，新建产品时按此选用解码器，已有产品的解码器不会被修改）。模拟器首次连接 MQTT 失败时每 2 秒重试，最多 15 次。
+完整部署起来后，浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录（默认租户的租户管理员）；管理租户用 `CONDUIT_PLATFORM_ADMIN_USERNAME` / `CONDUIT_PLATFORM_ADMIN_PASSWORD` 登录（平台管理员，见「账号与角色」）。模拟器会自动创建「三相电表（演示）」产品和设备（设备名形如「1号楼配电室 电表01」，每栋楼 10 台；已有设备的旧名称会在启动时改成这种格式，Key 不变），并在产品缺少演示物模型（docs/examples/demo-meter.thing-model.json）中的任一属性时以合并方式导入（已有部署因此会自动补上 V0.2-B 新增的枚举属性「运行状态」st：每台设备每个整点可能切换一次，多数时间为「运行」）（默认 100 台，每 10 秒上报一次，见 `SIM_DEVICE_COUNT` / `SIM_INTERVAL_MS`；上报格式由 `SIM_PAYLOAD_FORMAT`（`standard` / `flat`）指定，新建产品时按此选用解码器，已有产品的解码器不会被修改）。模拟器首次连接 MQTT 失败时每 2 秒重试，最多 15 次。
 
 已有部署升级注意：演示产品的默认名称已从「Demo Meter」改为「三相电表（演示）」，升级前请先在界面上把旧产品改名为「三相电表（演示）」，否则模拟器会新建一个产品、旧产品及其设备会遗留下来；改名后模拟器会复用该产品，并把其下设备原地改成新名称。
 
@@ -145,6 +147,21 @@ deploy/build-local.sh
     --data-urlencode "db=telemetry" --data-urlencode "format=json" \
     --data-urlencode "q=SELECT time, device_key, \"Ua\" FROM property ORDER BY time DESC LIMIT 5"
   ```
+
+## 账号与角色
+
+| 角色 | 所属 | 能力 |
+|---|---|---|
+| 平台管理员 `PLATFORM_ADMIN` | 不属于任何租户 | 平台首页、租户管理（新建含首个管理员、改名、停用/启用、删除）、查看租户用户、重置租户管理员密码、进入租户 |
+| 租户管理员 `TENANT_ADMIN` | 一个租户 | 本租户产品、物模型、设备的全部读写，用户管理 |
+| 只读用户 `TENANT_VIEWER` | 一个租户 | 本租户只读 |
+
+- **初始账号**：启动时若没有默认租户 `default` 与 `CONDUIT_ADMIN_USERNAME`（默认 `admin`）就创建它们（`admin` 是默认租户的租户管理员）；若库中没有任何平台管理员，用 `CONDUIT_PLATFORM_ADMIN_USERNAME`（默认 `sysadmin`）与 `CONDUIT_PLATFORM_ADMIN_PASSWORD` 创建一个，密码为空则不创建（server 打一条 WARN，照常启动）。已有账号不会被改动。
+- **规则**：用户名 3～32 位，字母开头，只能含字母、数字、`_`、`-`、`.`，全平台唯一（登录不选租户）；密码 8～64 位，同时含字母和数字；租户编码 `^[a-z][a-z0-9-]{1,31}$`，创建后不可改。
+- **首次登录改密码**：新建的用户、新租户的首个管理员、被重置密码的用户登录后必须先修改密码，界面弹出不可关闭的对话框；此前其余接口返回 403 `PASSWORD_CHANGE_REQUIRED`。
+- **进入租户**：平台管理员在「租户」页点「进入」，确认后以租户管理员身份操作该租户，顶栏下方显示「正在以平台管理员身份操作租户：XX」与「退出」；代入期间每个写请求在 server 日志记一行 INFO（`Impersonated write by platform admin …`）。代入期间不能修改密码。
+- **停用租户**：其用户登录与续期被拒，其设备 MQTT 连接被拒，已连接设备的上报进入死信 `TENANT_DISABLED`；默认租户不能停用或删除；删除租户前须先删掉其产品与设备，用户随之删除。
+- **生效时间**：禁用用户、停用租户、修改角色在对方下次续期时生效，最长 15 分钟（access token 有效期）。
 
 ## 设备接入
 
@@ -216,6 +233,7 @@ cd conduit-ui && npm install && npm test && npm run dev
    conduit:
      bootstrap:
        admin-password: <CONDUIT_ADMIN_PASSWORD>
+       platform-admin-password: <CONDUIT_PLATFORM_ADMIN_PASSWORD>   # 不填则不创建平台管理员 sysadmin
      auth:
        jwt-secret: <CONDUIT_JWT_SECRET>
      internal:
