@@ -13,8 +13,8 @@ deploy/package.sh       # 生成 target/conduit-full-<短提交>.tar.gz
 把包复制到 Linux 宿主机后：
 
 ```bash
-tar -xzf conduit-full-<短提交>.tar.gz
-cd deploy/full
+mkdir -p conduit && tar -xzf conduit-full-<短提交>.tar.gz -C conduit
+cd conduit/deploy/full
 cp .env.example .env    # 替换全部 change-me-* 口令；BUILD_FROM 保持 prebuilt
 docker compose up -d --build
 ```
@@ -37,4 +37,7 @@ docker compose up -d --build
 - 构建上下文是包（或仓库）的根目录，`deploy/infra` 与 `deploy/full` 的相对位置不能改变。
 - EMQX 的鉴权回调固定为 `http://conduit-server:8080`。
 - 浏览器打开 `http://<docker-host>:8090`（`WEB_PORT`），用 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录；平台管理员用 `CONDUIT_PLATFORM_ADMIN_USERNAME` / `CONDUIT_PLATFORM_ADMIN_PASSWORD`。
+- 升级：先删除旧的 `deploy/full/artifacts/`，再把新包解压到同一目录（`.env` 不在包内，会保留），然后 `docker compose up -d --build`。
+- 更换 InfluxDB token：token 在首次启动时写入库中，之后要改需 `docker compose down`、`docker volume rm conduit_influx3-data`（会丢失时序数据）再启动。
+- 预编译前端里「连接信息」显示的 MQTT 端口在打包时确定（`VITE_MQTT_PORT`，默认 1883）；宿主机 `MQTT_PORT` 不是 1883 时，打包前设置 `VITE_MQTT_PORT`。
 - 日志在命名卷 `conduit_conduit-logs`（第二个 transport 在其 `transport-2` 子目录）。

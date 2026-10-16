@@ -54,5 +54,7 @@ cp -r "$SRC/conduit-ui/dist/." "$ART/ui/"
 
 mkdir -p "$OUT_DIR"
 # 经标准输出写包：Git Bash 的 GNU tar 会把 -f C:/... 中的盘符当成远程主机名
-(cd "$SRC" && tar -czf - deploy .dockerignore conduit-ui/nginx.conf) > "$OUT"
+# 先写临时文件再改名，打包失败时不留下看似完整的包；属主记为 0，避免 Linux 上解压出 Windows 的 uid
+(cd "$SRC" && tar --owner=0 --group=0 --numeric-owner -czf - deploy .dockerignore conduit-ui/nginx.conf) > "$OUT.tmp"
+mv "$OUT.tmp" "$OUT"
 echo "==> 已生成 $OUT"
