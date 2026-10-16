@@ -2,6 +2,7 @@ package dev.conduit.server.overview;
 
 import dev.conduit.common.bus.MessageBusProperties;
 import dev.conduit.server.auth.AuthPrincipal;
+import dev.conduit.server.auth.Roles;
 import dev.conduit.server.auth.JwtService;
 import dev.conduit.server.presence.PresenceStore;
 import dev.conduit.server.support.IntegrationTestBase;
@@ -103,7 +104,8 @@ class OverviewApiIT extends IntegrationTestBase {
 
     /** 为指定租户签发 access token（过滤器只校验令牌、不查用户，因此不必建测试用户）。 */
     private String tokenFor(long tenantId) {
-        return bearer(jwt.issue(new AuthPrincipal(0L, tenantId, "overview-it", "ADMIN"), JwtService.TokenType.ACCESS));
+        return bearer(jwt.issue(new AuthPrincipal(0L, tenantId, "overview-it", Roles.TENANT_ADMIN),
+                JwtService.TokenType.ACCESS));
     }
 
     /** 直接写库建产品，返回 id 与 productKey。 */

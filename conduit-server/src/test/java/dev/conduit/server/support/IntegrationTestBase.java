@@ -11,11 +11,14 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -37,6 +40,16 @@ public abstract class IntegrationTestBase {
 
     @Autowired
     protected SecretHasher secretHasher;
+
+    @Autowired
+    protected PasswordEncoder passwordEncoder;
+
+    /** 测试用户统一的初始密码（符合密码规则）。 */
+    protected static final String TEST_PASSWORD = "Test-pass-123";
+
+    /** 测试配置（application-test.yml）中的平台管理员。 */
+    protected static final String PLATFORM_ADMIN = "sysadmin";
+    protected static final String PLATFORM_ADMIN_PASSWORD = "sysadmin-pass-123";
 
     /** 测试用设备凭据：租户、产品 Key、设备 Key 与明文密钥。 */
     protected record TestDevice(long tenantId, String productKey, String deviceKey, String secret) {
@@ -91,6 +104,19 @@ public abstract class IntegrationTestBase {
                 Long.class, code, code);
     }
 
+    /**
+     * 直接写库在指定租户下建用户，用户名随机、密码为 TEST_PASSWORD。
+     *
+     * @return 用户名
+     */
+    protected String createUser(long tenantId, String role, boolean mustChangePassword) {
+        String username = unique("u");
+        jdbc.update("insert into app_user (tenant_id, username, password_hash, role, must_change_password) "
+                        + "values (?, ?, ?, ?, ?)",
+                tenantId, username, passwordEncoder.encode(TEST_PASSWORD), role, mustChangePassword);
+        return username;
+    }
+
     protected String loginAsAdmin() throws Exception {
         String body = mvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -98,6 +124,36 @@ public abstract class IntegrationTestBase {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         return JsonPath.read(body, "$.accessToken");
+    }
+
+    /** 用户名密码登录，返回完整结果（状态码、响应体与 refresh Cookie 由调用方断言）。 */
+    protected MvcResult loginResult(String username, String password) throws Exception {
+        return mvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"%s\",\"password\":\"%s\"}".formatted(username, password)))
+                .andReturn();
+    }
+
+    /** 登录并返回 access token；登录不成功时断言失败。 */
+    protected String login(String username, String password) throws Exception {
+        MvcResult result = loginResult(username, password);
+        assertThat(result.getResponse().getStatus()).as("login %s", username).isEqualTo(200);
+        return JsonPath.read(result.getResponse().getContentAsString(), "$.accessToken");
+    }
+
+    /** 以测试配置的平台管理员登录。 */
+    protected String loginAsPlatformAdmin() throws Exception {
+        return login(PLATFORM_ADMIN, PLATFORM_ADMIN_PASSWORD);
+    }
+
+    /** 按用户名查用户 id。 */
+    protected long userId(String username) {
+        return jdbc.queryForObject("select id from app_user where username = ?", Long.class, username);
+    }
+
+    /** 按租户 id 查租户编码。 */
+    protected String tenantCode(long tenantId) {
+        return jdbc.queryForObject("select code from tenant where id = ?", String.class, tenantId);
     }
 
     protected static String bearer(String token) {

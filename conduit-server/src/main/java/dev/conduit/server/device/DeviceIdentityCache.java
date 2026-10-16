@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.Collection;
 import java.util.Optional;
 
 /**
@@ -70,5 +71,16 @@ public class DeviceIdentityCache {
      */
     public void evict(String deviceKey) {
         redis.delete(key(deviceKey));
+    }
+
+    /**
+     * 批量删除缓存项（租户停用/启用时清除该租户全部设备的身份，使鉴权立即按新状态判断）；空集合不访问 Redis。
+     * Redis 异常（DataAccessException）原样抛出，由调用方决定是否忽略。
+     */
+    public void evictAll(Collection<String> deviceKeys) {
+        if (deviceKeys.isEmpty()) {
+            return;
+        }
+        redis.delete(deviceKeys.stream().map(DeviceIdentityCache::key).toList());
     }
 }

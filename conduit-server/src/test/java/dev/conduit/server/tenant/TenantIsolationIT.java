@@ -58,7 +58,7 @@ class TenantIsolationIT extends IntegrationTestBase {
 
         DeviceIdentity identity = devices.findIdentity(dk);
 
-        assertThat(identity).isEqualTo(new DeviceIdentity(dk, tenant, "ENABLED", "h", "s", pk));
+        assertThat(identity).isEqualTo(new DeviceIdentity(dk, tenant, "ENABLED", "h", "s", pk, "ACTIVE"));
         assertThat(identity.enabled()).isTrue();
         assertThat(devices.findIdentity("missing")).isNull();
     }

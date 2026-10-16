@@ -28,13 +28,16 @@ public interface DeviceMapper extends BaseMapper<Device> {
     }
 
     /**
-     * 跨租户按 deviceKey 查设备身份（联查产品取 productKey）。供 MQTT 鉴权与流水线使用，这两处没有租户上下文，禁止用于面向用户的接口。
-     * 设备不存在返回 null。
+     * 跨租户按 deviceKey 查设备身份（联查产品取 productKey、联查租户取租户状态）。供 MQTT 鉴权与流水线使用，
+     * 这两处没有租户上下文，禁止用于面向用户的接口。设备不存在返回 null。
      */
     @InterceptorIgnore(tenantLine = "true")
     @Select("""
-            select d.device_key, d.tenant_id, d.status, d.secret_hash, d.secret_salt, p.product_key
-            from device d join product p on p.id = d.product_id
+            select d.device_key, d.tenant_id, d.status, d.secret_hash, d.secret_salt, p.product_key,
+                   t.status as tenant_status
+            from device d
+            join product p on p.id = d.product_id
+            join tenant t on t.id = d.tenant_id
             where d.device_key = #{deviceKey}
             """)
     DeviceIdentity findIdentity(@Param("deviceKey") String deviceKey);
