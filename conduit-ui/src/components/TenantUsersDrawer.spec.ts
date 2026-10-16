@@ -70,4 +70,41 @@ describe('TenantUsersDrawer', () => {
     expect(platformApi.tenantUsers).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
+
+  it('clears the old list on a tenant switch and ignores a late response of the previous tenant', async () => {
+    const west = { ...tenant, code: 'west', name: '验收租户（华西）' }
+    const westUsers: TenantUserView[] = [{ ...users[1], username: 'west-viewer' }]
+    let resolveEast!: (v: TenantUserView[]) => void
+    vi.mocked(platformApi.tenantUsers).mockImplementation((code: string) =>
+      code === 'east' ? new Promise<TenantUserView[]>((r) => (resolveEast = r)) : Promise.resolve(westUsers),
+    )
+    const wrapper = mount(TenantUsersDrawer, {
+      props: { modelValue: true, tenant },
+      global: { plugins: [ElementPlus] },
+      attachTo: document.body,
+    })
+    await settle()
+
+    await wrapper.setProps({ tenant: west })
+    await settle()
+    resolveEast(users)
+    await settle()
+
+    const text = wrapper.find('.el-table').text()
+    expect(text).toContain('west-viewer')
+    expect(text).not.toContain('east-admin')
+    wrapper.unmount()
+  })
+
+  it('shows no users of the previous tenant while the next tenant is loading', async () => {
+    const wrapper = await mountDrawer()
+    expect(wrapper.find('.el-table').text()).toContain('east-admin')
+    vi.mocked(platformApi.tenantUsers).mockReturnValue(new Promise(() => {}))
+
+    await wrapper.setProps({ tenant: { ...tenant, code: 'west', name: '验收租户（华西）' } })
+    await settle()
+
+    expect(wrapper.find('.el-table').text()).not.toContain('east-admin')
+    wrapper.unmount()
+  })
 })

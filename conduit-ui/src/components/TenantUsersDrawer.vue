@@ -1,13 +1,14 @@
 <script setup lang="ts">
 /**
  * 租户用户抽屉（平台管理员）：列出某租户的全部用户（不分页，按角色、用户名排序），角色、状态与「待改密码」用标签显示；
- * 租户管理员行有「重置密码」，经 ResetPasswordDialog 设置新的初始密码（对方下次登录须修改）。打开或切换租户时重新加载。
+ * 租户管理员行有「重置密码」，经 ResetPasswordDialog 设置新的初始密码（对方下次登录须修改）。打开或切换租户时清空旧列表并重新加载，请求带序号，只采用最后一次的响应。
  */
 import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { platformApi } from '@/api/platform'
 import { problemMessage } from '@/api/errors'
 import type { TenantUserView, TenantView } from '@/api/types'
+import { createRequestSeq } from '@/utils/requestSeq'
 import { formatDateTime } from '@/utils/format'
 import { roleLabel, statusLabel } from '@/utils/permissions'
 import ResetPasswordDialog from './ResetPasswordDialog.vue'
@@ -15,32 +16,44 @@ import ResetPasswordDialog from './ResetPasswordDialog.vue'
 const visible = defineModel<boolean>({ required: true })
 const props = defineProps<{ tenant: TenantView | null }>()
 
+const seq = createRequestSeq()
 const users = ref<TenantUserView[]>([])
 const loading = ref(false)
 const failed = ref(false)
 const resetVisible = ref(false)
 const resetting = ref<TenantUserView | null>(null)
 
-/** 加载当前租户的用户；失败时清空并提示 */
+/**
+ * 加载当前租户的用户；失败时清空并提示。只有最后发出的请求能写入结果与加载状态，
+ * 切换租户后先发后到的旧响应会被丢弃。
+ */
 async function load() {
   if (!props.tenant) return
+  const id = seq.next()
   loading.value = true
   failed.value = false
   try {
-    users.value = await platformApi.tenantUsers(props.tenant.code)
+    const result = await platformApi.tenantUsers(props.tenant.code)
+    if (seq.isLatest(id)) users.value = result
   } catch (e) {
-    users.value = []
-    failed.value = true
-    ElMessage.error(problemMessage(e))
+    if (seq.isLatest(id)) {
+      users.value = []
+      failed.value = true
+      ElMessage.error(problemMessage(e))
+    }
   } finally {
-    loading.value = false
+    if (seq.isLatest(id)) loading.value = false
   }
 }
 
+// 打开或切换租户时：先清空上一个租户的用户（避免加载期间显示别的租户的数据），再重新加载
 watch(
   () => [visible.value, props.tenant?.code] as const,
   ([open]) => {
-    if (open) void load()
+    if (open) {
+      users.value = []
+      void load()
+    }
   },
   { immediate: true },
 )
