@@ -8,20 +8,12 @@ import dev.conduit.common.bus.MessageBus;
 import dev.conduit.common.bus.MessageBusProperties;
 import dev.conduit.common.bus.RedisStreamMessageBus;
 import dev.conduit.common.message.MessageType;
-import org.junit.jupiter.api.AfterAll;
+import dev.conduit.common.message.RawMessage;
+import dev.conduit.transport.support.TestBroker;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
-import org.testcontainers.utility.MountableFile;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -30,61 +22,36 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-@Testcontainers
+/**
+ * MqttProtocolAdapter 对真实 EMQX（磁盘持久会话）的集成测试：属性与上下线事件进入总线、无法路由的 topic 不阻塞、
+ * 停止期间发布的 2000 条在重新 start 后全部收到、同 clientId 的新连接踢掉旧连接且旧连接不自行重连。
+ */
 class MqttProtocolAdapterIT {
-
-    @Container
-    static final GenericContainer<?> REDIS =
-            new GenericContainer<>(DockerImageName.parse("redis:7.4.2")).withExposedPorts(6379);
-
-    @Container
-    static final GenericContainer<?> EMQX =
-            new GenericContainer<>(DockerImageName.parse("emqx/emqx:5.8.6"))
-                    .withExposedPorts(1883)
-                    .withCopyToContainer(MountableFile.forClasspathResource("emqx/acl.conf"),
-                            "/opt/emqx/etc/acl.conf")
-                    .withEnv("EMQX_SYS_TOPICS__SYS_EVENT_MESSAGES__CLIENT_CONNECTED", "true")
-                    .withEnv("EMQX_SYS_TOPICS__SYS_EVENT_MESSAGES__CLIENT_DISCONNECTED", "true")
-                    .waitingFor(Wait.forLogMessage(".*is running now.*", 1))
-                    .withStartupTimeout(Duration.ofMinutes(2));
 
     static final String GROUP = "it";
     static final long NOW = 1_760_400_000_000L;
 
-    static LettuceConnectionFactory connectionFactory;
-    static StringRedisTemplate redis;
-
+    final StringRedisTemplate redis = TestBroker.redis();
+    final String streamKey = "it:up:" + UUID.randomUUID();
+    final String clientId = "conduit-transport-it-" + UUID.randomUUID();
+    final String productKey = "pk" + UUID.randomUUID().toString().substring(0, 8);
+    final List<MqttProtocolAdapter> adapters = new ArrayList<>();
+    final List<Mqtt5BlockingClient> devices = new ArrayList<>();
     MessageBus bus;
     MqttProtocolAdapter adapter;
-    final List<Mqtt5BlockingClient> devices = new ArrayList<>();
-
-    @BeforeAll
-    static void connectRedis() {
-        connectionFactory = new LettuceConnectionFactory(
-                new RedisStandaloneConfiguration(REDIS.getHost(), REDIS.getMappedPort(6379)));
-        connectionFactory.afterPropertiesSet();
-        redis = new StringRedisTemplate(connectionFactory);
-    }
-
-    @AfterAll
-    static void closeRedis() {
-        connectionFactory.destroy();
-    }
 
     @BeforeEach
     void setUp() {
-        redis.getConnectionFactory().getConnection().serverCommands().flushAll();
-        bus = new RedisStreamMessageBus(redis, new MessageBusProperties("it:up", "it:dead", 1000, 1000));
+        bus = new RedisStreamMessageBus(redis, new MessageBusProperties(streamKey, "it:dead", 100_000, 1000));
         bus.ensureGroup(GROUP);
-
-        var props = new MqttTransportProperties(EMQX.getHost(), EMQX.getMappedPort(1883),
-                "conduit-transport-it-" + UUID.randomUUID(), null, null, "it-" + UUID.randomUUID(), 300, "conduit-");
-        adapter = new MqttProtocolAdapter(props, bus, Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+        adapter = newAdapter();
         adapter.start();
     }
 
@@ -95,23 +62,38 @@ class MqttProtocolAdapterIT {
                 d.disconnect();
             }
         });
-        adapter.stop();
+        adapters.forEach(MqttProtocolAdapter::stop);
+        redis.delete(streamKey);
     }
 
-    private Mqtt5BlockingClient device(String clientId) {
+    private MqttProtocolAdapter newAdapter() {
+        var props = new MqttTransportProperties(TestBroker.emqxHost(), TestBroker.emqxPort(), clientId,
+                null, null, 86400, "conduit-");
+        MqttProtocolAdapter a = new MqttProtocolAdapter(props, bus,
+                Clock.fixed(Instant.ofEpochMilli(NOW), ZoneOffset.UTC));
+        adapters.add(a);
+        return a;
+    }
+
+    private Mqtt5BlockingClient device(String deviceKey) {
         Mqtt5BlockingClient client = MqttClient.builder().useMqttVersion5()
-                .identifier(clientId)
-                .serverHost(EMQX.getHost()).serverPort(EMQX.getMappedPort(1883))
+                .identifier(deviceKey)
+                .serverHost(TestBroker.emqxHost()).serverPort(TestBroker.emqxPort())
                 .buildBlocking();
         client.connect();
         devices.add(client);
         return client;
     }
 
+    private void publish(Mqtt5BlockingClient device, String deviceKey, String suffix, byte[] payload) {
+        device.publishWith().topic("conduit/" + productKey + "/" + deviceKey + "/up/" + suffix)
+                .qos(MqttQos.AT_LEAST_ONCE).payload(payload).send();
+    }
+
     private List<Delivery> drain() {
         List<Delivery> all = new ArrayList<>();
         List<Delivery> batch;
-        while (!(batch = bus.read(GROUP, "test", 100, Duration.ofMillis(50))).isEmpty()) {
+        while (!(batch = bus.read(GROUP, "test", 500, Duration.ofMillis(50))).isEmpty()) {
             all.addAll(batch);
         }
         return all;
@@ -120,8 +102,7 @@ class MqttProtocolAdapterIT {
     @Test
     void forwardsPropertyMessageToBus() {
         byte[] payload = "{\"params\":{\"Ua\":220.1}}".getBytes(StandardCharsets.UTF_8);
-        device("dk-prop").publishWith().topic("conduit/pk1/dk-prop/up/property")
-                .qos(MqttQos.AT_LEAST_ONCE).payload(payload).send();
+        publish(device("dk-prop"), "dk-prop", "property", payload);
 
         List<Delivery> received = new ArrayList<>();
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
@@ -129,48 +110,45 @@ class MqttProtocolAdapterIT {
             assertThat(received).anySatisfy(d -> assertThat(d.message().type()).isEqualTo(MessageType.PROPERTY));
         });
 
-        var message = received.stream().map(Delivery::message)
+        RawMessage message = received.stream().map(Delivery::message)
                 .filter(m -> m.type() == MessageType.PROPERTY).findFirst().orElseThrow();
-        assertThat(message.productKey()).isEqualTo("pk1");
+        assertThat(message.productKey()).isEqualTo(productKey);
         assertThat(message.deviceKey()).isEqualTo("dk-prop");
         assertThat(message.payload()).containsExactly(payload);
         assertThat(message.receivedAt()).isEqualTo(NOW);
-        assertThat(message.attributes()).containsEntry("topic", "conduit/pk1/dk-prop/up/property");
+        assertThat(message.attributes()).containsEntry("topic", "conduit/" + productKey + "/dk-prop/up/property");
     }
 
     @Test
     void forwardsPresenceEventsButIgnoresOwnClient() {
-        // 适配器已启动并订阅完成后再连接，确保事件真实经过过滤逻辑
         Mqtt5BlockingClient own = device("conduit-internal-" + UUID.randomUUID());
         own.disconnect();
-        Mqtt5BlockingClient client = device("dk-presence");
+        String deviceKey = "dk-presence-" + UUID.randomUUID();
+        Mqtt5BlockingClient client = device(deviceKey);
         client.disconnect();
 
         List<Delivery> received = new ArrayList<>();
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
             received.addAll(drain());
             assertThat(received).anySatisfy(d -> {
-                assertThat(d.message().deviceKey()).isEqualTo("dk-presence");
+                assertThat(d.message().deviceKey()).isEqualTo(deviceKey);
                 assertThat(d.message().type()).isEqualTo(MessageType.PRESENCE_DISCONNECTED);
             });
         });
 
         assertThat(received).anySatisfy(d -> {
-            assertThat(d.message().deviceKey()).isEqualTo("dk-presence");
+            assertThat(d.message().deviceKey()).isEqualTo(deviceKey);
             assertThat(d.message().type()).isEqualTo(MessageType.PRESENCE_CONNECTED);
         });
-        // 自有客户端的事件先于 dk-presence 产生，此时必已处理完毕
-        assertThat(received).noneSatisfy(d ->
-                assertThat(d.message().deviceKey()).startsWith("conduit-"));
+        // 自有客户端的事件先于本设备产生，此时必已处理完毕
+        assertThat(received).noneSatisfy(d -> assertThat(d.message().deviceKey()).startsWith("conduit-"));
     }
 
     @Test
     void dropsUnroutableTopicWithoutBlocking() {
         Mqtt5BlockingClient client = device("dk-bad");
-        client.publishWith().topic("conduit/pk1/dk-bad/up/unknown").qos(MqttQos.AT_LEAST_ONCE)
-                .payload(new byte[]{1}).send();
-        client.publishWith().topic("conduit/pk1/dk-bad/up/property").qos(MqttQos.AT_LEAST_ONCE)
-                .payload(new byte[]{2}).send();
+        publish(client, "dk-bad", "unknown", new byte[]{1});
+        publish(client, "dk-bad", "property", new byte[]{2});
 
         List<Delivery> received = new ArrayList<>();
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
@@ -179,5 +157,40 @@ class MqttProtocolAdapterIT {
         });
         assertThat(received).noneSatisfy(d ->
                 assertThat(d.message().attributes().get("topic")).endsWith("/up/unknown"));
+    }
+
+    @Test
+    void receivesEveryMessagePublishedWhileStopped() {
+        adapter.stop();
+        Mqtt5BlockingClient client = device("dk-offline");
+        for (int i = 1; i <= 2000; i++) {
+            publish(client, "dk-offline", "property", ("{\"seq\":" + i + "}").getBytes(StandardCharsets.UTF_8));
+        }
+
+        adapter.start();
+
+        Set<String> payloads = ConcurrentHashMap.newKeySet();
+        await().atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
+            drain().stream().map(Delivery::message)
+                    .filter(m -> m.type() == MessageType.PROPERTY && productKey.equals(m.productKey()))
+                    .forEach(m -> payloads.add(new String(m.payload(), StandardCharsets.UTF_8)));
+            assertThat(payloads).hasSize(2000);
+        });
+    }
+
+    @Test
+    void aSecondConnectionWithTheSameClientIdKicksTheFirstWhichStaysDown() throws Exception {
+        MqttProtocolAdapter second = newAdapter();
+
+        second.start();
+
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            assertThat(adapter.isConnected()).isFalse();
+            assertThat(adapter.needsRestart()).isTrue();
+        });
+        assertThat(second.isConnected()).isTrue();
+        Thread.sleep(2000);
+        assertThat(adapter.isConnected()).as("the kicked connection does not reconnect by itself").isFalse();
+        assertThat(second.isConnected()).isTrue();
     }
 }
