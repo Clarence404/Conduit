@@ -262,6 +262,20 @@ class MqttProtocolAdapterTest {
     }
 
     @Test
+    void stopOnAConnectedSessionDisconnectsExactlyOnce() throws Exception {
+        FakeConnectAdapter fake = new FakeConnectAdapter(bus);
+        Thread starter = Thread.startVirtualThread(fake::start);
+        org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(2)).until(() -> fake.connectCount() == 1);
+        fake.connects.get(0).complete(mock(Mqtt5ConnAck.class));
+        starter.join(2000);
+        Mqtt5AsyncClient client = fake.clients.get(0);
+
+        fake.stop();
+
+        verify(client, times(1)).disconnect();
+    }
+
+    @Test
     void startingTwiceClosesTheFirstSession() throws Exception {
         FakeConnectAdapter fake = new FakeConnectAdapter(bus);
         Thread first = Thread.startVirtualThread(() -> {

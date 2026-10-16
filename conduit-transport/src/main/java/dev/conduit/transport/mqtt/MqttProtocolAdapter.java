@@ -228,11 +228,16 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
     private void dropLateConnection(Session s) {
         CompletableFuture<Mqtt5ConnAck> f = s.connectFuture;
         Mqtt5AsyncClient c = s.client;
-        if (f != null && c != null) {
+        // 已完成的 future 说明连接结果已定：成功的由 close 的有界断开处理，失败的无需处理，这里只管仍在等待的
+        if (f != null && c != null && !f.isDone()) {
             f.whenComplete((ack, err) -> {
                 if (err == null) {
                     try {
-                        c.disconnect();
+                        c.disconnect().whenComplete((r, e) -> {
+                            if (e != null) {
+                                log.debug("Dropping late MQTT connection failed: {}", describe(e));
+                            }
+                        });
                     } catch (RuntimeException e) {
                         log.debug("Dropping late MQTT connection failed: {}", describe(e));
                     }
