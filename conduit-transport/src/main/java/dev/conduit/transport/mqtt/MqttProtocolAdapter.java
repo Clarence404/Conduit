@@ -8,8 +8,10 @@ import com.hivemq.client.mqtt.lifecycle.MqttDisconnectSource;
 import com.hivemq.client.mqtt.mqtt5.Mqtt5AsyncClient;
 import com.hivemq.client.mqtt.mqtt5.Mqtt5ClientBuilder;
 import com.hivemq.client.mqtt.mqtt5.exceptions.Mqtt5DisconnectException;
+import com.hivemq.client.mqtt.mqtt5.message.connect.connack.Mqtt5ConnAck;
 import com.hivemq.client.mqtt.mqtt5.message.disconnect.Mqtt5DisconnectReasonCode;
 import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5Publish;
+import com.hivemq.client.mqtt.mqtt5.message.subscribe.Mqtt5RetainHandling;
 import com.hivemq.client.mqtt.mqtt5.message.subscribe.suback.Mqtt5SubAck;
 import com.hivemq.client.mqtt.mqtt5.message.subscribe.suback.Mqtt5SubAckReasonCode;
 import dev.conduit.common.bus.MessageBus;
@@ -67,6 +69,10 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
         volatile Mqtt5AsyncClient client;
         volatile boolean stopping;
         volatile boolean needsRestart;
+        /** 连接请求的 future：HiveMQ 不会因超时或断开而取消它，关闭时需挂回调丢弃迟到的 CONNACK。 */
+        volatile CompletableFuture<Mqtt5ConnAck> connectFuture;
+        /** 会话关闭时完成，用来唤醒正在等待连接或订阅的 start。 */
+        final CompletableFuture<Void> stopSignal = new CompletableFuture<>();
 
         boolean connected() {
             Mqtt5AsyncClient c = client;
@@ -98,8 +104,7 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
      */
     @Override
     public void start() {
-        stop();
-        Session s = openSession();
+        Session s = register();
         Mqtt5ClientBuilder builder = MqttClient.builder().useMqttVersion5()
                 .identifier(props.clientId())
                 .serverHost(props.host())
@@ -110,17 +115,24 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
                     ? new byte[0] : props.password().getBytes(StandardCharsets.UTF_8);
             builder = builder.simpleAuth().username(props.username()).password(password).applySimpleAuth();
         }
-        Mqtt5AsyncClient client = builder.buildAsync();
+        Mqtt5AsyncClient client = buildClient(builder);
         s.client = client;
         // ALL 而非 SUBSCRIBED：新客户端对象不知道持久会话里已有的订阅，恢复会话后补发的消息也必须走写总线再 ACK 的路径
         client.publishes(MqttGlobalPublishFilter.ALL, p -> onPublish(s, p), s.deliveryExecutor, true);
 
         try {
-            client.connectWith()
-                    .cleanStart(false)
-                    .sessionExpiryInterval(props.sessionExpirySeconds())
-                    .send().get(CONNECT_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-            requireGranted(subscribe(client).get(SUBSCRIBE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS));
+            if (s.stopping) {
+                throw new IllegalStateException("MQTT adapter was stopped before connecting");
+            }
+            CompletableFuture<Mqtt5ConnAck> connectFuture = connect(client);
+            s.connectFuture = connectFuture;
+            // 与 stop 的竞态：stop 可能在登记 connectFuture 之前已执行 close，这里补挂丢弃回调
+            if (s.stopping) {
+                dropLateConnection(s);
+                throw new IllegalStateException("MQTT adapter was stopped while connecting");
+            }
+            await(s, connectFuture, CONNECT_TIMEOUT);
+            requireGranted(await(s, subscribe(client), SUBSCRIBE_TIMEOUT));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             abandon(s);
@@ -169,9 +181,64 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
 
     /** 新建并登记当前会话（测试接缝：单元测试不连接 broker，直接用会话驱动 onPublish / onDisconnected）。 */
     Session openSession() {
+        return register();
+    }
+
+    /** 原子地登记新会话并关闭被替换的旧会话：并发的 stop 因此一定能关到新会话，两个并发 start 也不会泄漏会话。 */
+    private Session register() {
         Session s = new Session();
-        current.set(s);
+        Session prev = current.getAndSet(s);
+        if (prev != null) {
+            close(prev);
+        }
         return s;
+    }
+
+    /** 创建 MQTT 客户端（测试接缝：单元测试可返回模拟客户端而不连接 broker）。 */
+    Mqtt5AsyncClient buildClient(Mqtt5ClientBuilder builder) {
+        return builder.buildAsync();
+    }
+
+    /** 发起连接（MQTT 5，cleanStart=false，会话保留 sessionExpirySeconds；测试接缝）。 */
+    CompletableFuture<Mqtt5ConnAck> connect(Mqtt5AsyncClient client) {
+        return client.connectWith()
+                .cleanStart(false)
+                .sessionExpiryInterval(props.sessionExpirySeconds())
+                .send();
+    }
+
+    /**
+     * 等待 future 完成，但会话被 stop 时立即醒来。
+     *
+     * @throws IllegalStateException 等待期间会话已被停止
+     */
+    private <T> T await(Session s, CompletableFuture<T> future, Duration timeout)
+            throws InterruptedException, ExecutionException, TimeoutException {
+        CompletableFuture.anyOf(future, s.stopSignal).get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        if (s.stopping) {
+            throw new IllegalStateException("MQTT adapter was stopped while connecting to " + endpoint());
+        }
+        return future.get();
+    }
+
+    /**
+     * 给连接 future 挂回调：CONNACK 迟到（超时或停止之后才成功）时立即断开，
+     * 否则这个僵尸连接会以共用的 clientId 顶掉主实例的会话。此时 stopping 已置位，onDisconnected 会忽略它。
+     */
+    private void dropLateConnection(Session s) {
+        CompletableFuture<Mqtt5ConnAck> f = s.connectFuture;
+        Mqtt5AsyncClient c = s.client;
+        if (f != null && c != null) {
+            f.whenComplete((ack, err) -> {
+                if (err == null) {
+                    try {
+                        c.disconnect();
+                    } catch (RuntimeException e) {
+                        log.debug("Dropping late MQTT connection failed: {}", describe(e));
+                    }
+                }
+            });
+        }
     }
 
     /** start 失败时作废会话：若仍是当前会话则清除登记，再关闭。 */
@@ -183,6 +250,8 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
     /** 关闭会话，可重复调用：断开失败只记 DEBUG（broker 已不可达时属正常）。 */
     private void close(Session s) {
         s.stopping = true;
+        s.stopSignal.complete(null);
+        dropLateConnection(s);
         Mqtt5AsyncClient c = s.client;
         if (c != null) {
             try {
@@ -194,6 +263,13 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
             }
         }
         s.deliveryExecutor.shutdownNow();
+        try {
+            if (!s.deliveryExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
+                log.warn("MQTT delivery thread did not terminate within 2 s after stop");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     /**
@@ -234,10 +310,14 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
         }
     }
 
-    /** 订阅设备上行 topic（普通订阅，磁盘持久会话不支持共享订阅）及 EMQX 的上下线系统 topic，均为 QoS 1。 */
-    private CompletableFuture<Mqtt5SubAck> subscribe(Mqtt5AsyncClient client) {
+    /**
+     * 订阅设备上行 topic（普通订阅，磁盘持久会话不支持共享订阅）及 EMQX 的上下线系统 topic，均为 QoS 1。
+     * 设备 topic 不接收保留消息（DO_NOT_SEND）：否则每次重启都会以新的 receivedAt 重放，让离线设备复活。
+     */
+    CompletableFuture<Mqtt5SubAck> subscribe(Mqtt5AsyncClient client) {
         return client.subscribeWith()
-                .addSubscription().topicFilter(DEVICE_TOPIC_FILTER).qos(MqttQos.AT_LEAST_ONCE).applySubscription()
+                .addSubscription().topicFilter(DEVICE_TOPIC_FILTER).qos(MqttQos.AT_LEAST_ONCE)
+                .retainHandling(Mqtt5RetainHandling.DO_NOT_SEND).applySubscription()
                 .addSubscription().topicFilter(CONNECTED_TOPIC_FILTER).qos(MqttQos.AT_LEAST_ONCE).applySubscription()
                 .addSubscription().topicFilter(DISCONNECTED_TOPIC_FILTER).qos(MqttQos.AT_LEAST_ONCE)
                 .applySubscription()

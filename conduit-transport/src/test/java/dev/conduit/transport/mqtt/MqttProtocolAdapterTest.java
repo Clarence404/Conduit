@@ -3,7 +3,10 @@ package dev.conduit.transport.mqtt;
 import com.hivemq.client.mqtt.datatypes.MqttTopic;
 import com.hivemq.client.mqtt.lifecycle.MqttClientDisconnectedContext;
 import com.hivemq.client.mqtt.lifecycle.MqttDisconnectSource;
+import com.hivemq.client.mqtt.mqtt5.Mqtt5AsyncClient;
+import com.hivemq.client.mqtt.mqtt5.Mqtt5ClientBuilder;
 import com.hivemq.client.mqtt.mqtt5.exceptions.Mqtt5DisconnectException;
+import com.hivemq.client.mqtt.mqtt5.message.connect.connack.Mqtt5ConnAck;
 import com.hivemq.client.mqtt.mqtt5.message.disconnect.Mqtt5Disconnect;
 import com.hivemq.client.mqtt.mqtt5.message.disconnect.Mqtt5DisconnectReasonCode;
 import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5Publish;
@@ -21,7 +24,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -31,6 +37,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -170,6 +177,116 @@ class MqttProtocolAdapterTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("NOT_AUTHORIZED");
         MqttProtocolAdapter.requireGranted(granted);
+    }
+
+    /** 用模拟客户端替换真实连接的适配器：connect 返回由测试控制的 future，subscribe 立即成功。 */
+    private static class FakeConnectAdapter extends MqttProtocolAdapter {
+        final List<Mqtt5AsyncClient> clients = new ArrayList<>();
+        final List<CompletableFuture<Mqtt5ConnAck>> connects = new ArrayList<>();
+
+        FakeConnectAdapter(MessageBus bus) {
+            super(new MqttTransportProperties("localhost", 1883, "conduit-transport-ut", null, null, 86400,
+                    "conduit-"), bus, Clock.systemUTC(), Duration.ofMillis(1));
+        }
+
+        @Override
+        synchronized Mqtt5AsyncClient buildClient(Mqtt5ClientBuilder builder) {
+            Mqtt5AsyncClient client = mock(Mqtt5AsyncClient.class);
+            when(client.disconnect()).thenReturn(CompletableFuture.completedFuture(null));
+            clients.add(client);
+            return client;
+        }
+
+        @Override
+        synchronized CompletableFuture<Mqtt5ConnAck> connect(Mqtt5AsyncClient client) {
+            CompletableFuture<Mqtt5ConnAck> f = new CompletableFuture<>();
+            connects.add(f);
+            return f;
+        }
+
+        @Override
+        CompletableFuture<Mqtt5SubAck> subscribe(Mqtt5AsyncClient client) {
+            Mqtt5SubAck ack = mock(Mqtt5SubAck.class);
+            when(ack.getReasonCodes()).thenReturn(List.of(Mqtt5SubAckReasonCode.GRANTED_QOS_1));
+            return CompletableFuture.completedFuture(ack);
+        }
+
+        synchronized int connectCount() {
+            return connects.size();
+        }
+    }
+
+    @Test
+    void stopDuringAnInProgressStartMakesTheStartFailAndLeavesNothingConnected() throws Exception {
+        FakeConnectAdapter fake = new FakeConnectAdapter(bus);
+        CompletableFuture<Throwable> result = new CompletableFuture<>();
+        Thread.startVirtualThread(() -> {
+            try {
+                fake.start();
+                result.complete(null);
+            } catch (Throwable e) {
+                result.complete(e);
+            }
+        });
+        org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(2)).until(() -> fake.connectCount() == 1);
+
+        fake.stop();
+
+        assertThat(result.get(2, TimeUnit.SECONDS)).isInstanceOf(IllegalStateException.class);
+        assertThat(fake.isConnected()).isFalse();
+        assertThat(fake.needsRestart()).isFalse();
+    }
+
+    @Test
+    void aConnackArrivingAfterStopIsDisconnectedImmediately() throws Exception {
+        FakeConnectAdapter fake = new FakeConnectAdapter(bus);
+        CompletableFuture<Throwable> result = new CompletableFuture<>();
+        Thread.startVirtualThread(() -> {
+            try {
+                fake.start();
+                result.complete(null);
+            } catch (Throwable e) {
+                result.complete(e);
+            }
+        });
+        org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(2)).until(() -> fake.connectCount() == 1);
+        fake.stop();
+        result.get(2, TimeUnit.SECONDS);
+        Mqtt5AsyncClient client = fake.clients.get(0);
+        org.mockito.Mockito.clearInvocations(client);
+        when(client.disconnect()).thenReturn(CompletableFuture.completedFuture(null));
+
+        fake.connects.get(0).complete(mock(Mqtt5ConnAck.class));
+
+        verify(client, timeout(1000).atLeastOnce()).disconnect();
+    }
+
+    @Test
+    void startingTwiceClosesTheFirstSession() throws Exception {
+        FakeConnectAdapter fake = new FakeConnectAdapter(bus);
+        Thread first = Thread.startVirtualThread(() -> {
+            try {
+                fake.start();
+            } catch (IllegalStateException expected) {
+                // 第一次 start 被第二次 start 作废
+            }
+        });
+        org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(2)).until(() -> fake.connectCount() == 1);
+
+        Thread second = Thread.startVirtualThread(() -> {
+            try {
+                fake.start();
+            } catch (IllegalStateException expected) {
+                // 测试结束时 stop 会使其失败
+            }
+        });
+        org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(2)).until(() -> fake.connectCount() == 2);
+
+        first.join(2000);
+        assertThat(first.isAlive()).as("the first start was abandoned").isFalse();
+        verify(fake.clients.get(0), timeout(1000).atLeastOnce()).disconnect();
+        fake.stop();
+        second.join(2000);
     }
 
     @Test
