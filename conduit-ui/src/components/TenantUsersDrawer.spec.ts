@@ -43,6 +43,13 @@ describe('TenantUsersDrawer', () => {
     vi.mocked(platformApi.resetAdminPassword).mockResolvedValue(undefined)
   })
 
+  it('renders as a dialog (el-drawer of Element Plus 2.11.1 opens with zero width)', async () => {
+    const wrapper = await mountDrawer()
+    expect(wrapper.findComponent({ name: 'ElDialog' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'ElDrawer' }).exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('lists the tenant users with role and status tags', async () => {
     const wrapper = await mountDrawer()
 

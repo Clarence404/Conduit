@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 租户用户抽屉（平台管理员）：列出某租户的全部用户（不分页，按角色、用户名排序），角色、状态与「待改密码」用标签显示；
+ * 租户用户对话框（平台管理员；文件名沿用 Drawer，原为侧滑抽屉，因 Element Plus 2.11.1 的 el-drawer 打开时宽度被算成 0 而改用 el-dialog）：列出某租户的全部用户（不分页，按角色、用户名排序），角色、状态与「待改密码」用标签显示；
  * 租户管理员行有「重置密码」，经 ResetPasswordDialog 设置新的初始密码（对方下次登录须修改）。打开或切换租户时清空旧列表并重新加载，请求带序号，只采用最后一次的响应。
  */
 import { ref, watch } from 'vue'
@@ -73,7 +73,7 @@ async function savePassword(password: string) {
 </script>
 
 <template>
-  <el-drawer v-model="visible" :title="tenant ? `用户 · ${tenant.name}` : '用户'" size="min(680px, 100vw)">
+  <el-dialog v-model="visible" :title="tenant ? `用户 · ${tenant.name}` : '用户'" width="min(720px, 94vw)">
     <el-table v-loading="loading" :data="users">
       <el-table-column label="用户名" min-width="160">
         <template #default="{ row }">
@@ -107,7 +107,7 @@ async function savePassword(password: string) {
       </template>
     </el-table>
     <ResetPasswordDialog v-model="resetVisible" :username="resetting?.username ?? ''" :save="savePassword" />
-  </el-drawer>
+  </el-dialog>
 </template>
 
 <style scoped>
