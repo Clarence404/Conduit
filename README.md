@@ -43,7 +43,8 @@ flowchart TB
 - EMQX 开启磁盘持久会话（`durable_sessions`，单节点 `singleton`）。transport 以固定 clientId `conduit-transport`、`cleanStart=false`、会话保留 86400 秒普通订阅 `conduit/+/+/up/#`（订阅选项 `retainHandling=DO_NOT_SEND`，重连时不重放保留消息）；transport 离线期间的消息写入 EMQX 磁盘，保留 1 天，重连后补发，不受内存队列 1000 条的上限。EMQX 5.8.6 的磁盘持久会话不支持共享订阅，所以多个 transport 不再分摊消息，而是单活多备。
 - 选主：Redis 键 `conduit:transport:leader`（值为实例 id），用一段 Lua 脚本抢锁：键不存在则 `SET PX` 写入；键里已是本实例 id 则刷新过期时间并视为抢到（所以 Redis 短暂抖动后原主实例立即拿回锁）；其他情况拒绝。主实例每 5 秒续期，锁 15 秒过期，备实例每 2 秒尝试抢锁，只有主实例连接 EMQX。续期失败（Redis 不可用、锁已被他人持有、超时）立即断开 MQTT 转为备用；正常停止时释放锁，备实例立即接管；主实例崩溃时备实例最长 15 秒后接管同一个会话。配置项 `conduit.transport.leader.ttl` / `renew-interval` / `acquire-interval`。抢锁或适配器启动首次失败记 WARN，之后的重试记 DEBUG，恢复与每次角色变化记 INFO。
 - 健康检查：transport（端口 8081）的 `GET /actuator/health` 在 `components.leader.details` 中显示 `role`（`LEADER` / `STANDBY`）、`instanceId` 与 `connected`；`connected` 仅在已连接且订阅已被 EMQX 批准后才为 true。
-- 完整部署起两个 transport（一主一备），都配置 `stop_grace_period: 20s` 以便正常停止时释放锁；开发时 IDE 中一个 transport，直接成为主实例。
+- 独立部署包起两个 transport（一主一备），都配置 `stop_grace_period: 20s` 以便正常停止时释放锁；开发时 IDE 中一个 transport，直接成为主实例。
+- 已知问题：正常停止（发送 DISCONNECT）交接时存在少量丢消息的已知问题（EMQX 5.8.6），见 backlog「V0.2-R 遗留」，待单独处理。
 
 ## 代码结构
 
@@ -63,7 +64,6 @@ flowchart LR
 ```
 conduit/
 ├── pom.xml                          Maven 父工程（JDK 21，Spring Boot 3.5），聚合下列 conduit-* Java 模块
-├── Dockerfile                       构建 Java 应用镜像（构建参数 MODULE 指定模块）
 ├── conduit-common/                  dev.conduit.common
 │   ├── message/                     RawMessage：协议无关的统一消息，及其与 Stream 字段的编解码
 │   └── bus/                         MessageBus 接口和 Redis Streams 实现（投递、消费组、认领、死信）
@@ -88,47 +88,79 @@ conduit/
 │   └── config/  web/                框架配置；统一错误响应、分页
 ├── conduit-simulator/               dev.conduit.simulator：演示产品 + 各租户的物模型产品，按周期上报
 ├── conduit-e2e/                     端到端测试（-Pe2e 时才参与构建）：临时环境中的四个故障场景
-├── conduit-ui/                      Vue 3 + TypeScript + Element Plus（独立 npm 工程，自带 Dockerfile）
+├── conduit-ui/                      Vue 3 + TypeScript + Element Plus（独立 npm 工程）
 │   └── src/  api/  stores/  router/  layouts/  views/  components/  composables/  utils/  styles/
-├── deploy/                          docker-compose.yml、.env.example、EMQX 鉴权与 ACL 配置
+├── deploy/
+│   ├── dev/                         开发环境包（deploy/dev）：compose、.env.example、EMQX 鉴权与 ACL 配置
+│   ├── standalone/                  独立部署包：extends 基础服务 + 应用服务，Dockerfile（预编译产物 / 源码两种来源）
+│   └── package.sh                   开发机打独立部署包 target/conduit-standalone-<短提交>.tar.gz
+├── .dockerignore                    独立部署包镜像的构建上下文（仓库根目录）排除规则
 ├── docs/                            设备接入指南、待办清单、设计文档与实现计划
 └── .run/                            IntelliJ IDEA 共享运行配置
 ```
 
-## 部署：基础设施与完整演示
+## 部署：开发环境包与独立部署包
 
-Docker Compose 默认只启动基础设施（PostgreSQL、Redis、InfluxDB、EMQX）；conduit-server、两个 transport（`conduit-transport`、`conduit-transport-2`，一主一备）、conduit-web 属于 `app` profile，演示模拟器属于 `demo` profile，需要时才整套部署。日常开发时应用在 IDE 中运行，见下方「开发」。
+`deploy/` 下有两个可以直接放到 Linux 上用 Docker Compose（v2）启动的目录。两者项目名都是 `conduit`，数据卷相同（`conduit_pg-data` 等），同一台宿主机上二选一，切换时数据沿用。从一个包切换到另一个包时，先在旧包目录执行 `docker compose down`（不加 `-v`），并在新包的 `.env` 中沿用相同的共用口令与密钥（`POSTGRES_PASSWORD`、`INFLUX_TOKEN`、`INFLUX_EXPLORER_SESSION_KEY`、`CONDUIT_INTERNAL_TOKEN`、`EMQX_DASHBOARD_PASSWORD`）。
 
-需要 Docker（本机或远程均可；远程时先设置 `DOCKER_HOST=tcp://<docker-host>:2375`；该端口是无认证的 Docker API，仅限可信局域网使用）。
+
+| 目录 | 内容 | 用途 |
+|---|---|---|
+| `deploy/dev` | PostgreSQL、Redis、InfluxDB 3、InfluxDB 3 Explorer、EMQX | 日常开发：应用在 IDE 中运行，见下方「开发」 |
+| `deploy/standalone` | 基础服务（`extends` 引用 `deploy/dev`）+ conduit-server、两个 transport（`conduit-transport`、`conduit-transport-2`，一主一备）、conduit-web、演示模拟器 | 完整演示部署 |
 
 > **安全提示**
 >
 > - `.env` 中所有 `change-me-*` 值必须在宿主机可被他人访问之前替换掉，例如用 `openssl rand -hex 32` 生成。
-> - 端口默认只绑定 `127.0.0.1`。Docker 宿主机是远程机器、或需被其他机器访问时，在 `.env` 中设置 `BIND_ADDR=0.0.0.0`，并确保网络可信。
+> - 端口按 `.env` 的 `BIND_ADDR` 绑定：开发环境包默认 `0.0.0.0`（开发机要连接这些端口），独立部署包默认 `127.0.0.1`。对外开放时确保网络可信。
 > - API 端口同时暴露 `/internal/mqtt/auth`（EMQX 鉴权回调，受内部 token 保护）和健康检查端点。
 > - `EMQX_DASHBOARD_PASSWORD` 仅在首次启动（`emqx-data` 卷为空）时生效；之后修改请在控制台中操作，或 `down -v` 清卷重来。
 
-```bash
-cp deploy/.env.example deploy/.env   # 按需修改口令与端口
-# 只启动基础设施（日常开发用）
-docker compose -f deploy/docker-compose.yml up -d
-# 完整演示：基础设施 + server / transport / web + 模拟器（demo 依赖 app，两个 profile 要同时给）
-docker compose -f deploy/docker-compose.yml --profile app --profile demo up -d --build
-```
+### 开发环境包
 
-EMQX 的鉴权回调地址由 `deploy/.env` 中的 `CONDUIT_AUTH_URL` 决定：完整 Docker 部署保持默认 `http://conduit-server:8080`；server 在 IDE 中运行时改为 `http://<dev-host>:8080`（`<dev-host>` 为开发机地址），修改后需重建 emqx 容器（`up -d --force-recreate emqx`）。
-
-EMQX 开启了磁盘持久会话：compose 环境变量 `EMQX_DURABLE_SESSIONS__ENABLE=true`、`EMQX_CLUSTER__DISCOVERY_STRATEGY=singleton`，并固定节点名 `EMQX_NODE__NAME=emqx@127.0.0.1`（见「transport 单活多备与磁盘持久会话」）。已有部署升级注意：EMQX 以前按容器 IP 命名节点，改为固定节点名后，旧节点名下的运行时数据不再使用，例如在控制台里改过的密码会恢复为 `.env` 中的 `EMQX_DASHBOARD_PASSWORD`，首次重建后 EMQX 也以全新的数据目录启动；升级后执行一次 `up -d --force-recreate emqx` 生效。
-
-Docker 宿主机无法访问外网时（镜像内的 `mvn` / `npm ci` 下载不了依赖），改用本机构建：
+把 `deploy/dev` 复制或 clone 到 Linux 宿主机，在该目录中：
 
 ```bash
-deploy/build-local.sh
+cp .env.example .env    # 替换口令，CONDUIT_AUTH_URL 改为 http://<dev-host>:8080
+docker compose up -d
 ```
 
-这是按需的完整部署入口，会带上 `--profile app --profile demo`。脚本从当前提交的干净检出构建 jar 和前端（未提交的修改与 `application-local.yml` 等本地配置不会进入镜像），在宿主机上只打复制产物的薄镜像，再执行 `up -d --no-build`。需要本机有 JDK 21 上的 Maven 和 Node.js 22，宿主机上已有 compose 用到的基础镜像（`eclipse-temurin:21.0.6_7-jre`、`nginx:1.27.4-alpine` 以及 postgres、redis、influxdb、emqx）。`--no-up` 只构建不启动；docker / compose 命令可用环境变量 `DOCKER`、`COMPOSE` 覆盖。
+`CONDUIT_AUTH_URL` 必填，是 EMQX 鉴权回调的地址，即开发机上 IDE 中运行的 conduit-server（`<dev-host>` 为宿主机访问开发机的地址）；修改后执行 `docker compose up -d --force-recreate emqx`。EMQX 使用官方镜像 `emqx/emqx:5.8.6`，`emqx/base.hocon.tpl` 与 `emqx/acl.conf` 以只读方式挂载，启动时渲染回调地址与内部 token；EMQX 不依赖 conduit-server，server 未就绪时自行重试。详见 `deploy/dev/README.md`。
 
-完整部署起来后，浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录（默认租户的租户管理员）；管理租户用 `CONDUIT_PLATFORM_ADMIN_USERNAME` / `CONDUIT_PLATFORM_ADMIN_PASSWORD` 登录（平台管理员，见「账号与角色」）。模拟器会自动创建「三相电表（演示）」产品和设备（设备名形如「1号楼配电室 电表01」，每栋楼 10 台；已有设备的旧名称会在启动时改成这种格式，Key 不变），并在产品缺少演示物模型（docs/examples/demo-meter.thing-model.json）中的任一属性时以合并方式导入（已有部署因此会自动补上 V0.2-B 新增的枚举属性「运行状态」st：每台设备每个整点可能切换一次，多数时间为「运行」）（默认 100 台，每 10 秒上报一次，见 `SIM_DEVICE_COUNT` / `SIM_INTERVAL_MS`；上报格式由 `SIM_PAYLOAD_FORMAT`（`standard` / `flat`）指定，新建产品时按此选用解码器，已有产品的解码器不会被修改）。模拟器首次连接 MQTT 失败时每 2 秒重试，最多 15 次。
+从旧的开发基础设施迁移（旧的 `deploy/docker-compose.yml`，可能是在开发机上用 `DOCKER_HOST` 加 `docker compose -f deploy/docker-compose.yml` 启动的，也可能是 1Panel 从宿主机上的 `/opt/conduit` 启动的）：
+
+1. 不依赖任何文件，按项目名停止旧项目：`docker compose -p conduit down`（绝不加 `-v`）。
+2. 旧 `.env` 在开发机的 `deploy/.env` 或宿主机的 `/opt/conduit/.env`。复制为 `deploy/dev/.env`，下列值必须原样保留：`POSTGRES_PASSWORD`、`INFLUX_TOKEN`、`INFLUX_EXPLORER_SESSION_KEY`、`CONDUIT_INTERNAL_TOKEN`、`EMQX_DASHBOARD_PASSWORD`，以及各端口与 `CONDUIT_AUTH_URL`。PostgreSQL 与 InfluxDB 只在数据卷首次启动时应用口令与 token，所以换成新值会导致已有数据无法访问。
+3. 1Panel 用户：先删除旧编排（不要删除数据卷），再导入 `deploy/dev` 目录。
+4. 在 `deploy/dev` 执行 `docker compose up -d`，然后用 `docker volume ls` 检查没有出现新的 `conduit_*` 数据卷（有则说明项目名或卷名不对，立即 `down` 排查）。
+
+项目名与数据卷不变，数据沿用。旧的自定义镜像 `conduit-emqx` 不再使用。
+
+EMQX 开启了磁盘持久会话：compose 环境变量 `EMQX_DURABLE_SESSIONS__ENABLE=true`、`EMQX_CLUSTER__DISCOVERY_STRATEGY=singleton`，并固定节点名 `EMQX_NODE__NAME=emqx@127.0.0.1`（见「transport 单活多备与磁盘持久会话」）。已有部署升级注意：EMQX 以前按容器 IP 命名节点，改为固定节点名后，旧节点名下的运行时数据不再使用，例如在控制台里改过的密码会恢复为 `.env` 中的 `EMQX_DASHBOARD_PASSWORD`，首次重建后 EMQX 也以全新的数据目录启动。
+
+> **EMQX 配置是 bind mount**：`emqx/base.hocon.tpl` 与 `emqx/acl.conf` 以挂载方式读取，所以 `deploy/dev`（或 `deploy/standalone`）目录必须放在运行 Docker 的那台 Linux 机器上。不再支持在另一台机器上通过远程 `DOCKER_HOST` 执行 compose。
+
+**修改 InfluxDB token**：`INFLUX_TOKEN` 在 InfluxDB 首次启动时写入库中，之后改 `.env` 不生效。要更换时先停止整套服务，执行 `docker volume rm conduit_influx3-data`（会丢失全部时序数据），再重新 `docker compose up -d`。
+
+### 独立部署包
+
+应用镜像的产物有两种来源，由 `deploy/standalone/.env` 的 `BUILD_FROM` 选择：
+
+- `prebuilt`（默认，宿主机无外网时用）：在开发机上执行 `deploy/package.sh`（需 JDK 21 上的 Maven 与 Node.js 22）。脚本从当前提交的干净检出编译 jar 与前端（未提交的修改与 `application-local.yml` 等本地配置不会进入包），生成 `target/conduit-standalone-<短提交>.tar.gz`，内含 `deploy/`（含产物、不含 `.env`）、根 `.dockerignore` 与 `conduit-ui/nginx.conf`。复制到宿主机后：
+
+  ```bash
+  mkdir -p conduit && tar -xzf conduit-standalone-<短提交>.tar.gz -C conduit
+  cd conduit/deploy/standalone
+  cp .env.example .env    # 替换口令
+  docker compose up -d --build
+  ```
+
+  宿主机上需已有 `eclipse-temurin:21.0.6_7-jre`、`nginx:1.27.4-alpine` 与基础服务的镜像。前端「连接信息」显示的 MQTT 端口在打包时固定（`VITE_MQTT_PORT`，默认 1883）。
+- `source`（宿主机能联网时用）：clone 仓库，`cd deploy/standalone`，`cp .env.example .env` 并设 `BUILD_FROM=source`，再 `docker compose up -d --build`；镜像内用 `maven:3.9.9-eclipse-temurin-21` 与 `node:22.14.0-alpine` 编译。
+
+两个 Dockerfile（`deploy/standalone/docker/java.Dockerfile`、`web.Dockerfile`）的构建上下文都是仓库（或包）根目录，用全局 `ARG BUILD_FROM` 与 `FROM ${BUILD_FROM} AS app` 选择 `prebuilt` 或 `source` 阶段，BuildKit 只构建选中的阶段。EMQX 的鉴权回调在独立部署包中固定为 `http://conduit-server:8080`。模拟器默认启动。详见 `deploy/standalone/README.md`。
+
+独立部署包启动后，浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录（默认租户的租户管理员）；管理租户用 `CONDUIT_PLATFORM_ADMIN_USERNAME` / `CONDUIT_PLATFORM_ADMIN_PASSWORD` 登录（平台管理员，见「账号与角色」）。模拟器会自动创建「三相电表（演示）」产品和设备（设备名形如「1号楼配电室 电表01」，每栋楼 10 台；已有设备的旧名称会在启动时改成这种格式，Key 不变），并在产品缺少演示物模型（docs/examples/demo-meter.thing-model.json）中的任一属性时以合并方式导入（已有部署因此会自动补上 V0.2-B 新增的枚举属性「运行状态」st：每台设备每个整点可能切换一次，多数时间为「运行」）（默认 100 台，每 10 秒上报一次，见 `SIM_DEVICE_COUNT` / `SIM_INTERVAL_MS`；上报格式由 `SIM_PAYLOAD_FORMAT`（`standard` / `flat`）指定，新建产品时按此选用解码器，已有产品的解码器不会被修改）。模拟器首次连接 MQTT 失败时每 2 秒重试，最多 15 次。
 
 已有部署升级注意：演示产品的默认名称已从「Demo Meter」改为「三相电表（演示）」，升级前请先在界面上把旧产品改名为「三相电表（演示）」，否则模拟器会新建一个产品、旧产品及其设备会遗留下来；改名后模拟器会复用该产品，并把其下设备原地改成新名称。
 
@@ -157,12 +189,12 @@ deploy/build-local.sh
 
 > **注意**：模拟器会重置所模拟设备的密钥，真实设备随之连不上，只应对演示租户使用；用 `SIM_TENANTS` 限定范围。「华东电力运维」「华南水务」「西北新能源」是本地手工通过平台管理界面或 API 创建的演示租户，并非代码创建；`SIM_TENANTS` 填的是租户编码，不是名称。
 
-宿主机端口可在 `deploy/.env` 中配置，括号内为默认值：
+宿主机端口在 `.env` 中配置（开发环境包 `deploy/dev/.env`，独立部署包 `deploy/standalone/.env`），括号内为默认值：
 
 | 变量 | 服务 |
 |---|---|
-| `WEB_PORT`（8090） | Web（app profile） |
-| `API_PORT`（8091） | REST API（app profile） |
+| `WEB_PORT`（8090） | Web（独立部署包） |
+| `API_PORT`（8091） | REST API（独立部署包） |
 | `MQTT_PORT`（1883） | MQTT |
 | `EMQX_DASHBOARD_PORT`（18083） | EMQX 控制台 |
 | `INFLUX_EXPLORER_PORT`（8888） | InfluxDB 3 Explorer（时序数据图形界面，已预置连接与 `telemetry` 库；admin 模式、无登录，仅在可信网络暴露） |
@@ -223,15 +255,15 @@ cd conduit-ui && npm install && npm test && npm run dev
 
 默认工作流：Docker 宿主机只跑 PostgreSQL、Redis、InfluxDB、EMQX；server、transport、simulator 和前端都在 IntelliJ 里本地运行。
 
-1. 在 Docker 宿主机（或用 `DOCKER_HOST` 指向它）启动基础设施：
+1. 在 Docker 宿主机上启动开发环境包（见上文「开发环境包」）：把 `deploy/dev` 放到宿主机，在该目录中 `cp .env.example .env` 并修改，然后
 
    ```bash
-   docker compose -f deploy/docker-compose.yml up -d
+   docker compose up -d
    ```
 
-2. 在 `deploy/.env` 中设置 `CONDUIT_AUTH_URL=http://<dev-host>:8080`，让 EMQX 的鉴权回调打到开发机上本地运行的 server，然后让 emqx 容器重新读取配置（`docker compose -f deploy/docker-compose.yml up -d --force-recreate emqx`）。同时确认 `BIND_ADDR`、`POSTGRES_PORT`（默认 15432）、`REDIS_PORT`（默认 16379）已按需设置，使这些端口对开发机开放。
+2. `deploy/dev/.env` 中的 `CONDUIT_AUTH_URL=http://<dev-host>:8080` 让 EMQX 的鉴权回调打到开发机上本地运行的 server；修改后执行 `docker compose up -d --force-recreate emqx`。同时确认 `BIND_ADDR`（默认 `0.0.0.0`）、`POSTGRES_PORT`（默认 15432）、`REDIS_PORT`（默认 16379）使这些端口对开发机开放。
 3. 在 IDEA 中运行 `Conduit (local all)`（一次启动 Server、Transport、Simulator、UI）。首次需要先完成下面的 IDE 配置。
-4. 完整的 Docker 演示部署只在需要时进行，用 `deploy/build-local.sh`（见上文「部署」）。
+4. 完整的 Docker 演示部署只在需要时进行，用独立部署包（见上文「独立部署包」）。
 
 提示：
 
@@ -313,16 +345,11 @@ cd conduit-ui && npm install && npm test && npm run dev
 
 4. 单独调试时先启动 `Conduit Server (local)`，再按需启动 Transport、Simulator、UI。前端默认把 `/api` 代理到本机 8080。
 
-如果同时还部署了完整的 Docker 应用栈（`app` profile），容器里的 server 会和 IDE 中的 server 加入同一个消费组分担消息；transport 则与 IDE 中的实例竞争同一把选主锁，只有一个实例连接 EMQX。数据不会重复也不会丢，但 EMQX 的鉴权回调只指向 `CONDUIT_AUTH_URL` 一处。一般不建议两套同时运行。
+如果同时还部署了独立部署包，容器里的 server 会和 IDE 中的 server 加入同一个消费组分担消息；transport 则与 IDE 中的实例竞争同一把选主锁，只有一个实例连接 EMQX。数据不会重复也不会丢，但 EMQX 的鉴权回调只指向 `CONDUIT_AUTH_URL` 一处。一般不建议两套同时运行。
 
 ## 在宿主机面板（1Panel 等）中管理编排
 
-在本机通过 `DOCKER_HOST` 远程执行 `docker compose` 时，容器标签记录的是本机的编排文件路径，宿主机上的面板因此找不到编排文件。需要由面板管理时：
-
-1. 执行 `deploy/sync-to-host.sh`，把 `docker-compose.yml`、`.env`、`emqx/` 同步到宿主机的 `/opt/conduit`（可用 `CONDUIT_HOST_DIR` 修改）。
-2. 在面板中以该目录的 `docker-compose.yml` 创建/导入编排，项目名为 `conduit`；面板会在宿主机上重建基础服务，此后标签指向宿主机路径。
-
-仓库里的 `deploy/` 仍是唯一来源：修改编排后重新执行同步脚本。之后若又从本机执行 `docker compose` 或 `deploy/build-local.sh`，标签会变回本机路径，需要再在面板中重建一次。
+两个包都直接放在 Linux 宿主机的目录中运行，面板以该目录下的 `docker-compose.yml` 创建或导入编排即可（项目名 `conduit`）。独立部署包引用 `../dev/docker-compose.yml`，导入时保持 `deploy/dev` 与 `deploy/standalone` 的相对位置。
 
 ## 日志
 
@@ -330,7 +357,7 @@ cd conduit-ui && npm install && npm test && npm run dev
 
 - 位置：环境变量 `CONDUIT_LOG_DIR` 指定目录，默认 `logs`（相对进程工作目录）。IDEA 运行配置的工作目录是仓库根目录，所以本地日志在 `<仓库>/logs/`（已加入 `.gitignore`）；每个服务一个文件：`conduit-server.log`、`conduit-transport.log`、`conduit-simulator.log`。
 - 滚动：按天并按大小（单文件 50MB）滚动，保留 14 天，总量上限 1GB；归档文件名形如 `conduit-server.2026-10-15.0.log.gz`。
-- Docker：三个服务设置 `CONDUIT_LOG_DIR=/var/log/conduit` 并共用命名卷 `conduit-logs`，可用 `docker run --rm -v conduit_conduit-logs:/logs alpine ls /logs` 查看，或挂载到其他容器读取。
+- Docker（独立部署包）：server、两个 transport 与模拟器设置 `CONDUIT_LOG_DIR=/var/log/conduit`（第二个 transport 为其 `transport-2` 子目录）并共用命名卷 `conduit-logs`，可用 `docker run --rm -v conduit_conduit-logs:/logs alpine ls /logs` 查看，或挂载到其他容器读取。
 - 不在此列：前端开发服务器（Vite）的日志只在 IDE 控制台；`conduit-web` 的 nginx 日志走 `docker logs`。
 - 集成测试的日志写到 `conduit-server/target/test-logs/`，不污染工作目录。
 - 日志级别：默认 INFO。本地开发时调高：

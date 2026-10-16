@@ -27,7 +27,7 @@ conduit-ui（Vue）──REST──> conduit-server
 | `conduit-simulator` | 演示用设备模拟器：自动创建演示产品/设备、导入演示物模型、按间隔上报；演示设备附带枚举运行状态 st，首次连接 MQTT 失败每 2 秒重试、最多 15 次；配置平台管理员密码后模拟各租户的物模型产品 |
 | `conduit-ui` | 前端：Vue 3 + TypeScript + Element Plus + ECharts；统一框架（分组可折叠侧栏、面包屑顶栏、PageHeader）、首页总览、暗色模式、按角色的菜单与写操作、平台首页与租户/用户管理 |
 | `conduit-e2e` | 端到端测试（`-Pe2e`）：Testcontainers 临时环境 + 本地 jar 进程，杀 server / 主 transport / 全部 transport、重启 EMQX 四个场景不丢数据 |
-| `deploy/` | Docker Compose（项目名 `conduit`）、`build-local.sh` |
+| `deploy/` | 开发环境包 `dev/`（开发用）、独立部署包 `standalone/`（extends 基础服务 + 应用，预编译产物或源码构建）、`package.sh`（打独立部署包）；项目名均为 `conduit` |
 
 ### 1.2 关键设计决定
 
@@ -39,6 +39,7 @@ conduit-ui（Vue）──REST──> conduit-server
   - 重连：适配器不用 HiveMQ 自动重连。断线或会话被接管时，由选主协调器先续期确认仍持锁，再重新连接；SUBACK 含错误码视为失败。
   - 日志：抢锁或适配器启动首次失败 WARN，后续重试 DEBUG，恢复与每次角色变化 INFO。
   - 健康检查：`components.leader.details` 显示 `role` / `instanceId` / `connected`，`connected` 仅在已连接且订阅被批准后为 true。
+  - 已知问题：正常停止（发送 DISCONNECT）交接时存在少量丢消息的已知问题（EMQX 5.8.6），见 backlog「V0.2-R 遗留」，待单独处理。
 - **e2e**（V0.2-R）：`ReliabilityE2EIT` 在 Testcontainers 临时环境中运行。EMQX 开启持久会话，并固定一个 20000～29999 的随机宿主机端口，以便 docker restart 后端口不变。测试本地以 jar 启动 1 个 server、2 个 transport，配置全部经环境变量传入，口令每次随机生成；设备由测试代码扮演（QoS1 直到收到 PUBACK，断线重连）。四个场景各发 500 条，断言计数恰好、无死信、无待确认。运行需 `E2E_DEV_HOST`：先 `mvn -B -DskipTests install`，再 `mvn -B verify -Pe2e -pl conduit-e2e`。
 - **模拟器多租户**（V0.2-R）：
   - 发现：`SIM_PLATFORM_PASSWORD` 非空时，用平台管理员（`SIM_PLATFORM_USERNAME`）发现 `SIM_TENANTS` 中启用租户的物模型产品与启用设备（每产品最多 `SIM_MAX_DEVICES_PER_PRODUCT` 台），并重置其密钥；任一租户失败只记 WARN。退出租户失败时用平台管理员重新登录，再失败则发现停止并保留已发现的部分；单台设备重置密钥失败只跳过该设备。
@@ -53,8 +54,14 @@ conduit-ui（Vue）──REST──> conduit-server
 - **前端框架与外观**（界面刷新）：分组侧栏按身份给出（平台管理员：概览 / 系统管理→租户；租户管理员与代入者：概览 / 设备接入 / 系统管理→用户；只读用户：概览 / 设备接入）、可折叠、宽度 < 820px 自动折叠，侧栏有浅色/深色两种风格（默认深色）；顶栏为全局面包屑（路由 `meta.breadcrumb`，详情页用 `useBreadcrumb` 设置对象名称）、外观设置、租户名称与用户菜单（显示名称、角色、个人设置、退出登录），代入时顶栏下方固定显示代入提示条与「退出」，需改密码时弹出不可关闭的改密码对话框；路由 `meta.scope`（tenant / platform）与 `meta.requires`（manageUsers）由守卫与 AppLayout 统一处理，身份不匹配时改去租户管理或首页；`/home` 对未代入的平台管理员显示平台首页；浏览器标题「<页面名或对象名称> · Conduit」；`/` 重定向到 `/home`，未知地址显示 404。暗色模式用 Element Plus 暗色变量（`<html>` 的 `dark` 类），主题 浅色/深色/跟随系统（默认跟随系统）；外观偏好（主题、侧栏风格、侧栏折叠、最新值视图）存 `localStorage` 键 `conduit.ui`，读写失败用默认值。ECharts 图表随主题销毁重建（内置 `dark` 主题，背景透明）。设备详情为信息卡 + 指标卡片：前 8 个数值测点一次历史查询画最近 1 小时迷你趋势线（60 秒刷新，数值 5 秒刷新），布尔/枚举显示文字标签；点击卡片进入 `?tab=history&props=<标识>`，历史页从 `props` 读取初始选中。
 - **在线状态**：Redis hash `conduit:presence:{deviceKey}`（online / since / clientIp / source / lastSeen），由 Lua 脚本 `presence-apply.lua` 原子写入。两个来源：①EMQX 上下线事件（权威，时间为 EMQX 时钟，只接受 `eventTime >= since` 的事件，`since` 是唯一的乱序保护）；②设备上报数据（补偿设备在 transport 订阅之前就已连接、没有连接事件），在数据落库并 ACK 后由流水线每批按设备 pipeline 一次写入（尽力而为，失败只记 WARN）。数据时间是 transport 的接收时间 `receivedAt`，与 EMQX 时钟不同源，所以**数据永远不推进 `since`**：无记录 → 置在线；已在线 → 不改（只刷新 lastSeen）；已离线 → 仅当 `ts > since + 10 秒宽限期`（`PresenceStore.DATA_ONLINE_GRACE_MILLIS`）才复活。记录由数据产生（source=data）时 `since` 不可信，EMQX 事件总是生效。上线事件无 IP 时保留原 IP。
 - **设备列表筛选**：`GET /api/v1/devices` 在 productKey / keyword 之外支持 `online`（true|false）、`status`（ENABLED|DISABLED，不区分大小写）、`reported`（RECENT=最近 1 小时内有上报 | STALE=有上报但更久 | NEVER=从未上报）、`createdFrom`（毫秒，含）、`createdTo`（毫秒，不含），范围 0～253402300799999，非法值 400。status / 创建时间 / 产品 / 关键字在 SQL 过滤；`online` 与 `reported` 依赖 Redis，走「SQL 取全部匹配设备 → 批量读 Redis → 内存过滤 → 内存分页」，`total` 为过滤后数量，Redis 不可用返回 503「在线状态暂不可用」，开销 O(设备数)（见 backlog）。`reported` 依据设备时间戳（最新值 `__last`），`online` 依据 receivedAt / 事件时间，两者可能不一致。
-- **日志**：所有 Java 服务写文件日志，目录由环境变量 `CONDUIT_LOG_DIR` 指定（默认 `logs`，相对工作目录），每服务一个文件 `<服务名>.log`；按天 + 按大小滚动（单文件 50MB、保留 14 天、总量 1GB，归档 `<名>.%d{yyyy-MM-dd}.%i.log.gz`），控制台输出不变。server / transport 通过 `application.yml` 的 `logging.file.name` 与 `logging.logback.rollingpolicy.*` 配置；simulator 用 logback-classic + 自带 `logback.xml`（不再用 slf4j-simple）；测试 profile 写 `target/test-logs`，e2e 用 `logback-test.xml` 只输出控制台。Docker 中 server、simulator 与两个 transport 容器共用命名卷 `conduit-logs`（`/var/log/conduit`），第二个 transport 写入其 `transport-2` 子目录。
-- **部署**：Compose 默认只起基础设施（PostgreSQL、Redis、InfluxDB、EMQX）；conduit-server / transport / web 属于 `app` profile，模拟器属于 `demo` profile，完整部署需 `--profile app --profile demo`，只通过 `deploy/build-local.sh` 按需进行。Docker 宿主机无外网，该脚本在本机从干净检出构建 jar 与前端，宿主机只打复制产物的薄镜像。EMQX 鉴权回调地址由 `deploy/.env` 的 `CONDUIT_AUTH_URL` 配置（默认容器内 `http://conduit-server:8080`，server 在 IDE 中运行时改为 `http://<dev-host>:8080`）。完整部署起两个 transport 服务（`conduit-transport`、`conduit-transport-2`，同一镜像、YAML 锚点复用配置，后者日志在 `conduit-logs` 卷的 `transport-2` 子目录；不用 `deploy.replicas`，避免两个进程滚动同一个日志文件）。EMQX 磁盘持久会话写在 compose 环境变量中（`EMQX_DURABLE_SESSIONS__ENABLE=true`、`EMQX_CLUSTER__DISCOVERY_STRATEGY=singleton`、`EMQX_NODE__NAME=emqx@127.0.0.1`），不在 base.hocon；固定节点名的副作用：控制台里改过的密码会恢复为 `.env` 值，首次重建后 EMQX 数据目录为全新。
+- **日志**：所有 Java 服务写文件日志，目录由环境变量 `CONDUIT_LOG_DIR` 指定（默认 `logs`，相对工作目录），每服务一个文件 `<服务名>.log`；按天 + 按大小滚动（单文件 50MB、保留 14 天、总量 1GB，归档 `<名>.%d{yyyy-MM-dd}.%i.log.gz`），控制台输出不变。server / transport 通过 `application.yml` 的 `logging.file.name` 与 `logging.logback.rollingpolicy.*` 配置；simulator 用 logback-classic + 自带 `logback.xml`（不再用 slf4j-simple）；测试 profile 写 `target/test-logs`，e2e 用 `logback-test.xml` 只输出控制台。独立部署包中 server、simulator 与两个 transport 容器共用命名卷 `conduit-logs`（`/var/log/conduit`），第二个 transport 写入其 `transport-2` 子目录。
+- **部署**（部署包整理）：
+  - 两个包都可直接放到 Linux 上 `docker compose up -d`，项目名均为 `conduit`、数据卷同名（`conduit_pg-data` 等），同一宿主机二选一，切换时数据沿用。
+  - 开发环境包 `deploy/dev`：PostgreSQL、Redis、InfluxDB、InfluxDB Explorer、EMQX。EMQX 用官方镜像 `emqx/emqx:5.8.6`，`emqx/base.hocon.tpl` 与 `emqx/acl.conf` 只读挂载（需对 uid 1000 可读），启动命令用 `sed` 渲染回调地址与内部 token；EMQX 不依赖 conduit-server（自行重试鉴权回调）。`.env` 只含基础服务变量，`CONDUIT_AUTH_URL` 必填（开发机 `http://<dev-host>:8080`），`BIND_ADDR` 默认 `0.0.0.0`。
+  - 独立部署包 `deploy/standalone`：以 `extends` 引用 dev 包的 5 个服务（相对路径按 dev 文件解析；插值用独立部署包的 `.env` 并执行 dev 包的必填检查，所以独立部署包的 `.env` 含 dev 包的全部必填变量，`CONDUIT_AUTH_URL=http://conduit-server:8080`，EMQX 也以该值覆盖），数据卷在独立部署包文件中同名重新声明。应用服务：conduit-server、两个 transport（`conduit-transport`、`conduit-transport-2`，YAML 锚点复用配置，`stop_grace_period: 20s`，后者日志在 `conduit-logs` 卷的 `transport-2` 子目录；不用 `deploy.replicas`，避免两个进程滚动同一个日志文件）、conduit-web、模拟器（默认启动，不用 profile）。
+  - 镜像：构建上下文为仓库根目录，`deploy/standalone/docker/java.Dockerfile`（参数 `MODULE`、`JAR_NAME`，运行镜像 `eclipse-temurin:21.0.6_7-jre`）与 `web.Dockerfile`（`nginx:1.27.4-alpine`，`conduit-ui/nginx.conf`）。全局 `ARG BUILD_FROM=prebuilt`：阶段 `prebuilt`（`FROM scratch`）从 `deploy/standalone/artifacts/` 复制产物，阶段 `source` 用 `maven:3.9.9-eclipse-temurin-21` / `node:22.14.0-alpine` 从源码编译（需联网），`FROM ${BUILD_FROM} AS app` 选择，BuildKit 只构建选中的阶段；`.env` 中 `BUILD_FROM=prebuilt|source`。根 `.dockerignore` 排除 `.git`、`node_modules`、`target`、日志、IDE 与本地配置。
+  - Docker 宿主机无外网：开发机执行 `deploy/package.sh`，从当前提交的干净检出（git worktree）编译，产物放入 `deploy/standalone/artifacts/`（jar 三个 + `ui/`），把 `deploy/`（不含 `.env`）、根 `.dockerignore` 与 `conduit-ui/nginx.conf` 打成 `target/conduit-standalone-<短提交>.tar.gz`，复制到宿主机解压后以 prebuilt 启动。
+  - EMQX 磁盘持久会话写在 compose 环境变量中（`EMQX_DURABLE_SESSIONS__ENABLE=true`、`EMQX_CLUSTER__DISCOVERY_STRATEGY=singleton`、`EMQX_NODE__NAME=emqx@127.0.0.1`），不在 base.hocon；固定节点名的副作用：控制台里改过的密码会恢复为 `.env` 值，首次重建后 EMQX 数据目录为全新。
 
 ### 1.3 版本路线
 
@@ -77,11 +84,11 @@ conduit-ui（Vue）──REST──> conduit-server
 - 演示与测试数据：用有意义的中文名称（如「三相电表（演示）」「1号楼配电室 电表01」），测试结束清理自己创建的数据。
 - 日志：SLF4J 参数化；消息链路上 DEBUG 每条消息/每批一行（transport 收发、流水线解码/校验/写库/ACK、鉴权放行、在线状态、历史与总览、REST 访问行），逐字段细节放 TRACE；构造字符串或集合的日志用 `isDebugEnabled()`/`isTraceEnabled()` 保护；绝不记录设备密钥、口令、JWT、内部 token、Authorization；payload 值只在 TRACE 且截断 256 字符。；管理操作（租户与用户的增删改、重置密码、进入/退出租户、代入期间的写请求）各记一行 INFO，不记请求体与口令。
 - 提交：Conventional Commits；只署名不带邮箱；不加任何 AI 署名行。
-- 仓库公开：不要把 IP、本机路径、用户名、口令、token 写进受版本控制的文件；本地配置（`deploy/.env`、`application-local.yml`、`simulator-local.properties`）已在 `.gitignore`。
+- 仓库公开：不要把 IP、本机路径、用户名、口令、token 写进受版本控制的文件；本地配置（`deploy/dev/.env`、`deploy/standalone/.env`、`application-local.yml`、`simulator-local.properties`）与独立部署包产物 `deploy/standalone/artifacts/` 已在 `.gitignore`。
 
 ## 3. 本地开发
 
-见 README「开发」：开发模式是 Docker 宿主机只跑基础设施（`docker compose -f deploy/docker-compose.yml up -d`），server、transport、simulator、UI 在 IDEA 中运行（运行配置 `Conduit (local all)`），`deploy/.env` 的 `CONDUIT_AUTH_URL` 指向开发机。本地 transport 直接成为主实例，不要在 `application-local.yml` 中覆盖 `client-id` 或 `session-expiry-seconds`；本地模拟器默认使用「三相电表（演示）」，配置 `SIM_PLATFORM_PASSWORD` 后同时模拟各演示租户的产品。本地 server 需在 `application-local.yml` 配 `conduit.bootstrap.platform-admin-password`（或环境变量 `CONDUIT_PLATFORM_ADMIN_PASSWORD`）才会创建平台管理员 `sysadmin`。实施计划不再包含部署步骤，本地日志在仓库根目录 `logs/`（`CONDUIT_LOG_DIR`），排查问题先看这里。验收用测试和对本地运行的整套服务做 API 检查；只有所有者要求时才用 `deploy/build-local.sh` 部署完整应用栈。
+见 README「开发」：开发模式是 Docker 宿主机只跑开发环境包（宿主机上 `deploy/dev` 目录中 `docker compose up -d`），server、transport、simulator、UI 在 IDEA 中运行（运行配置 `Conduit (local all)`），`deploy/dev/.env` 的 `CONDUIT_AUTH_URL` 指向开发机。本地 transport 直接成为主实例，不要在 `application-local.yml` 中覆盖 `client-id` 或 `session-expiry-seconds`；本地模拟器默认使用「三相电表（演示）」，配置 `SIM_PLATFORM_PASSWORD` 后同时模拟各演示租户的产品。本地 server 需在 `application-local.yml` 配 `conduit.bootstrap.platform-admin-password`（或环境变量 `CONDUIT_PLATFORM_ADMIN_PASSWORD`）才会创建平台管理员 `sysadmin`。实施计划不再包含部署步骤，本地日志在仓库根目录 `logs/`（`CONDUIT_LOG_DIR`），排查问题先看这里。验收用测试和对本地运行的整套服务做 API 检查；只有所有者要求时才部署独立部署包（`deploy/package.sh` 打包后在宿主机启动）。
 
 ## 4. 决定记录
 
@@ -113,3 +120,5 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-16：V0.2-R 并入「模拟器多产品」：按各产品物模型生成数据，演示租户的设备也有数据。
 - 2026-10-16 V0.2-R 方向调整：EMQX 5.8.6 磁盘持久会话与共享订阅互斥（实测），改为「磁盘持久会话 + transport 单活多备（Redis 锁选主、同 clientId 接管）」；多实例共享订阅放弃，升级 EMQX 留待 V1.0。
 - 2026-10-16 V0.2-R：EMQX 开启磁盘持久会话（compose 环境变量，singleton，固定节点名 `emqx@127.0.0.1`）+ transport 单活多备（Redis 锁 `conduit:transport:leader`，固定 clientId `conduit-transport`、普通订阅，协调器负责重连）；完整部署两个 transport 服务（日志分目录，不用 replicas）；e2e 改为 Testcontainers 临时环境 + 本地 jar 进程的四个故障场景（`E2E_DEV_HOST`）；模拟器经平台管理员模拟各租户的物模型产品（`2026-10-16-conduit-v0.2r-reliability-design.md`）。
+- 2026-10-16 部署包整理：`deploy/` 拆为开发环境包 `infra/`（EMQX 官方镜像 + 只读挂载配置，`CONDUIT_AUTH_URL` 必填，不依赖 server）与独立部署包 `full/`（extends infra，应用服务与模拟器默认启动，单一 `.env`）；项目名均为 `conduit`、数据卷不变；应用镜像构建上下文为仓库根，`ARG BUILD_FROM=prebuilt|source` + `FROM ${BUILD_FROM} AS app` 选择预编译产物或源码构建；`deploy/package.sh` 从干净检出打 `target/conduit-standalone-<短提交>.tar.gz`；删除根 `Dockerfile`、`conduit-ui/Dockerfile`、自定义 EMQX 镜像、`build-local.sh` 与 `sync-to-host.sh`（`2026-10-16-conduit-deploy-packages-design.md`）。
+- 2026-10-16：部署包目录定名为 deploy/dev（开发环境：虚拟机只跑基础服务，应用在 IDEA）与 deploy/standalone（独立部署：全部组件在 Linux 上），打包 conduit-standalone-<短提交>.tar.gz。

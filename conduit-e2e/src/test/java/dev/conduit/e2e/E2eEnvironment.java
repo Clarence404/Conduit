@@ -175,9 +175,9 @@ final class E2eEnvironment implements AutoCloseable {
      * （docker restart 后端口不变），被占用时换端口重试，最多 5 次。
      */
     private GenericContainer<?> startEmqx() throws IOException {
-        String hocon = EmqxConfig.render(Files.readString(root.resolve("deploy/emqx/base.hocon.tpl")),
+        String hocon = EmqxConfig.render(Files.readString(root.resolve("deploy/dev/emqx/base.hocon.tpl")),
                 "http://" + devHost + ":" + serverPort, internalToken);
-        byte[] acl = Files.readAllBytes(root.resolve("deploy/emqx/acl.conf"));
+        byte[] acl = Files.readAllBytes(root.resolve("deploy/dev/emqx/acl.conf"));
         RuntimeException last = null;
         for (int attempt = 1; attempt <= 5; attempt++) {
             int hostPort = 20000 + ThreadLocalRandom.current().nextInt(10000);

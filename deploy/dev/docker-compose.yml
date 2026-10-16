@@ -1,0 +1,123 @@
+# 开发环境包（deploy/dev）：PostgreSQL、Redis、InfluxDB 3、InfluxDB 3 Explorer、EMQX。
+# 应用（server、transport、模拟器、前端）在开发机的 IDE 中运行，EMQX 的鉴权回调打到开发机上的 server。
+# 用法：把本目录放到 Linux 宿主机上，cp .env.example .env 并修改口令与 CONDUIT_AUTH_URL，然后 docker compose up -d。
+# 独立部署包 deploy/standalone 用 extends 引用这里的 5 个服务：修改本文件会同时影响独立部署包，两者项目名与数据卷相同。
+name: conduit
+
+services:
+  postgres:
+    image: postgres:16.8
+    environment:
+      POSTGRES_DB: conduit
+      POSTGRES_USER: conduit
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${POSTGRES_PORT:-15432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U conduit -d conduit"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.2
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${REDIS_PORT:-16379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+
+  influxdb:
+    image: influxdb:3.12.0-core
+    # 启动时由 INFLUX_TOKEN 生成离线管理员 token 文件（只有库里还没有管理员 token 时才生效），再启动服务
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        case "$${INFLUX_TOKEN}" in apiv3_*) ;; *) echo "INFLUX_TOKEN must start with apiv3_" >&2; exit 1;; esac;
+        umask 077
+        && printf '{"token":"%s","name":"_admin"}' "$${INFLUX_TOKEN}" > /tmp/admin-token.json
+        && exec influxdb3 serve --node-id node0 --object-store file --data-dir /var/lib/influxdb3/data
+        --admin-token-file /tmp/admin-token.json --disable-authz health,ping
+    environment:
+      INFLUX_TOKEN: ${INFLUX_TOKEN:?INFLUX_TOKEN is required}
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${INFLUX_PORT:-8096}:8181"
+    volumes:
+      - influx3-data:/var/lib/influxdb3
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8181/health"]
+      interval: 5s
+      retries: 30
+    restart: unless-stopped
+
+  influxdb-explorer:
+    # InfluxDB 3 官方图形界面（InfluxDB 3 Explorer），预置连接到本编排的 InfluxDB 与 telemetry 库。
+    # admin 模式可管理库与 token；它本身没有登录，只应在可信网络中暴露（端口按 BIND_ADDR 绑定）。
+    image: influxdata/influxdb3-ui:1.11.0
+    environment:
+      DEFAULT_SERVER_NAME: conduit
+      DEFAULT_INFLUX_SERVER: http://influxdb:8181
+      DEFAULT_API_TOKEN: ${INFLUX_TOKEN:?INFLUX_TOKEN is required}
+      DEFAULT_INFLUX_DATABASE: telemetry
+      UI_MODE: admin
+      # 会话签名密钥；不设置时每次重启都会生成新密钥，已打开的页面需要重新进入
+      SESSION_SECRET_KEY: ${INFLUX_EXPLORER_SESSION_KEY:?INFLUX_EXPLORER_SESSION_KEY is required}
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${INFLUX_EXPLORER_PORT:-8888}:8080"
+    volumes:
+      - influx-explorer-data:/db
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  emqx:
+    # 官方镜像；Conduit 的配置模板与 ACL 从本目录 emqx/ 只读挂载（不再烘焙进自定义镜像）。
+    # 启动时把模板中的鉴权回调地址与内部 token 渲染成 /opt/emqx/etc/base.hocon，再以前台方式启动 EMQX
+    image: emqx/emqx:5.8.6
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        esc() { printf '%s' "$$1" | sed 's/[&|\\]/\\&/g'; };
+        sed -e "s|__CONDUIT_INTERNAL_TOKEN__|$$(esc "$${CONDUIT_INTERNAL_TOKEN}")|"
+        -e "s|__CONDUIT_AUTH_URL__|$$(esc "$${CONDUIT_AUTH_URL}")|"
+        /conduit/base.hocon.tpl > /opt/emqx/etc/base.hocon
+        && exec /usr/bin/docker-entrypoint.sh /opt/emqx/bin/emqx foreground
+    environment:
+      CONDUIT_INTERNAL_TOKEN: ${CONDUIT_INTERNAL_TOKEN:?CONDUIT_INTERNAL_TOKEN is required}
+      # 鉴权回调地址（必填）：开发时为开发机上 server 的地址 http://<dev-host>:8080；独立部署包固定为 http://conduit-server:8080
+      CONDUIT_AUTH_URL: ${CONDUIT_AUTH_URL:?CONDUIT_AUTH_URL is required}
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:?EMQX_DASHBOARD_PASSWORD is required}
+      # 磁盘持久会话（V0.2-R）：transport 离线期间的消息写入磁盘，保留 1 天（durable_sessions.message_retention_period 默认值）；
+      # 5.8.6 要求单节点发现策略 singleton，否则启动失败。固定节点名：默认按容器 IP 命名，IP 变化会换数据目录、丢失持久会话
+      EMQX_DURABLE_SESSIONS__ENABLE: "true"
+      EMQX_CLUSTER__DISCOVERY_STRATEGY: singleton
+      EMQX_NODE__NAME: emqx@127.0.0.1
+    volumes:
+      - emqx-data:/opt/emqx/data
+      # 相对路径按本文件所在目录解析（独立部署包 extends 时同样指向这里）；文件需对容器内 emqx 用户（uid 1000）可读
+      - ./emqx/base.hocon.tpl:/conduit/base.hocon.tpl:ro
+      - ./emqx/acl.conf:/opt/emqx/etc/conduit-acl.conf:ro
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${MQTT_PORT:-1883}:1883"
+      - "${BIND_ADDR:-127.0.0.1}:${EMQX_DASHBOARD_PORT:-18083}:18083"
+    # 不依赖 conduit-server：server 未运行或未就绪时，EMQX 对鉴权回调自行重试
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 5s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  pg-data:
+  redis-data:
+  influx3-data:
+  influx-explorer-data:
+  emqx-data:

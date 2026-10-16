@@ -1,6 +1,6 @@
 package dev.conduit.e2e;
 
-/** 渲染 deploy/emqx/base.hocon.tpl（与 compose 中 EMQX 容器启动时的 sed 替换相同的两个占位符）。 */
+/** 渲染 deploy/dev/emqx/base.hocon.tpl（与开发环境包 compose 中 EMQX 容器启动时的 sed 替换相同的两个占位符）。 */
 final class EmqxConfig {
 
     static final String AUTH_URL = "__CONDUIT_AUTH_URL__";
