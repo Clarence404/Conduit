@@ -3,7 +3,7 @@
  * 强制修改密码对话框：用户带「需改密码」标记（首次登录、密码被重置）或任一接口返回 PASSWORD_CHANGE_REQUIRED 时弹出，不能关闭。
  * 新密码先按本地规则校验（8～64 位，同时包含字母和数字，两次一致）；修改成功后换用新令牌并自动关闭。也可以退出登录。
  */
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
@@ -16,6 +16,16 @@ const form = reactive({ oldPassword: '', newPassword: '', confirm: '' })
 const error = ref('')
 const saving = ref(false)
 const visible = computed(() => auth.needsPasswordChange)
+
+// 对话框关闭（改密成功、退出登录）时清空密码与错误提示
+watch(visible, (open) => {
+  if (!open) {
+    form.oldPassword = ''
+    form.newPassword = ''
+    form.confirm = ''
+    error.value = ''
+  }
+})
 
 /** 校验并提交：原密码必填、新密码合规、两次一致；失败时把原因显示在对话框内。 */
 async function submit() {

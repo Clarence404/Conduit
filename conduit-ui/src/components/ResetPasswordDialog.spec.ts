@@ -57,4 +57,19 @@ describe('ResetPasswordDialog', () => {
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
     wrapper.unmount()
   })
+
+  it('clears the password fields and the error when closed', async () => {
+    const { wrapper, vm } = mountDialog(vi.fn().mockRejectedValue(new Error('只能重置租户管理员的密码')))
+    vm.form.password = 'Reset-pass-9'
+    vm.form.confirm = 'Reset-pass-9'
+    await vm.submit()
+    expect(vm.error).not.toBe('')
+
+    await wrapper.setProps({ modelValue: false })
+
+    expect(vm.form.password).toBe('')
+    expect(vm.form.confirm).toBe('')
+    expect(vm.error).toBe('')
+    wrapper.unmount()
+  })
 })

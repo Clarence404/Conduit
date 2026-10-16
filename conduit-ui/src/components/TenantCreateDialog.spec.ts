@@ -100,4 +100,18 @@ describe('TenantCreateDialog', () => {
     expect(wrapper.emitted('created')).toBeUndefined()
     wrapper.unmount()
   })
+
+  it('clears the password and the error when closed', async () => {
+    const { wrapper, vm } = mountDialog()
+    vm.form.password = 'Init-pass-2026'
+    vm.form.code = 'Bad Code'
+    await vm.submit()
+    expect(vm.error).not.toBe('')
+
+    await wrapper.setProps({ modelValue: false })
+
+    expect(vm.form.password).toBe('')
+    expect(vm.error).toBe('')
+    wrapper.unmount()
+  })
 })

@@ -22,11 +22,17 @@ const pw = reactive({ oldPassword: '', newPassword: '', confirm: '' })
 const error = ref('')
 const saving = ref(false)
 
-// 每次打开都从当前会话重新填充，并回到「基本信息」
+// 每次打开都从当前会话重新填充，并回到「基本信息」；关闭时清掉密码与错误提示，避免残留
 watch(
   visible,
   (open) => {
-    if (!open) return
+    if (!open) {
+      pw.oldPassword = ''
+      pw.newPassword = ''
+      pw.confirm = ''
+      error.value = ''
+      return
+    }
     tab.value = 'profile'
     displayName.value = auth.user?.displayName ?? ''
     pw.oldPassword = ''

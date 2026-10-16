@@ -100,4 +100,18 @@ describe('UserFormDialog', () => {
     expect(wrapper.emitted('saved')).toBeUndefined()
     wrapper.unmount()
   })
+
+  it('clears the password and the error when closed', async () => {
+    const { wrapper, vm } = mountDialog(null)
+    vm.form.username = 'ab'
+    vm.form.password = 'Init-pass-2026'
+    await vm.submit()
+    expect(vm.error).not.toBe('')
+
+    await wrapper.setProps({ modelValue: false })
+
+    expect(vm.form.password).toBe('')
+    expect(vm.error).toBe('')
+    wrapper.unmount()
+  })
 })

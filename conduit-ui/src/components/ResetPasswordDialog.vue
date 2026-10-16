@@ -15,12 +15,11 @@ const form = reactive({ password: '', confirm: '' })
 const error = ref('')
 const saving = ref(false)
 
-watch(visible, (open) => {
-  if (open) {
-    form.password = ''
-    form.confirm = ''
-    error.value = ''
-  }
+// 打开与关闭时都清空密码与错误提示，避免残留的密码留在内存和下次打开的界面里
+watch(visible, () => {
+  form.password = ''
+  form.confirm = ''
+  error.value = ''
 })
 
 /** 校验并保存：密码合规且两次一致才调用 save */

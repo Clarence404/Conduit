@@ -16,11 +16,10 @@ const form = reactive({ code: '', name: '', username: '', displayName: '', passw
 const error = ref('')
 const saving = ref(false)
 
-watch(visible, (open) => {
-  if (open) {
-    Object.assign(form, { code: '', name: '', username: '', displayName: '', password: '' })
-    error.value = ''
-  }
+// 打开与关闭时都重置表单与错误提示，避免初始密码残留
+watch(visible, () => {
+  Object.assign(form, { code: '', name: '', username: '', displayName: '', password: '' })
+  error.value = ''
 })
 
 /** 租户名称的错误：为空或超过 64 个字符 */

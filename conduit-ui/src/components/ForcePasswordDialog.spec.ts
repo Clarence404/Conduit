@@ -129,4 +129,19 @@ describe('ForcePasswordDialog', () => {
     expect(router.currentRoute.value.name).toBe('login')
     wrapper.unmount()
   })
+
+  it('clears the password fields and the error when it closes', async () => {
+    const { wrapper, vm } = await mountDialog({ mustChangePassword: true })
+    vm.form.oldPassword = 'Init-pass-2026'
+    vm.form.newPassword = 'weak'
+    await vm.submit()
+    expect(vm.error).not.toBe('')
+
+    useAuthStore().clear()
+    await nextTick()
+
+    expect(vm.form).toEqual({ oldPassword: '', newPassword: '', confirm: '' })
+    expect(vm.error).toBe('')
+    wrapper.unmount()
+  })
 })

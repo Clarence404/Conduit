@@ -19,11 +19,15 @@ const saving = ref(false)
 /** 是否在编辑已有用户（否则为新建） */
 const editing = computed(() => props.user !== null)
 
-// 每次打开都按当前要编辑的用户重置表单
+// 每次打开都按当前要编辑的用户重置表单；关闭时清掉密码与错误提示，避免残留
 watch(
   visible,
   (open) => {
-    if (!open) return
+    if (!open) {
+      form.password = ''
+      error.value = ''
+      return
+    }
     form.username = props.user?.username ?? ''
     form.displayName = props.user?.displayName ?? ''
     form.role = props.user?.role ?? 'TENANT_VIEWER'

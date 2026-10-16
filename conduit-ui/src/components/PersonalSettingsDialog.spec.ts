@@ -95,4 +95,18 @@ describe('PersonalSettingsDialog', () => {
     expect(document.body.textContent).toContain('代入租户期间不能修改密码')
     wrapper.unmount()
   })
+
+  it('clears the password fields and the error when closed', async () => {
+    const { wrapper, vm } = await mountDialog()
+    vm.pw.oldPassword = 'Old-pass-2026'
+    vm.pw.newPassword = 'weak'
+    await vm.savePassword()
+    expect(vm.error).not.toBe('')
+
+    await wrapper.setProps({ modelValue: false })
+
+    expect(vm.pw).toEqual({ oldPassword: '', newPassword: '', confirm: '' })
+    expect(vm.error).toBe('')
+    wrapper.unmount()
+  })
 })
