@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 设备信息卡（设备详情页顶部）：图标、名称、在线状态、启用状态标签；下方一行为所属产品（链接）、设备 Key（可复制）、
- * 最后上报（相对时间）、创建日期；右侧「连接参数」「编辑」按钮分别发出 connection、edit。
+ * 最后上报（相对时间）、创建日期；右侧「连接参数」「编辑」按钮分别发出 connection、edit；canEdit 为 false（只读身份）时不显示「编辑」。
  */
 import { computed } from 'vue'
 import { ElMessage } from 'element-plus'
@@ -12,7 +12,9 @@ import { formatDateTime } from '@/utils/format'
 import OnlineDot from './OnlineDot.vue'
 import RelativeTime from './RelativeTime.vue'
 
-const props = defineProps<{ device: DeviceView; productName: string | null }>()
+const props = withDefaults(defineProps<{ device: DeviceView; productName: string | null; canEdit?: boolean }>(), {
+  canEdit: true,
+})
 const emit = defineEmits<{ connection: []; edit: [] }>()
 
 /** 创建日期 yyyy-MM-dd */
@@ -55,7 +57,7 @@ async function copyKey() {
     </div>
     <div class="actions">
       <el-button :icon="Connection" @click="emit('connection')">连接参数</el-button>
-      <el-button type="primary" :icon="Edit" @click="emit('edit')">编辑</el-button>
+      <el-button v-if="canEdit" type="primary" :icon="Edit" @click="emit('edit')">编辑</el-button>
     </div>
   </div>
 </template>

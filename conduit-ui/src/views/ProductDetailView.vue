@@ -5,6 +5,7 @@
  * - 基本信息：编辑名称、描述、解码器；
  * - 物模型：属性的增删改、整体导入导出；属性一次取回，前端分页（useTable，默认每页 10 条，删除后页码自动修正）；
  * - 设备：该产品下的设备，服务端分页（useTable），每次切到该标签都重新加载以保持在线状态最新。
+ * 写操作（保存基本信息、新增/编辑/删除/导入属性、去新建设备）只对可写身份显示（usePermission().canWrite），导出对所有人可用。
  */
 
 import { computed, onMounted, reactive, ref, watch } from 'vue'
@@ -25,6 +26,7 @@ import { tabFromQuery, tabQuery, type ProductTab } from '@/utils/productTabs'
 import { downloadJson } from '@/utils/download'
 import { useTable } from '@/composables/useTable'
 import { useBreadcrumb } from '@/composables/useBreadcrumb'
+import { usePermission } from '@/composables/usePermission'
 import PageHeader from '@/components/PageHeader.vue'
 import OnlineDot from '@/components/OnlineDot.vue'
 import RelativeTime from '@/components/RelativeTime.vue'
@@ -36,6 +38,7 @@ const props = defineProps<{ productKey: string }>()
 const route = useRoute()
 const router = useRouter()
 const { setName } = useBreadcrumb()
+const { canWrite } = usePermission()
 
 // 当前标签与 ?tab= 同步；用 replace 切换，不产生历史记录
 const activeTab = computed<ProductTab>({
@@ -249,7 +252,7 @@ onMounted(() => {
     <div class="cd-panel">
       <el-tabs v-model="activeTab">
         <el-tab-pane label="基本信息" name="basic">
-          <el-form label-width="96px" class="basic" @submit.prevent="saveBasic">
+          <el-form label-width="96px" class="basic" :disabled="!canWrite" @submit.prevent="saveBasic">
             <el-form-item label="名称" required>
               <el-input v-model="basic.name" maxlength="128" />
             </el-form-item>
@@ -261,7 +264,7 @@ onMounted(() => {
                 <el-option v-for="c in codecs" :key="c.name" :label="c.displayName" :value="c.name" />
               </el-select>
             </el-form-item>
-            <el-form-item>
+            <el-form-item v-if="canWrite">
               <el-button type="primary" :loading="savingBasic" @click="saveBasic">保存</el-button>
             </el-form-item>
           </el-form>
@@ -271,9 +274,9 @@ onMounted(() => {
           <div class="toolbar">
             <span class="cd-muted">共 {{ properties.length }} 个属性（上限 200）</span>
             <div>
-              <el-button @click="importVisible = true">导入</el-button>
+              <el-button v-if="canWrite" @click="importVisible = true">导入</el-button>
               <el-button @click="exportModel">导出</el-button>
-              <el-button type="primary" @click="openCreate">新增属性</el-button>
+              <el-button v-if="canWrite" type="primary" @click="openCreate">新增属性</el-button>
             </div>
           </div>
           <el-table v-loading="fetchingProperties" :data="pagedProperties">
@@ -291,7 +294,7 @@ onMounted(() => {
             <el-table-column label="小数位数" width="100">
               <template #default="{ row }">{{ row.decimals ?? '—' }}</template>
             </el-table-column>
-            <el-table-column label="操作" width="140">
+            <el-table-column v-if="canWrite" label="操作" width="140">
               <template #default="{ row }">
                 <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
                 <el-button link type="danger" @click="remove(row)">删除</el-button>
@@ -302,8 +305,8 @@ onMounted(() => {
                 <el-button type="primary" @click="loadProperties">重试</el-button>
               </el-empty>
               <el-empty v-else description="暂无属性：未定义物模型时按 V0.1 规则接收数据（数值一律浮点）">
-                <el-button type="primary" @click="openCreate">新增属性</el-button>
-                <el-button @click="importVisible = true">导入物模型</el-button>
+                <el-button v-if="canWrite" type="primary" @click="openCreate">新增属性</el-button>
+                <el-button v-if="canWrite" @click="importVisible = true">导入物模型</el-button>
               </el-empty>
             </template>
           </el-table>
@@ -348,7 +351,7 @@ onMounted(() => {
                 <el-button type="primary" @click="loadDevices">重试</el-button>
               </el-empty>
               <el-empty v-else description="该产品下暂无设备">
-                <el-button type="primary" @click="router.push({ name: 'devices' })">去设备页新建</el-button>
+                <el-button v-if="canWrite" type="primary" @click="router.push({ name: 'devices' })">去设备页新建</el-button>
               </el-empty>
             </template>
           </el-table>

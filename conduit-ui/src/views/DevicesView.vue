@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 设备列表页：筛选栏（主行：关键字、产品、在线状态、启用状态；「更多筛选」：最后上报、创建时间；回车即查询）+ 服务端分页（useTable，默认每页 10 条）；在线状态用圆点，启用状态用标签，
- * 最后上报显示相对时间。支持新建设备、启用/禁用、重置密钥、删除，行内可跳到设备详情与所属产品。
+ * 最后上报显示相对时间。支持新建设备、启用/禁用、重置密钥、删除（只读身份看不到这些操作），行内可跳到设备详情与所属产品。
  * 创建设备和重置密钥的响应里有密钥明文，通过 SecretDialog 只展示一次。首次加载显示骨架屏，没有设备时引导新建，加载失败时改为「加载失败，点击重试」。
  * 查询只使用「已应用」的筛选条件（点查询/回车时才从输入框复制）：翻页、刷新、新建默认产品、空态判断都以它为准，不受尚未提交的输入影响。
  * 已应用的筛选同步到路由 query（router.replace，键见 utils/deviceFilters），进入页面时从 query 还原（非法值忽略），
@@ -30,6 +30,7 @@ import {
   toDeviceQuery,
 } from '@/utils/deviceFilters'
 import { useTable } from '@/composables/useTable'
+import { usePermission } from '@/composables/usePermission'
 import PageHeader from '@/components/PageHeader.vue'
 import FilterBar from '@/components/FilterBar.vue'
 import OnlineDot from '@/components/OnlineDot.vue'
@@ -38,6 +39,7 @@ import SecretDialog from '@/components/SecretDialog.vue'
 
 const router = useRouter()
 const route = useRoute()
+const { canWrite } = usePermission()
 
 const products = ref<ProductView[]>([])
 const productNames = computed(() => new Map(products.value.map((p) => [p.productKey, p.name])))
@@ -267,7 +269,7 @@ onMounted(() => {
     <PageHeader title="设备" subtitle="接入平台的设备：查看在线状态与最后上报，管理启用状态与密钥。">
       <template #actions>
         <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
-        <el-button type="primary" :icon="Plus" :disabled="products.length === 0" @click="openCreate">新建设备</el-button>
+        <el-button v-if="canWrite" type="primary" :icon="Plus" :disabled="products.length === 0" @click="openCreate">新建设备</el-button>
       </template>
     </PageHeader>
 
@@ -351,11 +353,13 @@ onMounted(() => {
               <el-button link type="primary" @click="router.push({ name: 'device-detail', params: { deviceKey: row.deviceKey } })">
                 详情
               </el-button>
-              <el-button link :type="row.status === 'ENABLED' ? 'warning' : 'success'" :loading="busy.has(row.deviceKey)" @click="toggleStatus(row)">
-                {{ row.status === 'ENABLED' ? '禁用' : '启用' }}
-              </el-button>
-              <el-button link type="warning" @click="resetSecret(row)">重置密钥</el-button>
-              <el-button link type="danger" @click="remove(row)">删除</el-button>
+              <template v-if="canWrite">
+                <el-button link :type="row.status === 'ENABLED' ? 'warning' : 'success'" :loading="busy.has(row.deviceKey)" @click="toggleStatus(row)">
+                  {{ row.status === 'ENABLED' ? '禁用' : '启用' }}
+                </el-button>
+                <el-button link type="warning" @click="resetSecret(row)">重置密钥</el-button>
+                <el-button link type="danger" @click="remove(row)">删除</el-button>
+              </template>
             </template>
           </el-table-column>
           <template #empty>
@@ -366,8 +370,10 @@ onMounted(() => {
               <el-button @click="reset">重置筛选</el-button>
             </el-empty>
             <el-empty v-else :description="products.length === 0 ? '还没有产品，先到「产品」页创建产品' : '还没有设备，先新建一台设备'">
-              <el-button v-if="products.length === 0" type="primary" @click="router.push({ name: 'products' })">去创建产品</el-button>
-              <el-button v-else type="primary" @click="openCreate">新建设备</el-button>
+              <template v-if="canWrite">
+                <el-button v-if="products.length === 0" type="primary" @click="router.push({ name: 'products' })">去创建产品</el-button>
+                <el-button v-else type="primary" @click="openCreate">新建设备</el-button>
+              </template>
             </el-empty>
           </template>
         </el-table>

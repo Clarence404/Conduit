@@ -3,11 +3,11 @@
  * 登录后的整体布局：外壳恰好一屏高（100vh），侧栏固定在左侧、「收起菜单」钉在其底部，顶栏固定，只有右侧内容区（el-main）滚动。
  * 左侧侧栏：Logo、按身份给出的分组菜单（带图标，见 layouts/menu.ts），按路由 meta.menu 高亮；
  * 可折叠（偏好保存，窗口宽度 < 820px 时强制折叠），浅色/深色两种风格（偏好）。
- * 顶栏：左侧全局面包屑（路由 meta + 详情页对象名称），右侧外观设置、租户名称、用户头像下拉（显示名称、角色、租户、退出登录）。
+ * 顶栏：左侧全局面包屑（路由 meta + 详情页对象名称），右侧外观设置、租户名称、用户头像下拉（显示名称、角色、租户、个人设置、退出登录）。
  * 顶栏下方：平台管理员代入租户时的提示条。页面渲染在 router-view；需要先改密码时弹出不可关闭的强制改密码对话框。
  * 会话身份变化（如代入的租户被停用、续期后退回平台管理员）时，按 router/access 的规则离开不匹配的页面。
  */
-import { computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowDown, Brush, Expand, Fold } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
@@ -20,6 +20,7 @@ import ConduitLogo from '@/components/ConduitLogo.vue'
 import AppearancePanel from '@/components/AppearancePanel.vue'
 import ImpersonationBar from '@/components/ImpersonationBar.vue'
 import ForcePasswordDialog from '@/components/ForcePasswordDialog.vue'
+import PersonalSettingsDialog from '@/components/PersonalSettingsDialog.vue'
 import { menuGroupsFor } from './menu'
 
 const auth = useAuthStore()
@@ -28,6 +29,8 @@ const route = useRoute()
 const router = useRouter()
 const { breadcrumb } = useCurrentPage()
 const narrow = useMediaQuery('(max-width: 819px)')
+/** 个人设置对话框是否打开 */
+const profileVisible = ref(false)
 
 /** 是否折叠：窄屏强制折叠，否则按偏好 */
 const collapsed = computed(() => narrow.value || ui.sidebarCollapsed)
@@ -65,9 +68,11 @@ async function logout() {
   }
 }
 
-/** 用户下拉菜单的命令：logout 退出登录 */
+/** 用户下拉菜单的命令：profile 打开个人设置，logout 退出登录 */
 function onCommand(command: string) {
-  if (command === 'logout') {
+  if (command === 'profile') {
+    profileVisible.value = true
+  } else if (command === 'logout') {
     void logout()
   }
 }
@@ -129,7 +134,8 @@ function onCommand(command: string) {
                 <el-dropdown-item disabled>{{ userName }}</el-dropdown-item>
                 <el-dropdown-item disabled>角色：{{ roleText }}</el-dropdown-item>
                 <el-dropdown-item v-if="auth.user?.tenantName" disabled>租户：{{ auth.user.tenantName }}</el-dropdown-item>
-                <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
+                <el-dropdown-item divided command="profile">个人设置</el-dropdown-item>
+                <el-dropdown-item command="logout">退出登录</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -141,6 +147,7 @@ function onCommand(command: string) {
       </el-main>
     </el-container>
     <ForcePasswordDialog />
+    <PersonalSettingsDialog v-model="profileVisible" />
   </el-container>
 </template>
 

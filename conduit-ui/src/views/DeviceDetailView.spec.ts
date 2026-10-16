@@ -6,7 +6,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
-import { createPinia, setActivePinia } from 'pinia'
 import DeviceDetailView from './DeviceDetailView.vue'
 import HistoryPanel from '@/components/HistoryPanel.vue'
 import LatestValuesPanel from '@/components/LatestValuesPanel.vue'
@@ -14,9 +13,9 @@ import ConnectionDialog from '@/components/ConnectionDialog.vue'
 import { deviceApi } from '@/api/devices'
 import { productApi } from '@/api/products'
 import { thingModelApi } from '@/api/thingModel'
-import type { DeviceView, PointView } from '@/api/types'
+import type { DeviceView, PointView, UserView } from '@/api/types'
 import { useCurrentPage } from '@/composables/useBreadcrumb'
-import { createTestRouter, settle } from '@/test/viewTestUtils'
+import { createTestPinia, createTestRouter, settle } from '@/test/viewTestUtils'
 
 vi.mock('@/api/devices', () => ({
   deviceApi: { list: vi.fn(), get: vi.fn(), create: vi.fn(), update: vi.fn(), resetSecret: vi.fn(), remove: vi.fn(), latest: vi.fn() },
@@ -44,9 +43,8 @@ function device(patch: Partial<DeviceView> = {}): DeviceView {
   }
 }
 
-async function mountAt(path: string) {
-  const pinia = createPinia()
-  setActivePinia(pinia)
+async function mountAt(path: string, user: Partial<UserView> = {}) {
+  const pinia = createTestPinia(user)
   const router = createTestRouter()
   await router.push(path)
   await router.isReady()
@@ -172,6 +170,15 @@ describe('DeviceDetailView', () => {
     expect(vm.editVisible).toBe(false)
     expect(wrapper.find('.info-card h2').text()).toBe('1号楼配电室 电表99')
     expect(wrapper.find('.info-card').text()).toContain('禁用')
+    wrapper.unmount()
+  })
+
+  it('hides 编辑 from a viewer but keeps the connection parameters', async () => {
+    const { wrapper } = await mountAt('/devices/dk1', { role: 'TENANT_VIEWER' })
+
+    const labels = wrapper.findAll('.info-card button').map((b) => b.text())
+    expect(labels).toContain('连接参数')
+    expect(labels).not.toContain('编辑')
     wrapper.unmount()
   })
 

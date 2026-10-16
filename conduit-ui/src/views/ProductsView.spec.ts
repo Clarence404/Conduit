@@ -1,12 +1,12 @@
-/** ProductsView 组件测试：首屏请求第 1 页 10 条、「设备（在线/总数）」列、空状态引导新建、首次加载失败显示「加载失败」并可重试、行内按钮跳转到详情的标签 */
+/** ProductsView 组件测试：首屏请求第 1 页 10 条、「设备（在线/总数）」列、空状态引导新建、首次加载失败显示「加载失败」并可重试、行内按钮跳转到详情的标签、只读用户看不到新建/编辑/删除 */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ElementPlus, { ElMessage } from 'element-plus'
 import ProductsView from './ProductsView.vue'
 import { productApi } from '@/api/products'
 import { codecApi } from '@/api/codecs'
-import type { ProductView } from '@/api/types'
-import { createTestRouter, settle } from '@/test/viewTestUtils'
+import type { ProductView, Role } from '@/api/types'
+import { createTestPinia, createTestRouter, settle } from '@/test/viewTestUtils'
 
 vi.mock('@/api/products', () => ({
   productApi: { list: vi.fn(), get: vi.fn(), create: vi.fn(), update: vi.fn(), remove: vi.fn() },
@@ -39,11 +39,14 @@ describe('ProductsView', () => {
     vi.mocked(codecApi.list).mockResolvedValue([])
   })
 
-  async function mountView() {
+  async function mountView(role: Role = 'TENANT_ADMIN') {
     const router = createTestRouter()
     await router.push('/products')
     await router.isReady()
-    const wrapper = mount(ProductsView, { global: { plugins: [router, ElementPlus] }, attachTo: document.body })
+    const wrapper = mount(ProductsView, {
+      global: { plugins: [createTestPinia({ role }), router, ElementPlus] },
+      attachTo: document.body,
+    })
     await settle()
     return { wrapper, router }
   }
@@ -125,6 +128,18 @@ describe('ProductsView', () => {
 
     expect(router.currentRoute.value.name).toBe('product-detail')
     expect(router.currentRoute.value.query).toEqual({})
+    wrapper.unmount()
+  })
+
+  it('hides the write actions from a viewer', async () => {
+    const { wrapper } = await mountView('TENANT_VIEWER')
+
+    const labels = wrapper.findAll('button').map((b) => b.text())
+    expect(labels).toContain('详情')
+    expect(labels).toContain('物模型')
+    for (const hidden of ['新建产品', '编辑', '删除']) {
+      expect(labels).not.toContain(hidden)
+    }
     wrapper.unmount()
   })
 })

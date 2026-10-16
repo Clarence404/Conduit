@@ -61,6 +61,12 @@ export const routes: RouteRecordRaw[] = [
         meta: ROUTE_META.tenants,
       },
       {
+        path: 'users',
+        name: 'users',
+        component: () => import('@/views/UsersView.vue'),
+        meta: ROUTE_META.users,
+      },
+      {
         path: ':pathMatch(.*)*',
         name: 'not-found',
         component: () => import('@/views/NotFoundView.vue'),

@@ -151,6 +151,17 @@ describe('AppLayout', () => {
     wrapper.unmount()
   })
 
+  it('opens personal settings from the user menu', async () => {
+    const { wrapper } = await mountAt('/devices')
+    const vm = wrapper.vm as unknown as { onCommand(command: string): void; profileVisible: boolean }
+
+    vm.onCommand('profile')
+    await nextTick()
+
+    expect(vm.profileVisible).toBe(true)
+    wrapper.unmount()
+  })
+
   it('shows the 概览 group with 首页 highlighted on the home page', async () => {
     const { wrapper } = await mountAt('/home')
 

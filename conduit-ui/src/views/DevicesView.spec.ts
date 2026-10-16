@@ -8,8 +8,8 @@ import ElementPlus, { ElMessage } from 'element-plus'
 import DevicesView from './DevicesView.vue'
 import { deviceApi } from '@/api/devices'
 import { productApi } from '@/api/products'
-import type { DeviceView } from '@/api/types'
-import { createTestRouter, settle } from '@/test/viewTestUtils'
+import type { DeviceView, Role } from '@/api/types'
+import { createTestPinia, createTestRouter, settle } from '@/test/viewTestUtils'
 
 const NOW = Date.UTC(2026, 9, 15, 8, 0, 0)
 
@@ -33,11 +33,14 @@ function device(patch: Partial<DeviceView> = {}): DeviceView {
   }
 }
 
-async function mountView(url = '/devices') {
+async function mountView(url = '/devices', role: Role = 'TENANT_ADMIN') {
   const router = createTestRouter()
   await router.push(url)
   await router.isReady()
-  const wrapper = mount(DevicesView, { global: { plugins: [router, ElementPlus] }, attachTo: document.body })
+  const wrapper = mount(DevicesView, {
+    global: { plugins: [createTestPinia({ role }), router, ElementPlus] },
+    attachTo: document.body,
+  })
   await settle()
   return { wrapper, router }
 }
@@ -392,6 +395,16 @@ describe('DevicesView', () => {
     vi.mocked(deviceApi.list).mockRejectedValueOnce(new Error('在线状态暂不可用'))
     const { wrapper } = await mountView('/devices?online=true')
     expect(spy).toHaveBeenCalledWith('在线状态暂不可用')
+    wrapper.unmount()
+  })
+
+  it('hides the write actions from a viewer', async () => {
+    const { wrapper } = await mountView('/devices', 'TENANT_VIEWER')
+
+    expect(wrapper.findAll('.el-table button').map((b) => b.text())).toEqual(['详情'])
+    const labels = wrapper.findAll('button').map((b) => b.text())
+    expect(labels).toContain('刷新')
+    expect(labels).not.toContain('新建设备')
     wrapper.unmount()
   })
 })
