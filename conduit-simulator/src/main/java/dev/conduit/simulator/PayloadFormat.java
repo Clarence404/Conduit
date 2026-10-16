@@ -2,6 +2,7 @@ package dev.conduit.simulator;
 
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /** 上报格式，与平台解码器一一对应。 */
 public enum PayloadFormat {
@@ -39,5 +40,19 @@ public enum PayloadFormat {
             case "flat" -> FLAT;
             default -> throw new IllegalStateException("SIM_PAYLOAD_FORMAT must be standard or flat, got: " + value);
         };
+    }
+
+    /**
+     * 按平台解码器名称找对应的上报格式。
+     *
+     * @return standard-json → STANDARD，flat-json → FLAT；其他解码器（模拟器不会生成的格式）或 null 为 empty
+     */
+    public static Optional<PayloadFormat> fromCodec(String codec) {
+        for (PayloadFormat format : values()) {
+            if (format.codec.equals(codec)) {
+                return Optional.of(format);
+            }
+        }
+        return Optional.empty();
     }
 }

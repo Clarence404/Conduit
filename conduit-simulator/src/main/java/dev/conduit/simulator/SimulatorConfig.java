@@ -28,7 +28,9 @@ import java.util.Properties;
 public record SimulatorConfig(URI apiUrl, String adminUsername, String adminPassword,
                               String mqttHost, int mqttPort, String productName,
                               int deviceCount, Duration interval, int messagesPerDevice,
-                              PayloadFormat payloadFormat) {
+                              PayloadFormat payloadFormat,
+                              String platformUsername, String platformPassword,
+                              TenantFilter tenants, int maxDevicesPerProduct) {
 
     /** 本地联调用的配置文件（classpath 根目录，不入库），键名与环境变量相同。 */
     static final String LOCAL_PROPERTIES = "simulator-local.properties";
@@ -48,7 +50,8 @@ public record SimulatorConfig(URI apiUrl, String adminUsername, String adminPass
     /**
      * 从键值表构造配置，未提供的项取默认值。
      *
-     * @throws IllegalStateException CONDUIT_ADMIN_PASSWORD 缺失或为空，或 SIM_PAYLOAD_FORMAT 非法
+     * @throws IllegalStateException CONDUIT_ADMIN_PASSWORD 缺失或为空、SIM_PAYLOAD_FORMAT 非法、
+     *                               SIM_MAX_DEVICES_PER_PRODUCT 小于 1
      * @throws NumberFormatException 数值类配置项格式错误
      */
     public static SimulatorConfig fromEnv(Map<String, String> env) {
@@ -62,7 +65,16 @@ public record SimulatorConfig(URI apiUrl, String adminUsername, String adminPass
                 Integer.parseInt(env.getOrDefault("SIM_DEVICE_COUNT", "100")),
                 Duration.ofMillis(Long.parseLong(env.getOrDefault("SIM_INTERVAL_MS", "10000"))),
                 Integer.parseInt(env.getOrDefault("SIM_MESSAGES_PER_DEVICE", "0")),
-                PayloadFormat.parse(env.getOrDefault("SIM_PAYLOAD_FORMAT", "standard")));
+                PayloadFormat.parse(env.getOrDefault("SIM_PAYLOAD_FORMAT", "standard")),
+                env.getOrDefault("SIM_PLATFORM_USERNAME", "sysadmin"),
+                env.getOrDefault("SIM_PLATFORM_PASSWORD", ""),
+                TenantFilter.parse(env.getOrDefault("SIM_TENANTS", "*")),
+                atLeastOne(env, "SIM_MAX_DEVICES_PER_PRODUCT", 100));
+    }
+
+    /** 是否模拟各租户的产品：平台管理员密码非空时才开启。 */
+    public boolean multiTenant() {
+        return platformPassword != null && !platformPassword.isBlank();
     }
 
     /** 读取 classpath 上的本地配置文件；文件不存在返回空表。 */
@@ -85,6 +97,15 @@ public record SimulatorConfig(URI apiUrl, String adminUsername, String adminPass
         String value = env.get(name);
         if (value == null || value.isBlank()) {
             throw new IllegalStateException("Environment variable " + name + " is required");
+        }
+        return value;
+    }
+
+    /** 读取不小于 1 的整数配置，缺省取 defaultValue。 */
+    private static int atLeastOne(Map<String, String> env, String name, int defaultValue) {
+        int value = Integer.parseInt(env.getOrDefault(name, Integer.toString(defaultValue)).trim());
+        if (value < 1) {
+            throw new IllegalStateException(name + " must be at least 1, got: " + value);
         }
         return value;
     }
