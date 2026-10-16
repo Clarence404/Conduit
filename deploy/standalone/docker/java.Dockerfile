@@ -1,16 +1,16 @@
 # Java 应用镜像（conduit-server、conduit-transport、conduit-simulator 共用），构建上下文为仓库根目录。
 # 构建参数：
-#   BUILD_FROM  产物来源：prebuilt（默认，复制 deploy/full/artifacts/ 中打好的 jar）或 source（在镜像内用 Maven 从源码编译，需联网）
+#   BUILD_FROM  产物来源：prebuilt（默认，复制 deploy/standalone/artifacts/ 中打好的 jar）或 source（在镜像内用 Maven 从源码编译，需联网）
 #   MODULE      Maven 模块目录，例如 conduit-server（source 用）
 #   JAR_NAME    jar 文件名（不含 .jar），例如 conduit-simulator-exec
 # FROM ${BUILD_FROM} AS app 选中其中一个阶段，BuildKit 只构建被最终阶段用到的阶段：
 # prebuilt 时不需要源码与 Maven 镜像，source 时不需要 artifacts/。
 ARG BUILD_FROM=prebuilt
 
-# 预编译产物：由开发机上的 deploy/package.sh 放入 deploy/full/artifacts/
+# 预编译产物：由开发机上的 deploy/package.sh 放入 deploy/standalone/artifacts/
 FROM scratch AS prebuilt
 ARG JAR_NAME
-COPY deploy/full/artifacts/${JAR_NAME}.jar /out/app.jar
+COPY deploy/standalone/artifacts/${JAR_NAME}.jar /out/app.jar
 
 # 从源码编译：只复制 Maven 需要的父 pom、各 Java 模块与模拟器打包的演示物模型
 FROM maven:3.9.9-eclipse-temurin-21 AS source

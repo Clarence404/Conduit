@@ -14,10 +14,10 @@
 
 ## 后端：部署与镜像
 
-- 全量包 Java 镜像以 root 运行；`source` 阶段无 Maven 依赖缓存层（每次构建全量下载依赖）
+- 独立部署包 Java 镜像以 root 运行；`source` 阶段无 Maven 依赖缓存层（每次构建全量下载依赖）
 - `BUILD_FROM=source` 需要宿主机联网（Maven 中央仓库、npm 源）；无外网时只能用 `prebuilt`
 - 预编译前端的 MQTT 端口（`VITE_MQTT_PORT`）在打包时固定，宿主机改 `MQTT_PORT` 后「连接信息」显示的端口不变，需重新打包
-- 基础服务包的 EMQX 配置为只读挂载，宿主机上的 `emqx/` 文件需对 uid 1000 可读；权限不对时 EMQX 启动失败
+- 开发环境包的 EMQX 配置为只读挂载，宿主机上的 `emqx/` 文件需对 uid 1000 可读；权限不对时 EMQX 启动失败
 - entrypoint 中 sed 注入内部 token、HOCON 引号处理较脆弱
 - EMQX 控制台密码仅首次启动生效（卷非空时忽略）
 - 重启后的启动顺序
@@ -145,7 +145,7 @@
 
 - **【待单独处理，优先】transport 正常停止时可能丢少量消息**（2026-10-16 发现）：`LeaderElectionIT.theStandbyTakesOverWithinTheTtlAndReceivesTheBacklog` 约 2/3 概率失败（300 条丢 4～7 条）。日志显示：旧主正常停止那一刻已收到但未写入总线、未 ACK 的几条（如 seq 101～104），新主接管后 EMQX 5.8.6 磁盘持久会话重发的条数相同，内容却是早已 ACK 的旧消息（seq 4～7），未 ACK 的消息因此丢失；强杀进程（e2e 场景 2、3）未复现。影响：每次正常停止 / 重启 / 主备切换最多丢停止瞬间在途的几条。处理方向（已与所有者确认）：先实测停止时不发 DISCONNECT、直接断开连接能否避开；再加「停止前处理并 ACK 完已收到的消息」缩小窗口；残留风险随 V1.0 升级 EMQX 解决。实施前与所有者详细讨论。
 
-- 全量包的 `conduit-transport-2` 从 YAML 锚点继承了 `build:`，`docker compose up --build` 为两个 transport 各构建一个内容相同的镜像（第二次命中 BuildKit 缓存，耗时很短）。可改为后者 `build: !reset null` 并共用前者的固定镜像名，需先确认 `up` 时不会在构建前去拉取该镜像。
+- 独立部署包的 `conduit-transport-2` 从 YAML 锚点继承了 `build:`，`docker compose up --build` 为两个 transport 各构建一个内容相同的镜像（第二次命中 BuildKit 缓存，耗时很短）。可改为后者 `build: !reset null` 并共用前者的固定镜像名，需先确认 `up` 时不会在构建前去拉取该镜像。
 - 租户发现代码在 `finally` 里 `return`，可能吞掉 `Error`；下次改动该文件时一并修正。
 - 升级 EMQX（评估同时支持磁盘持久会话与共享订阅的版本）后改回「多实例共享订阅 + 持久会话」，提升接入吞吐；当前单活多备只有主实例消费。
 - 主备切换窗口（最长一个续期间隔）内，旧主若未察觉失锁，可能与新主以同一 clientId 互相踢；协调器重连前先续期可止住，期间的重复消息由写库去重吸收。

@@ -34,7 +34,7 @@ public final class TestBroker {
         }
     }
 
-    /** EMQX 容器（首次访问时启动），配置与 deploy/infra/docker-compose.yml 的持久会话设置一致。 */
+    /** EMQX 容器（首次访问时启动），配置与 deploy/dev/docker-compose.yml 的持久会话设置一致。 */
     private static final class EmqxHolder {
         static final GenericContainer<?> CONTAINER = start(
                 new GenericContainer<>(DockerImageName.parse("emqx/emqx:5.8.6"))

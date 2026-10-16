@@ -1,7 +1,7 @@
-# 基础服务包（开发用）：PostgreSQL、Redis、InfluxDB 3、InfluxDB 3 Explorer、EMQX。
+# 开发环境包（deploy/dev）：PostgreSQL、Redis、InfluxDB 3、InfluxDB 3 Explorer、EMQX。
 # 应用（server、transport、模拟器、前端）在开发机的 IDE 中运行，EMQX 的鉴权回调打到开发机上的 server。
 # 用法：把本目录放到 Linux 宿主机上，cp .env.example .env 并修改口令与 CONDUIT_AUTH_URL，然后 docker compose up -d。
-# 全量包 deploy/full 用 extends 引用这里的 5 个服务：修改本文件会同时影响全量包，两者项目名与数据卷相同。
+# 独立部署包 deploy/standalone 用 extends 引用这里的 5 个服务：修改本文件会同时影响独立部署包，两者项目名与数据卷相同。
 name: conduit
 
 services:
@@ -92,7 +92,7 @@ services:
         && exec /usr/bin/docker-entrypoint.sh /opt/emqx/bin/emqx foreground
     environment:
       CONDUIT_INTERNAL_TOKEN: ${CONDUIT_INTERNAL_TOKEN:?CONDUIT_INTERNAL_TOKEN is required}
-      # 鉴权回调地址（必填）：开发时为开发机上 server 的地址 http://<dev-host>:8080；全量包固定为 http://conduit-server:8080
+      # 鉴权回调地址（必填）：开发时为开发机上 server 的地址 http://<dev-host>:8080；独立部署包固定为 http://conduit-server:8080
       CONDUIT_AUTH_URL: ${CONDUIT_AUTH_URL:?CONDUIT_AUTH_URL is required}
       EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:?EMQX_DASHBOARD_PASSWORD is required}
       # 磁盘持久会话（V0.2-R）：transport 离线期间的消息写入磁盘，保留 1 天（durable_sessions.message_retention_period 默认值）；
@@ -102,7 +102,7 @@ services:
       EMQX_NODE__NAME: emqx@127.0.0.1
     volumes:
       - emqx-data:/opt/emqx/data
-      # 相对路径按本文件所在目录解析（全量包 extends 时同样指向这里）；文件需对容器内 emqx 用户（uid 1000）可读
+      # 相对路径按本文件所在目录解析（独立部署包 extends 时同样指向这里）；文件需对容器内 emqx 用户（uid 1000）可读
       - ./emqx/base.hocon.tpl:/conduit/base.hocon.tpl:ro
       - ./emqx/acl.conf:/opt/emqx/etc/conduit-acl.conf:ro
     ports:

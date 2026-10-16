@@ -1,6 +1,6 @@
-# 构建上下文为仓库根目录（deploy/full/docker/ 下的 Dockerfile 使用）：
+# 构建上下文为仓库根目录（deploy/standalone/docker/ 下的 Dockerfile 使用）：
 # 排除依赖、构建产物、版本库、日志与本地配置，使上下文小且不带主机地址与口令。
-# 预编译产物在 deploy/full/artifacts/（由 deploy/package.sh 生成），最后一行保证它们始终进入上下文。
+# 预编译产物在 deploy/standalone/artifacts/（由 deploy/package.sh 生成），最后一行保证它们始终进入上下文。
 .git
 **/node_modules
 **/target
@@ -8,11 +8,10 @@ conduit-ui/dist
 logs
 .claude
 .superpowers
-.idea
 **/.idea
 **/*.iml
 **/.env
 **/.env.*
 **/application-local.yml
 **/simulator-local.properties
-!deploy/full/artifacts/**
+!deploy/standalone/artifacts/**

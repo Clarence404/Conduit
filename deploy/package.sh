@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 打包全量包（开发机执行，Git Bash 或 Linux）：从当前提交（HEAD）的干净检出编译后端 jar 与前端，
-# 放进检出中的 deploy/full/artifacts/，再把 deploy/（含产物，不含 .env）、根 .dockerignore 与 conduit-ui/nginx.conf
-# 打成 target/conduit-full-<短提交>.tar.gz。包复制到 Linux 上解压后，按 deploy/full/README.md 以 BUILD_FROM=prebuilt 启动，
+# 打包独立部署包（开发机执行，Git Bash 或 Linux）：从当前提交（HEAD）的干净检出编译后端 jar 与前端，
+# 放进检出中的 deploy/standalone/artifacts/，再把 deploy/（含产物，不含 .env）、根 .dockerignore 与 conduit-ui/nginx.conf
+# 打成 target/conduit-standalone-<短提交>.tar.gz。包复制到 Linux 上解压后，按 deploy/standalone/README.md 以 BUILD_FROM=prebuilt 启动，
 # 宿主机不需要外网。
 #
 # 未提交的修改与 .gitignore 中的本地配置（.env、application-local.yml、simulator-local.properties 等）不会进入包。
@@ -14,7 +14,7 @@ set -euo pipefail
 ROOT=$(git rev-parse --show-toplevel)
 SHA=$(git -C "$ROOT" rev-parse --short HEAD)
 OUT_DIR="$ROOT/target"
-OUT="$OUT_DIR/conduit-full-$SHA.tar.gz"
+OUT="$OUT_DIR/conduit-standalone-$SHA.tar.gz"
 MQTT_PORT=${VITE_MQTT_PORT:-1883}
 
 if ! mvn -v 2>/dev/null | grep -q "Java version: 21"; then
@@ -44,8 +44,8 @@ echo "==> 构建后端 jar"
 echo "==> 构建前端（VITE_MQTT_PORT=$MQTT_PORT）"
 (cd "$SRC/conduit-ui" && npm ci --no-audit --no-fund --loglevel=error && VITE_MQTT_PORT=$MQTT_PORT npm run build)
 
-echo "==> 复制产物到 deploy/full/artifacts/"
-ART="$SRC/deploy/full/artifacts"
+echo "==> 复制产物到 deploy/standalone/artifacts/"
+ART="$SRC/deploy/standalone/artifacts"
 cp "$SRC/conduit-server/target/conduit-server.jar" "$ART/"
 cp "$SRC/conduit-transport/target/conduit-transport.jar" "$ART/"
 cp "$SRC/conduit-simulator/target/conduit-simulator-exec.jar" "$ART/"

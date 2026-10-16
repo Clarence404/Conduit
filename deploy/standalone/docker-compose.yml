@@ -1,48 +1,48 @@
-# 全量包：基础服务（extends ../infra/docker-compose.yml）+ conduit-server、两个 transport、conduit-web 与演示模拟器。
+# 独立部署包：基础服务（extends ../dev/docker-compose.yml）+ conduit-server、两个 transport、conduit-web 与演示模拟器。
 # 用法：cp .env.example .env 并修改口令，然后 docker compose up -d --build。
 # 应用镜像的产物来源由 .env 的 BUILD_FROM 决定：prebuilt（默认，用 artifacts/ 中由 deploy/package.sh 打好的产物）
 # 或 source（在宿主机上从源码编译，需联网）。构建上下文为仓库根目录（../..），见根目录 .dockerignore。
-# 基础服务的定义只在 ../infra/docker-compose.yml：其中的相对路径（EMQX 配置挂载）按 infra 文件所在目录解析，
-# 变量插值用本目录的 .env，所以本目录 .env 要包含 infra 必填的全部变量。项目名与数据卷和基础服务包相同，同一宿主机上二选一。
+# 基础服务的定义只在 ../dev/docker-compose.yml：其中的相对路径（EMQX 配置挂载）按 dev 文件所在目录解析，
+# 变量插值用本目录的 .env，所以本目录 .env 要包含 dev 包必填的全部变量。项目名与数据卷和开发环境包相同，同一宿主机上二选一。
 name: conduit
 
 services:
   postgres:
     extends:
-      file: ../infra/docker-compose.yml
+      file: ../dev/docker-compose.yml
       service: postgres
 
   redis:
     extends:
-      file: ../infra/docker-compose.yml
+      file: ../dev/docker-compose.yml
       service: redis
 
   influxdb:
     extends:
-      file: ../infra/docker-compose.yml
+      file: ../dev/docker-compose.yml
       service: influxdb
 
   influxdb-explorer:
     extends:
-      file: ../infra/docker-compose.yml
+      file: ../dev/docker-compose.yml
       service: influxdb-explorer
-    # 与 infra 中的依赖相同，在此显式声明，不依赖 extends 是否继承 depends_on
+    # 与 dev 包中的依赖相同，在此显式声明，不依赖 extends 是否继承 depends_on
     depends_on:
       influxdb:
         condition: service_healthy
 
   emqx:
     extends:
-      file: ../infra/docker-compose.yml
+      file: ../dev/docker-compose.yml
       service: emqx
     environment:
-      # 全量包中鉴权回调固定指向容器内的 conduit-server（.env 中的同名变量只用于满足 infra 文件的必填检查）
+      # 独立部署包中鉴权回调固定指向容器内的 conduit-server（.env 中的同名变量只用于满足 dev 文件的必填检查）
       CONDUIT_AUTH_URL: http://conduit-server:8080
 
   conduit-server:
     build:
       context: ../..
-      dockerfile: deploy/full/docker/java.Dockerfile
+      dockerfile: deploy/standalone/docker/java.Dockerfile
       args:
         BUILD_FROM: ${BUILD_FROM:-prebuilt}
         MODULE: conduit-server
@@ -97,7 +97,7 @@ services:
   conduit-transport: &transport
     build:
       context: ../..
-      dockerfile: deploy/full/docker/java.Dockerfile
+      dockerfile: deploy/standalone/docker/java.Dockerfile
       args:
         BUILD_FROM: ${BUILD_FROM:-prebuilt}
         MODULE: conduit-transport
@@ -132,7 +132,7 @@ services:
   conduit-web:
     build:
       context: ../..
-      dockerfile: deploy/full/docker/web.Dockerfile
+      dockerfile: deploy/standalone/docker/web.Dockerfile
       args:
         BUILD_FROM: ${BUILD_FROM:-prebuilt}
         VITE_MQTT_PORT: ${MQTT_PORT:-1883}
@@ -147,7 +147,7 @@ services:
   simulator:
     build:
       context: ../..
-      dockerfile: deploy/full/docker/java.Dockerfile
+      dockerfile: deploy/standalone/docker/java.Dockerfile
       args:
         BUILD_FROM: ${BUILD_FROM:-prebuilt}
         MODULE: conduit-simulator
@@ -179,7 +179,7 @@ services:
         condition: service_started
     restart: on-failure
 
-# extends 不带入顶层数据卷，这里按同名重新声明（项目名 conduit 下即 conduit_pg-data 等，与基础服务包共用）
+# extends 不带入顶层数据卷，这里按同名重新声明（项目名 conduit 下即 conduit_pg-data 等，与开发环境包共用）
 volumes:
   pg-data:
   redis-data:

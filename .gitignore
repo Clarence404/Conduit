@@ -14,12 +14,12 @@ dist/
 
 # Secrets
 .env
-deploy/infra/.env
-deploy/full/.env
+deploy/dev/.env
+deploy/standalone/.env
 
 # 全量包的预编译产物（deploy/package.sh 在临时检出中生成），仓库里只保留占位文件
-deploy/full/artifacts/*
-!deploy/full/artifacts/.gitkeep
+deploy/standalone/artifacts/*
+!deploy/standalone/artifacts/.gitkeep
 
 # OS
 .DS_Store
