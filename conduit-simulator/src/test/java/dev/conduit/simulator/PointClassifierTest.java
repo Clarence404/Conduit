@@ -23,7 +23,14 @@ class PointClassifierTest {
         assertThat(kind("Uab", "线电压", "DOUBLE", null)).isEqualTo(PointKind.VOLTAGE);
         assertThat(kind("Ia", "A 相电流", "DOUBLE", "A")).isEqualTo(PointKind.LOAD);
         assertThat(kind("P", "有功功率", "DOUBLE", "kW")).isEqualTo(PointKind.LOAD);
+        // 无产品上下文（非光伏产品）：交流功率是用电负荷
         assertThat(kind("Pac", "交流功率", "DOUBLE", "W")).isEqualTo(PointKind.LOAD);
+        // 光伏产品上下文：同一个测点跟随日照
+        assertThat(PointClassifier.classify(def("Pac", "交流功率", "DOUBLE", "W"), true)).isEqualTo(PointKind.PV_POWER);
+        assertThat(PointClassifier.isPvModel(List.of(def("pac", "交流功率", "DOUBLE", "kW"),
+                def("eday", "日发电量", "DOUBLE", "kWh")))).isTrue();
+        assertThat(PointClassifier.isPvModel(List.of(def("P", "有功功率", "DOUBLE", "kW"),
+                def("EPimp", "正向有功电能", "DOUBLE", "kWh")))).isFalse();
         assertThat(kind("Ppv", "光伏功率", "DOUBLE", "kW")).isEqualTo(PointKind.PV_POWER);
         assertThat(kind("pdc", "直流发电功率", "DOUBLE", "W")).isEqualTo(PointKind.PV_POWER);
         assertThat(kind("irr", "辐照度", "DOUBLE", "W/m²")).isEqualTo(PointKind.IRRADIANCE);

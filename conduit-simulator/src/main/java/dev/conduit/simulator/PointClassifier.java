@@ -21,19 +21,29 @@ public final class PointClassifier {
         return classify(p) != PointKind.SKIP;
     }
 
-    /** 判定属性的类别；TEXT、无枚举项的 ENUM 与未知类型为 SKIP。 */
+    /** 判定属性的类别（无产品上下文，按非光伏产品处理）；TEXT、无枚举项的 ENUM 与未知类型为 SKIP。 */
     public static PointKind classify(PropertyDef p) {
+        return classify(p, false);
+    }
+
+    /**
+     * 判定属性的类别，带产品上下文。
+     *
+     * @param pvModel 产品是否为光伏类（见 {@link #isPvModel}）；为 true 时，原本归为 LOAD 的功率单位测点
+     *                （如逆变器的「交流功率」）改为 PV_POWER，跟随日照曲线，夜间为 0
+     */
+    public static PointKind classify(PropertyDef p, boolean pvModel) {
         String type = p.dataType() == null ? "" : p.dataType().toUpperCase(Locale.ROOT);
         return switch (type) {
             case "ENUM" -> p.enumItems().isEmpty() ? PointKind.SKIP : PointKind.ENUM;
             case "BOOL" -> PointKind.BOOL;
-            case "DOUBLE", "INT" -> numeric(p);
+            case "DOUBLE", "INT" -> numeric(p, pvModel);
             default -> PointKind.SKIP;
         };
     }
 
     /** 数值属性的分类：累计量 → 辐照 → 光伏功率 → 电压 → 负载（电流/功率）→ 温度 → 流量 → 漂移类 → 其他。 */
-    private static PointKind numeric(PropertyDef p) {
+    private static PointKind numeric(PropertyDef p, boolean pvModel) {
         String unit = normalizeUnit(p.unit());
         String text = text(p);
         boolean daily = isDaily(text);
@@ -52,6 +62,9 @@ public final class PointClassifier {
         if (unit.equals("v") || (unit.isEmpty() && text.contains("电压"))) {
             return PointKind.VOLTAGE;
         }
+        if (pvModel && POWER_UNITS.contains(unit)) {
+            return PointKind.PV_POWER;
+        }
         if (unit.equals("a") || POWER_UNITS.contains(unit)) {
             return PointKind.LOAD;
         }
@@ -65,6 +78,25 @@ public final class PointClassifier {
             return PointKind.DRIFT;
         }
         return PointKind.OTHER;
+    }
+
+    /**
+     * 产品是否为光伏类：任一属性的标识或名称含发电关键字（eday / etotal / 发电 / 光伏 / pv / solar），
+     * 或是辐照度（W/m² 或辐照关键字）。光伏类产品里的功率测点都按光伏功率生成。
+     */
+    public static boolean isPvModel(java.util.List<PropertyDef> properties) {
+        for (PropertyDef p : properties) {
+            String type = p.dataType() == null ? "" : p.dataType().toUpperCase(Locale.ROOT);
+            if (!type.equals("DOUBLE") && !type.equals("INT")) {
+                continue;
+            }
+            String text = text(p);
+            if (isGeneration(text) || normalizeUnit(p.unit()).equals("w/m2")
+                    || containsAny(text, "辐照", "irradiance")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 是否与发电（光伏、逆变器）有关。 */

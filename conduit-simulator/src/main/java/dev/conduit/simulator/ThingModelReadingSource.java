@@ -10,7 +10,7 @@ import java.util.Map;
 
 /**
  * 按产品物模型为一台设备生成读数（spec 5.2）：每个可模拟的属性一个 {@link PointGenerator}，TEXT 等跳过；
- * 先生成瞬时量，再按本轮功率/流量积分累计量。日曲线按 zone 的本地时间计算。
+ * 先生成瞬时量，再按本轮功率/流量积分累计量；光伏类产品（见 PointClassifier.isPvModel）的功率测点跟随日照。日曲线按 zone 的本地时间计算。
  */
 public final class ThingModelReadingSource implements ReadingSource {
 
@@ -26,6 +26,7 @@ public final class ThingModelReadingSource implements ReadingSource {
      */
     public ThingModelReadingSource(List<PropertyDef> properties, String deviceKey, ZoneId zone) {
         this.zone = zone;
+        boolean pvModel = PointClassifier.isPvModel(properties);
         double pv = 0;
         double load = 0;
         double flow = 0;
@@ -33,11 +34,11 @@ public final class ThingModelReadingSource implements ReadingSource {
             if (!PointClassifier.simulated(p)) {
                 continue;
             }
-            PointGenerator g = new PointGenerator(p, deviceKey);
+            PointGenerator g = new PointGenerator(p, deviceKey, pvModel);
             (g.cumulative() ? totals : instant).add(g);
             switch (g.kind) {
-                case PV_POWER -> pv += g.nominalKw();
-                case LOAD -> load += g.nominalKw();
+                case PV_POWER -> pv = Math.max(pv, g.nominalKw());
+                case LOAD -> load = Math.max(load, g.nominalKw());
                 case FLOW -> flow += g.nominalValue();
                 default -> {
                 }
@@ -51,6 +52,7 @@ public final class ThingModelReadingSource implements ReadingSource {
         return instant.size() + totals.size();
     }
 
+    /** 生成一次读数：先算瞬时量，再按本轮功率/流量积分累计量，TEXT 等不模拟的属性不出现。 */
     @Override
     public Map<String, Object> next(long epochMillis, double intervalSeconds) {
         ZonedDateTime time = Instant.ofEpochMilli(epochMillis).atZone(zone);

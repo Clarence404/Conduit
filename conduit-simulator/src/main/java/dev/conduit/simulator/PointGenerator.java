@@ -6,11 +6,12 @@ import java.util.Random;
 
 /**
  * 单个测点的取值生成器（每台设备每个测点一个实例，保存游走、云层与累计状态），实现 spec 5.2 的各条规则。
+ * 非线程安全：每台设备一个调度任务独占其生成器，不可并发调用。
  * 随机数以 deviceKey 与 identifier 为种子，同一设备每次启动得到相同的序列；状态只在内存中，重启后从合理初值开始。
  */
 final class PointGenerator {
 
-    /** 一轮读数中已生成的功率与流量合计，供累计量按功率/流量积分。 */
+    /** 一轮读数中的功率与流量，供累计量积分；功率取同类测点中最大的一个（各相功率与总功率不重复计入）。 */
     static final class Rates {
         double pvKw;
         double loadKw;
@@ -46,9 +47,12 @@ final class PointGenerator {
     private double cloud = 0.9;
     private LocalDate day;
 
-    PointGenerator(PropertyDef def, String deviceKey) {
+    /**
+     * @param pvModel 所属产品是否为光伏类，影响功率测点的分类
+     */
+    PointGenerator(PropertyDef def, String deviceKey, boolean pvModel) {
         this.def = def;
-        this.kind = PointClassifier.classify(def);
+        this.kind = PointClassifier.classify(def, pvModel);
         this.unit = PointClassifier.normalizeUnit(def.unit());
         this.text = PointClassifier.text(def);
         this.seed = deviceKey.hashCode() * 31L + def.identifier().hashCode();
@@ -72,6 +76,7 @@ final class PointGenerator {
         return unit.equals("a") ? 0 : toKw(nominal);
     }
 
+    /** 额定值（原单位：功率为 kW/W/MW，流量为 m³/h，辐照为 W/m²）。 */
     double nominalValue() {
         return nominal;
     }
@@ -158,12 +163,12 @@ final class PointGenerator {
     private void addToRates(double raw, Rates rates) {
         switch (kind) {
             case PV_POWER -> {
-                rates.pvKw += toKw(raw);
+                rates.pvKw = Math.max(rates.pvKw, toKw(raw));
                 rates.hasPv = true;
             }
             case LOAD -> {
                 if (!unit.equals("a")) {
-                    rates.loadKw += toKw(raw);
+                    rates.loadKw = Math.max(rates.loadKw, toKw(raw));
                     rates.hasLoad = true;
                 }
             }

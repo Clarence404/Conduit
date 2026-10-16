@@ -43,6 +43,33 @@ class ThingModelReadingSourceTest {
     }
 
     @Test
+    void inverterAcPowerFollowsTheSunAndFeedsDailyEnergy() {
+        var source = new ThingModelReadingSource(List.of(
+                def("pac", "交流功率", "DOUBLE", "kW", null, null, 3),
+                def("eday", "日发电量", "DOUBLE", "kWh", null, null, 3),
+                def("invTemp", "机内温度", "DOUBLE", "℃", null, null, 1),
+                new PropertyDef("invState", "运行状态", "ENUM", null, null, null, null,
+                        List.of(opt(0, "待机"), opt(1, "发电"), opt(2, "故障")))), "inv-pac", ZONE);
+
+        assertThat(source.next(at(16, 23, 0), 60).get("pac")).isEqualTo(0.0);
+        double firstEday = 0;
+        double lastEday = 0;
+        double expected = 0;
+        for (int i = 0; i < 480; i++) {
+            Map<String, Object> reading = source.next(at(16, 8, 0) + i * 60_000L, 60);
+            lastEday = (Double) reading.get("eday");
+            if (i == 0) {
+                firstEday = lastEday;
+            } else {
+                expected += (Double) reading.get("pac") / 60;
+            }
+        }
+        assertThat((Double) source.next(at(16, 12, 0), 60).get("pac")).isGreaterThan(0.0);
+        assertThat(expected).isGreaterThan(50);
+        assertThat(lastEday - firstEday).isCloseTo(expected, within(expected * 0.01 + 0.01));
+    }
+
+    @Test
     void energyIsMonotonicAndFollowsThePower() {
         var source = new ThingModelReadingSource(List.of(
                 def("P", "有功功率", "DOUBLE", "kW", 0.0, 60.0, 2),
