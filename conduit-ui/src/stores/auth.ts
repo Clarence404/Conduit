@@ -16,6 +16,8 @@ export const useAuthStore = defineStore('auth', {
     user: null as UserView | null,
     /** 某个接口返回了 PASSWORD_CHANGE_REQUIRED（令牌带「需改密码」标记，即使 user 里还没体现） */
     passwordChangeRequired: false,
+    /** 会话代数：每次签发（setSession）或清空会话时递增，供自动刷新判断自己是否已被更新的会话取代 */
+    generation: 0,
   }),
   getters: {
     isAuthenticated: (state) => state.token !== null,
@@ -24,8 +26,9 @@ export const useAuthStore = defineStore('auth', {
       state.token !== null && (state.passwordChangeRequired || state.user?.mustChangePassword === true),
   },
   actions: {
-    /** 写入一次签发的会话（token 与用户），并清除「接口要求先改密码」标记。 */
+    /** 写入一次签发的会话（token 与用户），清除「接口要求先改密码」标记，并递增会话代数使在途的旧刷新作废。 */
     setSession(res: TokenResponse) {
+      this.generation++
       this.token = res.accessToken
       this.user = res.user
       this.passwordChangeRequired = false
@@ -70,6 +73,7 @@ export const useAuthStore = defineStore('auth', {
     },
     /** 清空本地会话（token、用户与改密码标记），不请求服务端；登录失效或登出时使用。 */
     clear() {
+      this.generation++
       this.token = null
       this.user = null
       this.passwordChangeRequired = false

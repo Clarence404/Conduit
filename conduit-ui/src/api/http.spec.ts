@@ -141,4 +141,76 @@ describe('createHttp', () => {
     expect(exit.data.auth).toBe('Bearer old')
     expect(login.data.auth).toBeNull()
   })
+
+  it('ignores a refresh that resolves after the session was replaced', async () => {
+    let generation = 0
+    let token: string | null = 'old'
+    const onRefreshed = vi.fn()
+    const client = createHttp({
+      getToken: () => token,
+      setToken: (t) => {
+        token = t
+      },
+      getGeneration: () => generation,
+      onRefreshed,
+      onAuthFailed: vi.fn(),
+    })
+    const m = new MockAdapter(client)
+    m.onGet('/api/v1/x').reply((config) =>
+      config.headers?.Authorization === 'Bearer entered' ? [200, { ok: true }] : [401],
+    )
+    m.onPost(REFRESH_URL).reply(() => {
+      // 刷新在途时，用户进入租户，换成了更新的会话
+      generation++
+      token = 'entered'
+      return [200, { accessToken: 'stale', expiresIn: 900, user: { username: 'stale' } }]
+    })
+
+    const res = await client.get('/api/v1/x')
+
+    expect(res.data.ok).toBe(true)
+    expect(token).toBe('entered')
+    expect(onRefreshed).not.toHaveBeenCalled()
+  })
+
+  it('does not log out when a stale refresh is rejected after the session was replaced', async () => {
+    let generation = 0
+    let token: string | null = 'old'
+    const onAuthFailed = vi.fn()
+    const client = createHttp({
+      getToken: () => token,
+      setToken: (t) => {
+        token = t
+      },
+      getGeneration: () => generation,
+      onAuthFailed,
+    })
+    const m = new MockAdapter(client)
+    m.onGet('/api/v1/x').reply(401)
+    m.onPost(REFRESH_URL).reply(() => {
+      generation++
+      token = 'entered'
+      return [401]
+    })
+
+    await expect(client.get('/api/v1/x')).rejects.toBeTruthy()
+
+    expect(onAuthFailed).not.toHaveBeenCalled()
+    expect(token).toBe('entered')
+  })
+
+  it('does not treat a refresh 403 PASSWORD_CHANGE_REQUIRED as a logout', async () => {
+    const onPasswordChangeRequired = vi.fn()
+    const tokens2 = holder('old')
+    const c2 = createHttp({ ...tokens2, onPasswordChangeRequired })
+    const m2 = new MockAdapter(c2)
+    m2.onGet('/api/v1/x').reply(401)
+    m2.onPost(REFRESH_URL).reply(403, { code: PASSWORD_CHANGE_REQUIRED, detail: '请先修改密码' })
+
+    await expect(c2.get('/api/v1/x')).rejects.toBeTruthy()
+
+    expect(tokens2.onAuthFailed).not.toHaveBeenCalled()
+    expect(tokens2.getToken()).toBe('old')
+    expect(onPasswordChangeRequired).toHaveBeenCalled()
+  })
 })

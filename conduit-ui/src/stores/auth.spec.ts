@@ -105,4 +105,16 @@ describe('useAuthStore', () => {
     expect(auth.user).toBeNull()
     expect(auth.passwordChangeRequired).toBe(false)
   })
+
+  it('bumps the session generation on every new session and on clear', () => {
+    const auth = useAuthStore()
+    const g0 = auth.generation
+
+    auth.setSession(session('t1'))
+    const g1 = auth.generation
+    auth.clear()
+
+    expect(g1).toBeGreaterThan(g0)
+    expect(auth.generation).toBeGreaterThan(g1)
+  })
 })
