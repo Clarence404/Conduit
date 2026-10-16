@@ -78,3 +78,13 @@ deploy/
 3. 基础服务包用临时项目名在宿主机启动，5 个服务健康、EMQX 持久会话配置生效，然后删除。
 4. `mvn -B verify` 与 e2e 四个场景通过。
 5. 所有者把 `deploy/infra` 放到宿主机并以项目名 `conduit` 重新启动开发基础设施，数据保留，本地 `Conduit (local all)` 正常。
+
+## 9. 验收记录（2026-10-16）
+
+在 Docker 宿主机（Docker 28.0.2、Compose v2.35.1）上用临时项目 `conduit-pkgtest`、临时目录与错开的端口验证，结束后容器、数据卷、镜像与目录全部删除，开发项目 `conduit` 前后一致。
+
+1. 全量包（`target/conduit-full-1151c5b.tar.gz`，`BUILD_FROM=prebuilt`）：`docker compose up -d --build --wait` 成功，全部服务健康；一个 transport 为主、一个为备；模拟器上报写入 InfluxDB（行数持续增长），死信 0；web 返回页面并代理 API。
+2. `BUILD_FROM=source`（`git archive` 的源码）：在宿主机上构建 conduit-server 与 conduit-web 镜像成功（Maven 依赖下载约 5.5 分钟）。
+3. 基础服务包：5 个服务健康，EMQX 磁盘持久会话生效、回调地址渲染正确，挂载的配置文件属主 0、权限 644。
+4. e2e 四个场景通过（读取 `deploy/infra/emqx/` 模板）。`mvn -B verify` 中 `LeaderElectionIT` 的正常停止交接用例间歇失败，为 V0.2-R 已知问题（见 backlog「V0.2-R 遗留」），与本次整理无关，单独处理。
+5. 开发基础设施切换到 `deploy/infra`：待所有者操作。
