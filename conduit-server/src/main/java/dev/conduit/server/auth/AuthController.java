@@ -55,7 +55,7 @@ public class AuthController {
     public ResponseEntity<TokenResponse> login(@Valid @RequestBody LoginRequest request) {
         AppUser user = users.selectOne(new LambdaQueryWrapper<AppUser>().eq(AppUser::getUsername, request.username()));
         if (user == null || !encoder.matches(request.password(), user.getPasswordHash())) {
-            log.debug("Login rejected for {}: bad credentials", request.username());
+            log.debug("Login rejected: bad credentials");
             throw ApiException.unauthorized("用户名或密码错误");
         }
         sessions.requireActive(user);
@@ -119,14 +119,18 @@ public class AuthController {
     /**
      * 平台管理员退出代入的租户：换回自己的令牌，记一行 INFO。
      *
-     * @throws ApiException 409：当前令牌不是代入令牌；401：平台管理员已被删除或禁用
+     * @throws ApiException 409：当前令牌不是代入令牌；401：平台管理员已被删除、禁用或不再是平台管理员（与代入续期同一检查）
      */
     @PostMapping("/exit-tenant")
     public ResponseEntity<TokenResponse> exitTenant(@AuthenticationPrincipal AuthPrincipal principal) {
         if (!principal.impersonating()) {
             throw ApiException.conflict("当前没有进入任何租户");
         }
-        AppUser admin = sessions.requireActive(users.selectById(principal.impersonatorId()));
+        AppUser admin = users.selectById(principal.impersonatorId());
+        if (admin == null || !Roles.PLATFORM_ADMIN.equals(admin.getRole())) {
+            throw ApiException.unauthorized("用户不可用");
+        }
+        sessions.requireActive(admin);
         Tenant tenant = tenants.selectById(principal.tenantId());
         log.info("Platform admin {} exited tenant {}", admin.getUsername(),
                 tenant == null ? String.valueOf(principal.tenantId()) : tenant.getCode());

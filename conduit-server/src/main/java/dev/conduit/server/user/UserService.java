@@ -161,18 +161,24 @@ public class UserService {
     /**
      * 重置密码并要求对方下次登录修改。
      *
-     * @throws ApiException 404：用户不在当前租户；400：密码不合规
+     * <p>不加租户锁：该操作不改变角色与状态，不会影响「最后一个启用的租户管理员」判断，
+     * 与其他用户管理操作并发时互不依赖，无需串行化。
+     *
+     * @throws ApiException 404：用户不在当前租户（含更新时恰好被并发删除，影响 0 行）；400：密码不合规
      */
     @Transactional
     public void resetPassword(AuthPrincipal actor, String username, PasswordRequest request) {
         long tenantId = TenantContext.require();
         AppUser target = require(tenantId, username);
         PasswordPolicy.requireValid(request.password());
-        users.update(null, new LambdaUpdateWrapper<AppUser>()
+        int updated = users.update(null, new LambdaUpdateWrapper<AppUser>()
                 .eq(AppUser::getId, target.getId())
                 .set(AppUser::getPasswordHash, encoder.encode(request.password()))
                 .set(AppUser::getMustChangePassword, true)
                 .set(AppUser::getUpdatedAt, OffsetDateTime.now(clock)));
+        if (updated == 0) {
+            throw ApiException.notFound("用户不存在: " + username);
+        }
         log.info("Reset password of user {} by {}", username, actor.username());
     }
 

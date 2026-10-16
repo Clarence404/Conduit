@@ -30,7 +30,7 @@ public class ImpersonationLogFilter extends OncePerRequestFilter {
         this.tenants = tenants;
     }
 
-    /** 代入的写请求放行后记日志（finally 中，含被拒绝或出错的请求）；其余请求直接放行。 */
+    /** 代入的写请求放行后记日志（finally 中，含被拒绝或出错的请求；异常逃出时记 500 并重新抛出）；其余请求直接放行。 */
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
@@ -40,12 +40,17 @@ public class ImpersonationLogFilter extends OncePerRequestFilter {
             chain.doFilter(request, response);
             return;
         }
+        // 异常逃出 MVC 时响应状态还没写出（容器随后才返回 500），日志按 500 记录并原样重新抛出
+        int status = 0;
         try {
             chain.doFilter(request, response);
+        } catch (IOException | ServletException | RuntimeException e) {
+            status = HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+            throw e;
         } finally {
             log.info("Impersonated write by platform admin {} in tenant {}: {} {} -> {}", principal.username(),
                     tenantCode(principal.tenantId()), request.getMethod(), request.getRequestURI(),
-                    response.getStatus());
+                    status != 0 ? status : response.getStatus());
         }
     }
 

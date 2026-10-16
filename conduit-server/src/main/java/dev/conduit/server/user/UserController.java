@@ -46,28 +46,45 @@ public class UserController {
         return service.list(keyword, role, status, page, size);
     }
 
+    /**
+     * 在当前租户新建用户（201），首次登录必须修改密码。角色只能是 TENANT_ADMIN 或 TENANT_VIEWER，用户名、密码、显示名称
+     * 须符合各自规则，否则 400；用户名全平台唯一，重名 409。
+     */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public UserItem create(@Valid @RequestBody CreateUserRequest request) {
         return service.create(request);
     }
 
+    /**
+     * 修改用户的显示名称与角色（角色只能是租户角色，否则 400）。用户不在当前租户 404；修改自己的角色，
+     * 或把最后一个启用的租户管理员降级时 409（代入的平台管理员不算本租户用户，不受「自己」限制）。
+     */
     @PutMapping("/{username}")
     public UserItem update(@AuthenticationPrincipal AuthPrincipal actor, @PathVariable String username,
                            @Valid @RequestBody UpdateUserRequest request) {
         return service.update(actor, username, request);
     }
 
+    /**
+     * 禁用用户（已禁用时幂等），对方在下次续期时失效。用户不在当前租户 404；禁用自己，
+     * 或禁用最后一个启用的租户管理员时 409。
+     */
     @PostMapping("/{username}/disable")
     public UserItem disable(@AuthenticationPrincipal AuthPrincipal actor, @PathVariable String username) {
         return service.setStatus(actor, username, AppUser.DISABLED);
     }
 
+    /** 启用用户（已启用时幂等）。用户不在当前租户 404；启用不受「自己」和「最后管理员」规则限制。 */
     @PostMapping("/{username}/enable")
     public UserItem enable(@AuthenticationPrincipal AuthPrincipal actor, @PathVariable String username) {
         return service.setStatus(actor, username, AppUser.ACTIVE);
     }
 
+    /**
+     * 重置用户密码（204），并把该用户置为「下次登录必须修改密码」（must_change_password）。新密码不合规 400；
+     * 用户不在当前租户 404。不受「自己」和「最后管理员」规则限制（不改变角色与状态）。
+     */
     @PostMapping("/{username}/reset-password")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void resetPassword(@AuthenticationPrincipal AuthPrincipal actor, @PathVariable String username,
@@ -75,6 +92,9 @@ public class UserController {
         service.resetPassword(actor, username, request);
     }
 
+    /**
+     * 删除用户（204）。用户不在当前租户 404；删除自己，或删除最后一个启用的租户管理员时 409。
+     */
     @DeleteMapping("/{username}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@AuthenticationPrincipal AuthPrincipal actor, @PathVariable String username) {

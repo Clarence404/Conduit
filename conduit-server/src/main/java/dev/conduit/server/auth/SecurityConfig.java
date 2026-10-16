@@ -18,7 +18,7 @@ import java.io.IOException;
 /**
  * Spring Security 配置：无状态 JWT 认证与权限矩阵（spec §3.3，后端统一按路径与方法判断，前端只做隐藏）：
  * <ul>
- *   <li>登录、刷新、登出、/internal/**（EMQX 回调，自行校验）、健康检查公开；</li>
+ *   <li>登录、刷新、登出、/internal/**（EMQX 回调，自行校验）、健康检查（/actuator/health/**）公开；其余 /actuator/** 仅平台管理员；</li>
  *   <li>/api/v1/auth/**、/api/v1/me/**：所有登录用户；</li>
  *   <li>/api/v1/platform/**：平台管理员（代入令牌的有效角色是 TENANT_ADMIN，因此被拒）；</li>
  *   <li>/api/v1/users/**：租户管理员（含代入的平台管理员）；</li>
@@ -43,6 +43,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout").permitAll()
                         .requestMatchers("/internal/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/error").permitAll()
+                        .requestMatchers("/actuator/**").hasRole(Roles.PLATFORM_ADMIN)
                         .requestMatchers("/api/v1/auth/**", "/api/v1/me", "/api/v1/me/**").authenticated()
                         .requestMatchers("/api/v1/platform/**").hasRole(Roles.PLATFORM_ADMIN)
                         .requestMatchers("/api/v1/users", "/api/v1/users/**").hasRole(Roles.TENANT_ADMIN)

@@ -20,7 +20,8 @@ public final class DisplayNamePolicy {
         if (displayName == null || displayName.isBlank()) {
             return null;
         }
-        String trimmed = displayName.trim();
+        // strip() 按 Unicode 空白处理（如全角空格 U+3000），trim() 只去掉 ASCII 控制与空格
+        String trimmed = displayName.strip();
         if (trimmed.length() > MAX_LENGTH) {
             throw ApiException.badRequest("显示名称最多 64 个字符");
         }
