@@ -297,6 +297,17 @@ class PipelineProcessorTest {
     }
 
     @Test
+    void tenantIsCheckedBeforeTheDevice() {
+        when(identities.find("d1")).thenReturn(Optional.of(new DeviceIdentity("d1", 1L, "DISABLED", "h", "s", "pk", "DISABLED")));
+        Delivery d = delivery("1-0", "d1");
+
+        processor.process(List.of(d));
+
+        verifyDeadLettered(d, "TENANT_DISABLED");
+        verify(writer, never()).write(anyList());
+    }
+
+    @Test
     void missingProductProfileIsUnknownDevice() {
         when(identities.find("d1")).thenReturn(Optional.of(identity("d1")));
         when(thingModels.find("pk")).thenReturn(Optional.empty());

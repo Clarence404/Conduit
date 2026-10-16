@@ -220,4 +220,21 @@ class PlatformTenantApiIT extends IntegrationTestBase {
         call("/api/v1/platform/tenants/{c}/disable", "no-such-tenant").andExpect(status().isNotFound());
         call("/api/v1/platform/tenants/{c}/enter", "no-such-tenant").andExpect(status().isNotFound());
     }
+
+    @Test
+    void resetsThePasswordOfAnAdminInADisabledTenant() throws Exception {
+        long id = createTenant("rd-");
+        String admin = createUser(id, Roles.TENANT_ADMIN, false);
+        jdbc.update("update tenant set status = 'DISABLED' where id = ?", id);
+
+        mvc.perform(post("/api/v1/platform/tenants/{c}/users/{u}/reset-password", tenantCode(id), admin)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(sys))
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"password\":\"Reset-pass-9\"}"))
+                .andExpect(status().isNoContent());
+
+        assertThat(jdbc.queryForObject("select must_change_password from app_user where username = ?",
+                Boolean.class, admin)).isTrue();
+        assertThat(jdbc.queryForObject("select password_hash from app_user where username = ?", String.class, admin))
+                .satisfies(hash -> assertThat(passwordEncoder.matches("Reset-pass-9", hash)).isTrue());
+    }
 }

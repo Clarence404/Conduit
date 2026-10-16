@@ -3,6 +3,7 @@ package dev.conduit.server.auth;
 import com.jayway.jsonpath.JsonPath;
 import dev.conduit.server.support.IntegrationTestBase;
 import org.junit.jupiter.api.Test;
+import jakarta.servlet.http.Cookie;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -17,7 +18,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 个人接口集成测试：修改显示名称；需改密码时只放行 /auth/me、修改密码与登出，其余 403 PASSWORD_CHANGE_REQUIRED；
- * 修改密码成功后换发令牌并解除限制；原密码错误、新密码不合规或与原密码相同 400；代入期间修改密码 409。
+ * 修改密码成功后换发令牌并解除限制；原密码错误、新密码不合规或与原密码相同 400；代入期间修改密码 409；
+ * 仍需改密码时续期（带 access token 或不带）都成功，且新令牌仍带 mcp。
  */
 class MeApiIT extends IntegrationTestBase {
 
@@ -94,5 +96,30 @@ class MeApiIT extends IntegrationTestBase {
                 JwtService.TokenType.ACCESS);
 
         changePassword(token, PLATFORM_ADMIN_PASSWORD, NEW_PASSWORD).andExpect(status().isConflict());
+    }
+
+    @Test
+    void refreshKeepsThePasswordChangeFlagWithAndWithoutAnAccessToken() throws Exception {
+        String username = createUser(createTenant("me-"), Roles.TENANT_ADMIN, true);
+        var login = loginResult(username, TEST_PASSWORD);
+        String access = JsonPath.read(login.getResponse().getContentAsString(), "$.accessToken");
+        Cookie refresh = login.getResponse().getCookie(SessionService.REFRESH_COOKIE);
+
+        // 带 access token（refresh 是公开接口，不要求登录）
+        String withAccess = mvc.perform(post("/api/v1/auth/refresh").cookie(refresh)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(access)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.mustChangePassword").value(true))
+                .andReturn().getResponse().getContentAsString();
+        // 不带 access token（access 已过期时与没有令牌等价）
+        String withoutAccess = mvc.perform(post("/api/v1/auth/refresh").cookie(refresh))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.mustChangePassword").value(true))
+                .andReturn().getResponse().getContentAsString();
+
+        for (String body : new String[]{withAccess, withoutAccess}) {
+            String fresh = JsonPath.read(body, "$.accessToken");
+            assertThat(jwt.parse(fresh, JwtService.TokenType.ACCESS).mustChangePassword()).isTrue();
+        }
     }
 }

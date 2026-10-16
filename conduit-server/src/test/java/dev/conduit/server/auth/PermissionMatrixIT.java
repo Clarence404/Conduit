@@ -16,7 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * 权限矩阵集成测试（spec §3.3）：平台管理员、租户管理员、只读用户与代入的平台管理员分别访问平台接口、租户读、租户写、
- * 用户管理与个人接口。「允许」以「不是 401/403」判断（平台与用户管理接口在后续任务实现前返回 404，实现后同样成立）；
+ * 用户管理与个人接口；/actuator/** 除健康检查外只有平台管理员可访问。「允许」以「不是 401/403」判断（平台与用户管理接口在后续任务实现前返回 404，实现后同样成立）；
  * 租户写用空请求体探测，允许时因参数校验返回 400，不会真的写入数据。
  */
 class PermissionMatrixIT extends IntegrationTestBase {
@@ -111,5 +111,18 @@ class PermissionMatrixIT extends IntegrationTestBase {
         mvc.perform(get("/api/v1/platform/overview")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/v1/users")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/v1/products")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void actuatorIsPlatformAdminOnlyExceptHealth() throws Exception {
+        long tenant = createTenant("pm-");
+        for (String role : new String[]{Roles.TENANT_ADMIN, Roles.TENANT_VIEWER}) {
+            String token = login(createUser(tenant, role, false), TEST_PASSWORD);
+            assertThat(statusOf(token, HttpMethod.GET, "/actuator/metrics")).as(role).isEqualTo(403);
+        }
+        assertThat(statusOf(loginAsPlatformAdmin(), HttpMethod.GET, "/actuator/metrics")).isEqualTo(200);
+        // 健康检查公开（不带令牌）
+        assertThat(mvc.perform(get("/actuator/health")).andReturn().getResponse().getStatus()).isEqualTo(200);
+        assertThat(mvc.perform(get("/actuator/metrics")).andReturn().getResponse().getStatus()).isEqualTo(401);
     }
 }

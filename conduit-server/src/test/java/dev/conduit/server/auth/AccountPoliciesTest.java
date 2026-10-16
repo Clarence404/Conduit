@@ -45,6 +45,9 @@ class AccountPoliciesTest {
         assertThat(DisplayNamePolicy.normalize(null)).isNull();
         assertThat(DisplayNamePolicy.normalize("   ")).isNull();
         assertThat(DisplayNamePolicy.normalize(" 华东运维 张工 ")).isEqualTo("华东运维 张工");
+        // 全角空格（U+3000）也要去掉；纯全角空格视为未设置
+        assertThat(DisplayNamePolicy.normalize("\u3000华东运维 张工\u3000")).isEqualTo("华东运维 张工");
+        assertThat(DisplayNamePolicy.normalize("\u3000\u3000")).isNull();
         assertThat(DisplayNamePolicy.normalize("名".repeat(64))).hasSize(64);
         assertBadRequest(() -> DisplayNamePolicy.normalize("名".repeat(65)));
     }

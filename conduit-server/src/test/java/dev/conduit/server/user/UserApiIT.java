@@ -13,6 +13,14 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -24,6 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * 租户用户管理集成测试：新建（需改密码）、分页与筛选、输入规则与重名 409、编辑显示名称与角色、
  * 「自己」不能删除/禁用/改角色、最后一个启用的租户管理员不能被降级/禁用/删除（代入的平台管理员同样受限）、
+ * 两个管理员并发互相降级只有一个成功（租户行锁）、非最后管理员可降级、已禁用的管理员不计入最后管理员规则、
  * 禁用后续期失败、重置密码、删除，以及其他租户的用户不可见（404）。每个测试使用自己新建的租户。
  */
 class UserApiIT extends IntegrationTestBase {
@@ -198,5 +207,63 @@ class UserApiIT extends IntegrationTestBase {
                 .andExpect(status().isNotFound());
         mvc.perform(get("/api/v1/users").header(HttpHeaders.AUTHORIZATION, bearer(token)))
                 .andExpect(jsonPath("$.total").value(1));
+    }
+
+    @Test
+    void twoAdminsDemotingEachOtherConcurrentlyLeaveExactlyOne() throws Exception {
+        String other = createUser(tenant, Roles.TENANT_ADMIN, false);
+        String otherToken = login(other, TEST_PASSWORD);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch go = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<Integer>> results = new ArrayList<>();
+            // 两人用各自的令牌（角色在令牌里，互相降级时对方的令牌仍是管理员）同时降级对方
+            for (String[] pair : new String[][]{{token, other}, {otherToken, admin}}) {
+                Callable<Integer> call = () -> {
+                    ready.countDown();
+                    go.await();
+                    return update(pair[0], pair[1], "", Roles.TENANT_VIEWER).andReturn().getResponse().getStatus();
+                };
+                results.add(pool.submit(call));
+            }
+            ready.await();
+            go.countDown();
+            List<Integer> statuses = new ArrayList<>();
+            for (Future<Integer> f : results) {
+                statuses.add(f.get());
+            }
+            assertThat(statuses).containsExactlyInAnyOrder(200, 409);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(jdbc.queryForObject("select count(*) from app_user where tenant_id = ? and role = ? and status = 'ACTIVE'",
+                Integer.class, tenant, Roles.TENANT_ADMIN)).isEqualTo(1);
+    }
+
+    @Test
+    void demotingANonLastAdminWorks() throws Exception {
+        String other = createUser(tenant, Roles.TENANT_ADMIN, false);
+
+        update(token, other, "", Roles.TENANT_VIEWER)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value(Roles.TENANT_VIEWER));
+    }
+
+    @Test
+    void aDisabledAdminDoesNotCountTowardTheLastAdminRule() throws Exception {
+        String disabled = createUser(tenant, Roles.TENANT_ADMIN, false);
+        jdbc.update("update app_user set status = 'DISABLED' where username = ?", disabled);
+        String platform = impersonationToken();
+
+        // 本租户只有 admin 一个启用的管理员，已禁用的不算：不能降级、禁用、删除
+        update(platform, admin, "", Roles.TENANT_VIEWER).andExpect(status().isConflict());
+        action(platform, admin, "disable").andExpect(status().isConflict());
+        mvc.perform(delete("/api/v1/users/{u}", admin).header(HttpHeaders.AUTHORIZATION, bearer(platform)))
+                .andExpect(status().isConflict());
+        // 已禁用的管理员本身可以随意降级、删除
+        update(platform, disabled, "", Roles.TENANT_VIEWER).andExpect(status().isOk());
+        mvc.perform(delete("/api/v1/users/{u}", disabled).header(HttpHeaders.AUTHORIZATION, bearer(platform)))
+                .andExpect(status().isNoContent());
     }
 }
