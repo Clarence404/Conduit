@@ -33,7 +33,7 @@ docker compose up -d --build
 
 ## 说明
 
-- 项目名 `conduit`，数据卷与开发环境包 `deploy/dev` 相同（`conduit_pg-data` 等），同一台宿主机上二选一；从开发环境包切换过来时数据沿用。
+- 项目名 `conduit`，数据卷与开发环境包 `deploy/dev` 相同（`conduit_pg-data` 等），同一台宿主机上二选一；从开发环境包切换过来时数据沿用。从一个包切换到另一个包时，先在旧包目录执行 `docker compose down`（不加 `-v`），并在新包的 `.env` 中沿用相同的共用口令与密钥（`POSTGRES_PASSWORD`、`INFLUX_TOKEN`、`INFLUX_EXPLORER_SESSION_KEY`、`CONDUIT_INTERNAL_TOKEN`、`EMQX_DASHBOARD_PASSWORD`）。
 - 构建上下文是包（或仓库）的根目录，`deploy/dev` 与 `deploy/standalone` 的相对位置不能改变。
 - EMQX 的鉴权回调固定为 `http://conduit-server:8080`。
 - 浏览器打开 `http://<docker-host>:8090`（`WEB_PORT`），用 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录；平台管理员用 `CONDUIT_PLATFORM_ADMIN_USERNAME` / `CONDUIT_PLATFORM_ADMIN_PASSWORD`。

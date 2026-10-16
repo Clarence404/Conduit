@@ -39,6 +39,7 @@ conduit-ui（Vue）──REST──> conduit-server
   - 重连：适配器不用 HiveMQ 自动重连。断线或会话被接管时，由选主协调器先续期确认仍持锁，再重新连接；SUBACK 含错误码视为失败。
   - 日志：抢锁或适配器启动首次失败 WARN，后续重试 DEBUG，恢复与每次角色变化 INFO。
   - 健康检查：`components.leader.details` 显示 `role` / `instanceId` / `connected`，`connected` 仅在已连接且订阅被批准后为 true。
+  - 已知问题：正常停止（发送 DISCONNECT）交接时存在少量丢消息的已知问题（EMQX 5.8.6），见 backlog「V0.2-R 遗留」，待单独处理。
 - **e2e**（V0.2-R）：`ReliabilityE2EIT` 在 Testcontainers 临时环境中运行。EMQX 开启持久会话，并固定一个 20000～29999 的随机宿主机端口，以便 docker restart 后端口不变。测试本地以 jar 启动 1 个 server、2 个 transport，配置全部经环境变量传入，口令每次随机生成；设备由测试代码扮演（QoS1 直到收到 PUBACK，断线重连）。四个场景各发 500 条，断言计数恰好、无死信、无待确认。运行需 `E2E_DEV_HOST`：先 `mvn -B -DskipTests install`，再 `mvn -B verify -Pe2e -pl conduit-e2e`。
 - **模拟器多租户**（V0.2-R）：
   - 发现：`SIM_PLATFORM_PASSWORD` 非空时，用平台管理员（`SIM_PLATFORM_USERNAME`）发现 `SIM_TENANTS` 中启用租户的物模型产品与启用设备（每产品最多 `SIM_MAX_DEVICES_PER_PRODUCT` 台），并重置其密钥；任一租户失败只记 WARN。退出租户失败时用平台管理员重新登录，再失败则发现停止并保留已发现的部分；单台设备重置密钥失败只跳过该设备。

@@ -44,6 +44,7 @@ flowchart TB
 - 选主：Redis 键 `conduit:transport:leader`（值为实例 id），用一段 Lua 脚本抢锁：键不存在则 `SET PX` 写入；键里已是本实例 id 则刷新过期时间并视为抢到（所以 Redis 短暂抖动后原主实例立即拿回锁）；其他情况拒绝。主实例每 5 秒续期，锁 15 秒过期，备实例每 2 秒尝试抢锁，只有主实例连接 EMQX。续期失败（Redis 不可用、锁已被他人持有、超时）立即断开 MQTT 转为备用；正常停止时释放锁，备实例立即接管；主实例崩溃时备实例最长 15 秒后接管同一个会话。配置项 `conduit.transport.leader.ttl` / `renew-interval` / `acquire-interval`。抢锁或适配器启动首次失败记 WARN，之后的重试记 DEBUG，恢复与每次角色变化记 INFO。
 - 健康检查：transport（端口 8081）的 `GET /actuator/health` 在 `components.leader.details` 中显示 `role`（`LEADER` / `STANDBY`）、`instanceId` 与 `connected`；`connected` 仅在已连接且订阅已被 EMQX 批准后才为 true。
 - 独立部署包起两个 transport（一主一备），都配置 `stop_grace_period: 20s` 以便正常停止时释放锁；开发时 IDE 中一个 transport，直接成为主实例。
+- 已知问题：正常停止（发送 DISCONNECT）交接时存在少量丢消息的已知问题（EMQX 5.8.6），见 backlog「V0.2-R 遗留」，待单独处理。
 
 ## 代码结构
 
@@ -100,7 +101,8 @@ conduit/
 
 ## 部署：开发环境包与独立部署包
 
-`deploy/` 下有两个可以直接放到 Linux 上用 Docker Compose（v2）启动的目录。两者项目名都是 `conduit`，数据卷相同（`conduit_pg-data` 等），同一台宿主机上二选一，切换时数据沿用：
+`deploy/` 下有两个可以直接放到 Linux 上用 Docker Compose（v2）启动的目录。两者项目名都是 `conduit`，数据卷相同（`conduit_pg-data` 等），同一台宿主机上二选一，切换时数据沿用。从一个包切换到另一个包时，先在旧包目录执行 `docker compose down`（不加 `-v`），并在新包的 `.env` 中沿用相同的共用口令与密钥（`POSTGRES_PASSWORD`、`INFLUX_TOKEN`、`INFLUX_EXPLORER_SESSION_KEY`、`CONDUIT_INTERNAL_TOKEN`、`EMQX_DASHBOARD_PASSWORD`）。
+
 
 | 目录 | 内容 | 用途 |
 |---|---|---|
@@ -125,7 +127,14 @@ docker compose up -d
 
 `CONDUIT_AUTH_URL` 必填，是 EMQX 鉴权回调的地址，即开发机上 IDE 中运行的 conduit-server（`<dev-host>` 为宿主机访问开发机的地址）；修改后执行 `docker compose up -d --force-recreate emqx`。EMQX 使用官方镜像 `emqx/emqx:5.8.6`，`emqx/base.hocon.tpl` 与 `emqx/acl.conf` 以只读方式挂载，启动时渲染回调地址与内部 token；EMQX 不依赖 conduit-server，server 未就绪时自行重试。详见 `deploy/dev/README.md`。
 
-从旧的 `deploy/docker-compose.yml` 迁移：在旧编排目录 `docker compose down`（不加 `-v`），把旧 `.env` 复制为 `deploy/dev/.env`，在新目录 `docker compose up -d`；项目名与数据卷不变，数据沿用。旧的自定义镜像 `conduit-emqx` 不再使用。
+从旧的开发基础设施迁移（旧的 `deploy/docker-compose.yml`，可能是在开发机上用 `DOCKER_HOST` 加 `docker compose -f deploy/docker-compose.yml` 启动的，也可能是 1Panel 从宿主机上的 `/opt/conduit` 启动的）：
+
+1. 不依赖任何文件，按项目名停止旧项目：`docker compose -p conduit down`（绝不加 `-v`）。
+2. 旧 `.env` 在开发机的 `deploy/.env` 或宿主机的 `/opt/conduit/.env`。复制为 `deploy/dev/.env`，下列值必须原样保留：`POSTGRES_PASSWORD`、`INFLUX_TOKEN`、`INFLUX_EXPLORER_SESSION_KEY`、`CONDUIT_INTERNAL_TOKEN`、`EMQX_DASHBOARD_PASSWORD`，以及各端口与 `CONDUIT_AUTH_URL`。PostgreSQL 与 InfluxDB 只在数据卷首次启动时应用口令与 token，所以换成新值会导致已有数据无法访问。
+3. 1Panel 用户：先删除旧编排（不要删除数据卷），再导入 `deploy/dev` 目录。
+4. 在 `deploy/dev` 执行 `docker compose up -d`，然后用 `docker volume ls` 检查没有出现新的 `conduit_*` 数据卷（有则说明项目名或卷名不对，立即 `down` 排查）。
+
+项目名与数据卷不变，数据沿用。旧的自定义镜像 `conduit-emqx` 不再使用。
 
 EMQX 开启了磁盘持久会话：compose 环境变量 `EMQX_DURABLE_SESSIONS__ENABLE=true`、`EMQX_CLUSTER__DISCOVERY_STRATEGY=singleton`，并固定节点名 `EMQX_NODE__NAME=emqx@127.0.0.1`（见「transport 单活多备与磁盘持久会话」）。已有部署升级注意：EMQX 以前按容器 IP 命名节点，改为固定节点名后，旧节点名下的运行时数据不再使用，例如在控制台里改过的密码会恢复为 `.env` 中的 `EMQX_DASHBOARD_PASSWORD`，首次重建后 EMQX 也以全新的数据目录启动。
 
@@ -140,8 +149,8 @@ EMQX 开启了磁盘持久会话：compose 环境变量 `EMQX_DURABLE_SESSIONS__
 - `prebuilt`（默认，宿主机无外网时用）：在开发机上执行 `deploy/package.sh`（需 JDK 21 上的 Maven 与 Node.js 22）。脚本从当前提交的干净检出编译 jar 与前端（未提交的修改与 `application-local.yml` 等本地配置不会进入包），生成 `target/conduit-standalone-<短提交>.tar.gz`，内含 `deploy/`（含产物、不含 `.env`）、根 `.dockerignore` 与 `conduit-ui/nginx.conf`。复制到宿主机后：
 
   ```bash
-  tar -xzf conduit-standalone-<短提交>.tar.gz
-  cd deploy/standalone
+  mkdir -p conduit && tar -xzf conduit-standalone-<短提交>.tar.gz -C conduit
+  cd conduit/deploy/standalone
   cp .env.example .env    # 替换口令
   docker compose up -d --build
   ```

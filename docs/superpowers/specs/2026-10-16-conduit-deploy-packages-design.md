@@ -64,7 +64,7 @@ deploy/
 
 ## 6. 删除
 
-根 `Dockerfile`、`conduit-ui/Dockerfile`、`conduit-ui/.dockerignore`、`deploy/emqx/`（Dockerfile 与配置移入 `deploy/dev/emqx/`）、`deploy/docker-compose.yml`、`deploy/.env.example`、`deploy/build-local.sh`、`deploy/sync-to-host.sh`。根 `.dockerignore` 按第 5 节重写。
+根 `Dockerfile`、`conduit-ui/Dockerfile`、`conduit-ui/.dockerignore`、`deploy/emqx/`（Dockerfile 删除，配置移入 `deploy/dev/emqx/`）、`deploy/docker-compose.yml`、`deploy/.env.example`、`deploy/build-local.sh`、`deploy/sync-to-host.sh`。根 `.dockerignore` 按第 5 节重写。
 
 ## 7. 其他改动
 
