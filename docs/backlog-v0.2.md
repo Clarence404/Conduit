@@ -14,7 +14,10 @@
 
 ## 后端：部署与镜像
 
-- 后端 Dockerfile 无依赖缓存层，且以 root 运行
+- 全量包 Java 镜像以 root 运行；`source` 阶段无 Maven 依赖缓存层（每次构建全量下载依赖）
+- `BUILD_FROM=source` 需要宿主机联网（Maven 中央仓库、npm 源）；无外网时只能用 `prebuilt`
+- 预编译前端的 MQTT 端口（`VITE_MQTT_PORT`）在打包时固定，宿主机改 `MQTT_PORT` 后「连接信息」显示的端口不变，需重新打包
+- 基础服务包的 EMQX 配置为只读挂载，宿主机上的 `emqx/` 文件需对 uid 1000 可读；权限不对时 EMQX 启动失败
 - entrypoint 中 sed 注入内部 token、HOCON 引号处理较脆弱
 - EMQX 控制台密码仅首次启动生效（卷非空时忽略）
 - 重启后的启动顺序
@@ -80,7 +83,6 @@
 - `MessageBus.deadLetter` 已不再被流水线使用，注释需更新
 - 演示物模型导入失败会让模拟器退出（依赖 compose 重启）
 - 产品详情：增删改属性后会重新加载产品，覆盖「基本信息」页未保存的编辑；`productKey` 变化时不重新加载；导出下载同步 `revokeObjectURL`
-- `Dockerfile` / `.dockerignore` 头部注释未提及放行的 `docs/examples` 文件
 - 测试缺口：200 属性上限的并发测试、枚举标签的负例、null 值、缓存容量上限、模型标识与模拟器测点的一致性
 
 ## V0.2-B 遗留（评审后延后）
@@ -141,7 +143,7 @@
 
 ## V0.2-R 遗留（2026-10-16）
 
-- Compose 的 `conduit-transport-2` 从 YAML 锚点继承了 `build:`，`docker compose up --build` 会把同一镜像构建两次；`build-local.sh` 用 `--no-build`，不受影响。确认宿主机 compose 版本后用 `build: !reset` 修正。
+- 全量包的 `conduit-transport-2` 从 YAML 锚点继承了 `build:`，`docker compose up --build` 为两个 transport 各构建一个内容相同的镜像（第二次命中 BuildKit 缓存，耗时很短）。可改为后者 `build: !reset null` 并共用前者的固定镜像名，需先确认 `up` 时不会在构建前去拉取该镜像。
 - 租户发现代码在 `finally` 里 `return`，可能吞掉 `Error`；下次改动该文件时一并修正。
 - 升级 EMQX（评估同时支持磁盘持久会话与共享订阅的版本）后改回「多实例共享订阅 + 持久会话」，提升接入吞吐；当前单活多备只有主实例消费。
 - 主备切换窗口（最长一个续期间隔）内，旧主若未察觉失锁，可能与新主以同一 clientId 互相踢；协调器重连前先续期可止住，期间的重复消息由写库去重吸收。

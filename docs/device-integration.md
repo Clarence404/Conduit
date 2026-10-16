@@ -188,7 +188,8 @@ while True:
 消息到达平台后如果校验不通过，会进入死信队列，不会重试。可以这样查看最近几条死信及原因：
 
 ```bash
-docker compose -f deploy/docker-compose.yml exec redis \
+# 在宿主机的 deploy/infra（或 deploy/full）目录中执行
+docker compose exec redis \
   redis-cli XREVRANGE conduit:stream:dead + - COUNT 5
 ```
 
