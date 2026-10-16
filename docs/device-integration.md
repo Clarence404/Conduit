@@ -34,7 +34,7 @@ sequenceDiagram
     participant Server as conduit-server
     participant Store as InfluxDB / Redis
     Dev->>EMQX: PUBLISH QoS1 conduit/{productKey}/{deviceKey}/up/property
-    EMQX->>Transport: ACL 检查后交给共享订阅
+    EMQX->>Transport: ACL 检查后投递给主（leader）transport，它通过普通订阅挂在 EMQX 磁盘持久会话上
     Transport->>Bus: XADD conduit:stream:up
     Transport-->>EMQX: PUBACK（写入成功后才确认）
     EMQX-->>Dev: PUBACK
@@ -209,7 +209,7 @@ docker compose -f deploy/docker-compose.yml exec redis \
 
 **发出去的消息没有收到 PUBACK**
 
-平台下游（Redis）暂时不可用时，transport 会暂缓确认，设备侧表现为 PUBACK 变慢。恢复后会继续确认，消息不会丢失。设备应等待 PUBACK，不要因为超时就丢弃数据。
+平台下游（Redis）暂时不可用时，主 transport 的锁续期会在几秒内失败并主动断开与 EMQX 的连接，Redis 恢复前没有任何 transport 实例连接 EMQX。这期间设备上报的消息保存在 EMQX 的磁盘持久会话中（最长保留 1 天），设备仍能照常从 EMQX 收到 PUBACK；Redis 与主实例恢复后，积压消息会被一并投递，不会丢失。
 
 ## 9. 当前限制
 

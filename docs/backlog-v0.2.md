@@ -141,6 +141,8 @@
 
 ## V0.2-R 遗留（2026-10-16）
 
+- Compose 的 `conduit-transport-2` 从 YAML 锚点继承了 `build:`，`docker compose up --build` 会把同一镜像构建两次；`build-local.sh` 用 `--no-build`，不受影响。确认宿主机 compose 版本后用 `build: !reset` 修正。
+- 租户发现代码在 `finally` 里 `return`，可能吞掉 `Error`；下次改动该文件时一并修正。
 - 升级 EMQX（评估同时支持磁盘持久会话与共享订阅的版本）后改回「多实例共享订阅 + 持久会话」，提升接入吞吐；当前单活多备只有主实例消费。
 - 主备切换窗口（最长一个续期间隔）内，旧主若未察觉失锁，可能与新主以同一 clientId 互相踢；协调器重连前先续期可止住，期间的重复消息由写库去重吸收。
 - transport 健康检查状态恒为 UP，备实例与「主实例但连不上 EMQX」都只体现在 details（`role`、`connected`）里；需要告警时再细分。
