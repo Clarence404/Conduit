@@ -1,6 +1,7 @@
 package dev.conduit.server.auth;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.conduit.server.tenant.TenantMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,15 +24,15 @@ import java.io.IOException;
  *   <li>/api/v1/users/**：租户管理员（含代入的平台管理员）；</li>
  *   <li>其余 /api/v1/** 的 GET：租户管理员、只读用户；其他方法：租户管理员。</li>
  * </ul>
- * 未认证 401、无权限 403，均为 problem+json。过滤器顺序：JwtAuthFilter → PasswordChangeGateFilter → 权限判断。
+ * 未认证 401、无权限 403，均为 problem+json。过滤器顺序：JwtAuthFilter → PasswordChangeGateFilter → ImpersonationLogFilter → 权限判断。
  */
 @Configuration(proxyBeanMethods = false)
 public class SecurityConfig {
 
     /** 构建过滤链（规则见类注释）。 */
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http, JwtService jwt, ObjectMapper objectMapper)
-            throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, JwtService jwt, ObjectMapper objectMapper,
+                                            TenantMapper tenants) throws Exception {
         http
                 // 无会话 + refresh Cookie 为 SameSite=Strict 且只发往 /api/v1/auth，关闭 CSRF
                 .csrf(c -> c.disable())
@@ -54,7 +55,8 @@ public class SecurityConfig {
                         .accessDeniedHandler((req, res, ex) ->
                                 writeProblem(res, objectMapper, HttpStatus.FORBIDDEN, "无权限", null)))
                 .addFilterBefore(new JwtAuthFilter(jwt), UsernamePasswordAuthenticationFilter.class)
-                .addFilterAfter(new PasswordChangeGateFilter(objectMapper), JwtAuthFilter.class);
+                .addFilterAfter(new PasswordChangeGateFilter(objectMapper), JwtAuthFilter.class)
+                .addFilterAfter(new ImpersonationLogFilter(tenants), PasswordChangeGateFilter.class);
         return http.build();
     }
 
