@@ -44,7 +44,7 @@ flowchart TB
 - 选主：Redis 键 `conduit:transport:leader`（值为实例 id），用一段 Lua 脚本抢锁：键不存在则 `SET PX` 写入；键里已是本实例 id 则刷新过期时间并视为抢到（所以 Redis 短暂抖动后原主实例立即拿回锁）；其他情况拒绝。主实例每 5 秒续期，锁 15 秒过期，备实例每 2 秒尝试抢锁，只有主实例连接 EMQX。续期失败（Redis 不可用、锁已被他人持有、超时）立即断开 MQTT 转为备用；正常停止时释放锁，备实例立即接管；主实例崩溃时备实例最长 15 秒后接管同一个会话。配置项 `conduit.transport.leader.ttl` / `renew-interval` / `acquire-interval`。抢锁或适配器启动首次失败记 WARN，之后的重试记 DEBUG，恢复与每次角色变化记 INFO。
 - 健康检查：transport（端口 8081）的 `GET /actuator/health` 在 `components.leader.details` 中显示 `role`（`LEADER` / `STANDBY`）、`instanceId` 与 `connected`；`connected` 仅在已连接且订阅已被 EMQX 批准后才为 true。
 - 独立部署包起两个 transport（一主一备），都配置 `stop_grace_period: 20s` 以便正常停止时释放锁；开发时 IDE 中一个 transport，直接成为主实例。
-- 已知问题：正常停止（发送 DISCONNECT）交接时存在少量丢消息的已知问题（EMQX 5.8.6），见 backlog「V0.2-R 遗留」，待单独处理。
+- 已解决的旧版问题：EMQX 5.8.6/5.8.9 在正常停止交接时会出现持久会话补发错位并丢少量消息；升级到当前项目版本 5.10.5 后，专项实验 9 次均未复现。该结论只覆盖 transport 正常交接，Broker 自身被强杀或客户机断电的持久性风险仍见「已知限制」。
 
 ## 代码结构
 
@@ -125,7 +125,7 @@ cp .env.example .env    # 替换口令，CONDUIT_AUTH_URL 改为 http://<dev-hos
 docker compose up -d
 ```
 
-`CONDUIT_AUTH_URL` 必填，是 EMQX 鉴权回调的地址，即开发机上 IDE 中运行的 conduit-server（`<dev-host>` 为宿主机访问开发机的地址）；修改后执行 `docker compose up -d --force-recreate emqx`。EMQX 使用官方镜像 `emqx/emqx:5.8.6`，`emqx/base.hocon.tpl` 与 `emqx/acl.conf` 以只读方式挂载，启动时渲染回调地址与内部 token；EMQX 不依赖 conduit-server，server 未就绪时自行重试。详见 `deploy/dev/README.md`。
+`CONDUIT_AUTH_URL` 必填，是 EMQX 鉴权回调的地址，即开发机上 IDE 中运行的 conduit-server（`<dev-host>` 为宿主机访问开发机的地址）；修改后执行 `docker compose up -d --force-recreate emqx`。EMQX 默认使用官方镜像 `emqx/emqx:5.10.5`，`emqx/base.hocon.tpl` 与 `emqx/acl.conf` 以只读方式挂载，启动时渲染回调地址与内部 token；EMQX 不依赖 conduit-server，server 未就绪时自行重试。详见 `deploy/dev/README.md`。
 
 从旧的开发基础设施迁移（旧的 `deploy/docker-compose.yml`，可能是在开发机上用 `DOCKER_HOST` 加 `docker compose -f deploy/docker-compose.yml` 启动的，也可能是 1Panel 从宿主机上的 `/opt/conduit` 启动的）：
 
@@ -283,7 +283,7 @@ cd conduit-ui && npm install && npm test && npm run dev
    | `Conduit UI (local)` | 在 `conduit-ui/` 下执行 `npm run dev`（首次先 `npm install`） |
    | `Conduit (local all)` | 一次启动 Server、Transport、Simulator、UI |
 
-2. 在 `conduit-server/src/main/resources/` 和 `conduit-transport/src/main/resources/` 下各新建一个 `application-local.yml`，写入 Docker 宿主机地址、端口和 `.env` 中的口令。这个文件已在 `.gitignore` 中，不会被提交。
+2. 在 `conduit-server/src/main/resources/` 和 `conduit-transport/src/main/resources/` 下各新建一个 `application-local.yml`，写入 Docker 宿主机地址、端口和所需口令。这两个文件已从 Git 跟踪中移除并加入 `.gitignore`。当前本机 server 的本地配置用 `spring.config.import: "optional:file:./deploy/dev/.env[.properties]"` 读取数据库、InfluxDB 与内部 token；IDEA 的工作目录须为仓库根目录。
 
    > 注意：本版本起模块已由 `conduit-connector` 改名为 `conduit-transport`。已有的本地 `application-local.yml` 需要移到 `conduit-transport/src/main/resources/`，并把配置前缀改为 `conduit.transport.mqtt`；server 侧的 `conduit.internal.connector-password` 也已改为 `transport-password`。
 
@@ -366,7 +366,7 @@ cd conduit-ui && npm install && npm test && npm run dev
 
 ## 端到端测试：故障场景不丢数据
 
-`conduit-e2e`（`-Pe2e` 时才参与构建）在完全独立的临时环境中验证四种故障下数据不丢。Testcontainers 在 Docker 宿主机上起 PostgreSQL 16.8、Redis 7.4.2、InfluxDB 3.12.0-core，以及开启磁盘持久会话的 EMQX 5.8.6（端口随机，与 `conduit` 开发环境互不影响）；测试机本地以 jar 启动 1 个 server 与 2 个 transport。每个场景新建产品「e2e 场景 N 电表」与 10 台设备，每台以 QoS1 发送 50 条（未收到 PUBACK 时重连重发），发送中途注入故障：
+`conduit-e2e`（`-Pe2e` 时才参与构建）在完全独立的临时环境中验证四种故障下数据不丢。Testcontainers 在 Docker 宿主机上起 PostgreSQL 16.8、Redis 7.4.2、InfluxDB 3.12.0-core，以及开启磁盘持久会话的 EMQX 5.10.5（端口随机，与 `conduit` 开发环境互不影响）；测试机本地以 jar 启动 1 个 server 与 2 个 transport。每个场景新建产品「e2e 场景 N 电表」与 10 台设备，每台以 QoS1 发送 50 条（未收到 PUBACK 时重连重发），发送中途注入故障：
 
 | 场景 | 故障 | 验证的机制 |
 |---|---|---|
@@ -387,6 +387,8 @@ E2E_DEV_HOST=<dev-host> mvn -B verify -Pe2e -pl conduit-e2e
 - 耗时约 6～10 分钟，不进默认构建。进程日志在 `conduit-e2e/target/e2e-logs/<时间>/`（`server`、`transport-a`、`transport-b` 各一个目录），失败时先看这里。
 
 ## 已知限制
+
+- Broker 自身崩溃、客户机强制重启的持久性尚未闭环：EMQX 5.10.5 仍可丢失已 PUBACK 的消息，并观察到新建会话未恢复；InfluxDB 曾因零字节 catalog 无法启动。Redis 部署已改为 AOF 每次刷盘，详见 [持久性验证](docs/durability-validation.md)。
 
 - 物模型缓存为进程内缓存：多实例部署时，修改物模型最多 60 秒后在其他实例生效。
 - 未启用 TLS；凭证均为演示用途。

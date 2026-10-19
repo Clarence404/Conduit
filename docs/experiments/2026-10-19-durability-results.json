@@ -1,0 +1,507 @@
+{
+  "fault_trials": [
+    {
+      "everysec": {
+        "received": 2001,
+        "missing_count": 99,
+        "missing_first": [
+          2002,
+          2003,
+          2004,
+          2005,
+          2006,
+          2007,
+          2008,
+          2009,
+          2010,
+          2011,
+          2012,
+          2013,
+          2014,
+          2015,
+          2016,
+          2017,
+          2018,
+          2019,
+          2020,
+          2021,
+          2022,
+          2023,
+          2024,
+          2025,
+          2026,
+          2027,
+          2028,
+          2029,
+          2030,
+          2031
+        ]
+      },
+      "always": {
+        "received": 2100,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "emqx": {
+        "session_present": true,
+        "received": 500,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "run": "guest-reset-1-1792418696444315600",
+      "redis_acked": 2100,
+      "mqtt_pubacked": 500,
+      "mqtt_publish_errors": []
+    },
+    {
+      "everysec": {
+        "received": 2000,
+        "missing_count": 100,
+        "missing_first": [
+          2001,
+          2002,
+          2003,
+          2004,
+          2005,
+          2006,
+          2007,
+          2008,
+          2009,
+          2010,
+          2011,
+          2012,
+          2013,
+          2014,
+          2015,
+          2016,
+          2017,
+          2018,
+          2019,
+          2020,
+          2021,
+          2022,
+          2023,
+          2024,
+          2025,
+          2026,
+          2027,
+          2028,
+          2029,
+          2030
+        ]
+      },
+      "always": {
+        "received": 2100,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "emqx": {
+        "session_present": false,
+        "received": 0,
+        "missing_count": 500,
+        "missing_first": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40
+        ]
+      },
+      "run": "guest-reset-2-1792418730210178600",
+      "redis_acked": 2100,
+      "mqtt_pubacked": 500,
+      "mqtt_publish_errors": []
+    },
+    {
+      "everysec": {
+        "received": 2000,
+        "missing_count": 100,
+        "missing_first": [
+          2001,
+          2002,
+          2003,
+          2004,
+          2005,
+          2006,
+          2007,
+          2008,
+          2009,
+          2010,
+          2011,
+          2012,
+          2013,
+          2014,
+          2015,
+          2016,
+          2017,
+          2018,
+          2019,
+          2020,
+          2021,
+          2022,
+          2023,
+          2024,
+          2025,
+          2026,
+          2027,
+          2028,
+          2029,
+          2030
+        ]
+      },
+      "always": {
+        "received": 2100,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "emqx": {
+        "session_present": false,
+        "received": 0,
+        "missing_count": 500,
+        "missing_first": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40
+        ]
+      },
+      "run": "guest-reset-3-1792418797973747400",
+      "redis_acked": 2100,
+      "mqtt_pubacked": 500,
+      "mqtt_publish_errors": []
+    },
+    {
+      "everysec": {
+        "received": 2000,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "always": {
+        "received": 2000,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "emqx": {
+        "session_present": true,
+        "received": 485,
+        "missing_count": 15,
+        "missing_first": [
+          486,
+          487,
+          488,
+          489,
+          490,
+          491,
+          492,
+          493,
+          494,
+          495,
+          496,
+          497,
+          498,
+          499,
+          500
+        ]
+      },
+      "run": "process-1-1792418578003905900",
+      "redis_acked": 2000,
+      "mqtt_pubacked": 500,
+      "mqtt_publish_errors": []
+    },
+    {
+      "everysec": {
+        "received": 2000,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "always": {
+        "received": 2000,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "emqx": {
+        "session_present": true,
+        "received": 376,
+        "missing_count": 124,
+        "missing_first": [
+          377,
+          378,
+          379,
+          380,
+          381,
+          382,
+          383,
+          384,
+          385,
+          386,
+          387,
+          388,
+          389,
+          390,
+          391,
+          392,
+          393,
+          394,
+          395,
+          396,
+          397,
+          398,
+          399,
+          400,
+          401,
+          402,
+          403,
+          404,
+          405,
+          406,
+          407,
+          408,
+          409,
+          410,
+          411,
+          412,
+          413,
+          414,
+          415,
+          416
+        ]
+      },
+      "run": "process-2-1792418627353520500",
+      "redis_acked": 2000,
+      "mqtt_pubacked": 500,
+      "mqtt_publish_errors": []
+    },
+    {
+      "everysec": {
+        "received": 2000,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "always": {
+        "received": 2000,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "emqx": {
+        "session_present": true,
+        "received": 500,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "run": "process-3-1792418673775399200",
+      "redis_acked": 2000,
+      "mqtt_pubacked": 500,
+      "mqtt_publish_errors": []
+    }
+  ],
+  "benchmark": [
+    {
+      "mode": "everysec",
+      "clients": 1,
+      "rounds": [
+        {
+          "rps": 28011.21,
+          "p99_ms": 0.087
+        },
+        {
+          "rps": 27397.26,
+          "p99_ms": 0.103
+        },
+        {
+          "rps": 27855.15,
+          "p99_ms": 0.087
+        }
+      ]
+    },
+    {
+      "mode": "everysec",
+      "clients": 16,
+      "rounds": [
+        {
+          "rps": 103092.78,
+          "p99_ms": 0.559
+        },
+        {
+          "rps": 107526.88,
+          "p99_ms": 0.343
+        },
+        {
+          "rps": 90909.09,
+          "p99_ms": 0.575
+        }
+      ]
+    },
+    {
+      "mode": "always",
+      "clients": 1,
+      "rounds": [
+        {
+          "rps": 5227.39,
+          "p99_ms": 0.511
+        },
+        {
+          "rps": 6373.49,
+          "p99_ms": 0.359
+        },
+        {
+          "rps": 5643.34,
+          "p99_ms": 0.383
+        }
+      ]
+    },
+    {
+      "mode": "always",
+      "clients": 16,
+      "rounds": [
+        {
+          "rps": 42194.09,
+          "p99_ms": 0.599
+        },
+        {
+          "rps": 41666.67,
+          "p99_ms": 0.871
+        },
+        {
+          "rps": 29585.8,
+          "p99_ms": 0.655
+        }
+      ]
+    }
+  ],
+  "cli_validation": [
+    {
+      "everysec": {
+        "received": 2000,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "always": {
+        "received": 2000,
+        "missing_count": 0,
+        "missing_first": []
+      },
+      "emqx": {
+        "session_present": true,
+        "received": 358,
+        "missing_count": 142,
+        "missing_first": [
+          359,
+          360,
+          361,
+          362,
+          363,
+          364,
+          365,
+          366,
+          367,
+          368,
+          369,
+          370,
+          371,
+          372,
+          373,
+          374,
+          375,
+          376,
+          377,
+          378,
+          379,
+          380,
+          381,
+          382,
+          383,
+          384,
+          385,
+          386,
+          387,
+          388,
+          389,
+          390,
+          391,
+          392,
+          393,
+          394,
+          395,
+          396,
+          397,
+          398
+        ]
+      },
+      "run": "process-1-1792418958148339600",
+      "redis_acked": 2000,
+      "mqtt_pubacked": 500,
+      "mqtt_publish_errors": []
+    }
+  ]
+}

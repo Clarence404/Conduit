@@ -34,7 +34,7 @@ class DeviceSimulatorIT {
 
     @Container
     static final GenericContainer<?> EMQX =
-            new GenericContainer<>(DockerImageName.parse("emqx/emqx:5.8.6"))
+            new GenericContainer<>(DockerImageName.parse("emqx/emqx:5.10.5"))
                     .withExposedPorts(1883)
                     .withCopyToContainer(MountableFile.forClasspathResource("emqx/acl.conf"),
                             "/opt/emqx/etc/acl.conf")

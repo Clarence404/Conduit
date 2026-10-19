@@ -1,0 +1,33 @@
+# Independent experimental containers/volumes. No application credentials or auth callback.
+# Bind TEST_BIND_ADDR to the VM's private address when the driver runs on another machine.
+name: conduit-durability
+services:
+  redis-everysec:
+    image: redis:7.4.2
+    container_name: conduit-durability-redis-everysec
+    command: [redis-server, --appendonly, 'yes', --appendfsync, everysec]
+    restart: unless-stopped
+    ports: ['${TEST_BIND_ADDR:-127.0.0.1}:26379:6379']
+    volumes: ['redis-everysec:/data']
+  redis-always:
+    image: redis:7.4.2
+    container_name: conduit-durability-redis-always
+    command: [redis-server, --appendonly, 'yes', --appendfsync, always, --no-appendfsync-on-rewrite, 'no']
+    restart: unless-stopped
+    ports: ['${TEST_BIND_ADDR:-127.0.0.1}:26380:6379']
+    volumes: ['redis-always:/data']
+  emqx:
+    image: emqx/emqx:5.10.5
+    container_name: conduit-durability-emqx
+    restart: unless-stopped
+    ports: ['${TEST_BIND_ADDR:-127.0.0.1}:21883:1883']
+    environment:
+      EMQX_NODE__NAME: emqx@127.0.0.1
+      EMQX_CLUSTER__DISCOVERY_STRATEGY: singleton
+      EMQX_DURABLE_SESSIONS__ENABLE: 'true'
+      EMQX_AUTHORIZATION__NO_MATCH: allow
+    volumes: ['emqx:/opt/emqx/data']
+volumes:
+  redis-everysec:
+  redis-always:
+  emqx:

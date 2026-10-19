@@ -181,7 +181,7 @@ final class E2eEnvironment implements AutoCloseable {
         RuntimeException last = null;
         for (int attempt = 1; attempt <= 5; attempt++) {
             int hostPort = 20000 + ThreadLocalRandom.current().nextInt(10000);
-            GenericContainer<?> c = new GenericContainer<>(DockerImageName.parse("emqx/emqx:5.8.6"))
+            GenericContainer<?> c = new GenericContainer<>(DockerImageName.parse("emqx/emqx:5.10.5"))
                     .withExposedPorts(EMQX_MQTT_PORT)
                     .withCreateContainerCmdModifier(cmd -> cmd.getHostConfig().withPortBindings(
                             new PortBinding(Ports.Binding.bindPort(hostPort), new ExposedPort(EMQX_MQTT_PORT))))

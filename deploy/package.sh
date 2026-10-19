@@ -5,6 +5,7 @@
 # 宿主机不需要外网。
 #
 # 未提交的修改与 .gitignore 中的本地配置（.env、application-local.yml、simulator-local.properties 等）不会进入包。
+# 运行时配置必须保持未跟踪；.dockerignore 还会从 Docker 构建上下文排除它们。
 #
 # 用法（仓库内任意目录）：deploy/package.sh
 # 环境变量：VITE_MQTT_PORT  前端「连接信息」中显示的 MQTT 端口（默认 1883，打包时固定进前端）
@@ -37,6 +38,17 @@ trap cleanup EXIT
 
 echo "==> 干净检出 $SHA"
 git -C "$ROOT" worktree add --detach --quiet "$SRC" HEAD
+
+# 防止旧提交误跟踪本地配置：工作树从 HEAD 创建，.gitignore 无法排除已经跟踪的文件。
+for local_config in \
+    conduit-server/src/main/resources/application-local.yml \
+    conduit-transport/src/main/resources/application-local.yml \
+    conduit-simulator/src/main/resources/simulator-local.properties; do
+  if git -C "$SRC" ls-files --error-unmatch -- "$local_config" >/dev/null 2>&1; then
+    echo "当前提交仍跟踪本地配置 $local_config；先从 Git 跟踪中移除并提交，再打部署包" >&2
+    exit 1
+  fi
+done
 
 echo "==> 构建后端 jar"
 (cd "$SRC" && mvn -B -q -DskipTests package)

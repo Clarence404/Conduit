@@ -19,7 +19,7 @@ cp .env.example .env    # 替换全部 change-me-* 口令；BUILD_FROM 保持 pr
 docker compose up -d --build
 ```
 
-宿主机上需已有镜像 `eclipse-temurin:21.0.6_7-jre`、`nginx:1.27.4-alpine` 以及基础服务的镜像（`postgres:16.8`、`redis:7.4.2`、`influxdb:3.12.0-core`、`influxdata/influxdb3-ui:1.11.0`、`emqx/emqx:5.8.6`）。包里只有部署文件与产物，没有源码；`.env` 不在包内。
+宿主机上需已有镜像 `eclipse-temurin:21.0.6_7-jre`、`nginx:1.27.4-alpine` 以及基础服务的镜像（`postgres:16.8`、`redis:7.4.2`、`influxdb:3.12.0-core`、`influxdata/influxdb3-ui:1.11.0`、`emqx/emqx:5.10.5`）。包里只有部署文件与产物，没有源码；`.env` 不在包内。
 
 ## 方式二：从源码构建（宿主机能联网）
 

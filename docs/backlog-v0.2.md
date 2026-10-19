@@ -1,5 +1,7 @@
 # V0.2 待办（V0.1 评审遗留的次要事项）
 
+2026-10-19 持久性验证更新：Redis 部署已改为 `appendfsync always`，客户机强制重启三轮未丢已确认数据；EMQX 5.10.5 强杀仍丢已 PUBACK 的尾部消息，强制重启还观察到新建会话未恢复。另发现 InfluxDB 零字节 catalog 导致启动失败。详见 [实验与后续工作](durability-validation.md)，这些边界不被既有应用进程故障 e2e 覆盖。
+
 ## 后端：模拟器
 
 - 模拟器重启后 EPimp 重置；provisioning 会重置其他运行中模拟器的密钥
@@ -143,7 +145,7 @@
 
 ## V0.2-R 遗留（2026-10-16）
 
-- **【待单独处理，优先】transport 正常停止时可能丢少量消息**（2026-10-16 发现）：`LeaderElectionIT.theStandbyTakesOverWithinTheTtlAndReceivesTheBacklog` 约 2/3 概率失败（300 条丢 4～7 条）。日志显示：旧主正常停止那一刻已收到但未写入总线、未 ACK 的几条（如 seq 101～104），新主接管后 EMQX 5.8.6 磁盘持久会话重发的条数相同，内容却是早已 ACK 的旧消息（seq 4～7），未 ACK 的消息因此丢失；强杀进程（e2e 场景 2、3）未复现。影响：每次正常停止 / 重启 / 主备切换最多丢停止瞬间在途的几条。处理方向（已与所有者确认）：先实测停止时不发 DISCONNECT、直接断开连接能否避开；再加「停止前处理并 ACK 完已收到的消息」缩小窗口；残留风险随 V1.0 升级 EMQX 解决。实施前与所有者详细讨论。
+- **【已解决，2026-10-19】transport 正常停止交接**：该问题于 EMQX 5.8.6/5.8.9 上发现，表现为持久会话补发错位，300 条约丢 4～7 条。升级到当前项目版本 5.10.5 后，专项实验 9 次结果全部正确，未再复现，因此关闭该遗留项。此结论不覆盖 Broker 进程强杀或客户机断电；5.10.5 在这些场景仍可能丢已 PUBACK 的尾部消息，见 [持久性验证](durability-validation.md)。
 
 - 独立部署包的 `conduit-transport-2` 从 YAML 锚点继承了 `build:`，`docker compose up --build` 为两个 transport 各构建一个内容相同的镜像（第二次命中 BuildKit 缓存，耗时很短）。可改为后者 `build: !reset null` 并共用前者的固定镜像名，需先确认 `up` 时不会在构建前去拉取该镜像。
 - 租户发现代码在 `finally` 里 `return`，可能吞掉 `Error`；下次改动该文件时一并修正。
