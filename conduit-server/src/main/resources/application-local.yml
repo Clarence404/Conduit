@@ -1,0 +1,35 @@
+# 本地 IDE 运行 conduit-server 时使用：激活 profile `local`。此文件不入库。
+spring:
+  datasource:
+    url: jdbc:postgresql://192.168.126.128:15432/conduit
+    username: conduit
+    password: change-me-postgres
+  data:
+    redis:
+      host: 192.168.126.128
+      port: 16379
+
+conduit:
+  bootstrap:
+    admin-username: admin
+    admin-password: change-me-admin
+    platform-admin-username: sysadmin
+    platform-admin-password: sysadmin2026
+  auth:
+    jwt-secret: change-me-to-a-random-string-of-at-least-32-bytes
+  internal:
+    token: change-me-internal-token
+    transport-username: conduit-transport
+    transport-password: change-me-connector
+  influx:
+    url: http://192.168.126.128:8096
+    token: apiv3_1f374241175384f9e1ef273ca5f3ee79dc25782700bd0f66
+  pipeline:
+    consumer: server-idea
+
+# 本地开发：业务代码 DEBUG；MyBatis 映射器 DEBUG 时会打印执行的 SQL 与参数；请求映射与参数绑定 DEBUG
+logging:
+  level:
+    dev.conduit: DEBUG
+    org.springframework.web: DEBUG
+    org.springframework.security: INFO
