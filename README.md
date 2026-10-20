@@ -1,6 +1,6 @@
 # Conduit
 
-面向工业、能源、园区与设备运营场景的生产级多租户 IoT SaaS 平台。当前版本已跑通「设备 MQTT 直连 → 接入 → 总线 → 处理 → 时序存储 → Web 展示」主链路，正在按 SaaS Roadmap 补齐安全隔离、设备控制、规则引擎、资产与仪表盘、开放生态、云原生和商业化能力。
+Conduit 以建设面向工业、能源、园区与设备运营场景的生产级多租户 IoT SaaS 平台为目标。当前版本已跑通「设备 MQTT 直连 → 接入 → 总线 → 处理 → 时序存储 → Web 展示」主链路，正在按 SaaS Roadmap 补齐安全隔离、设备控制、规则引擎、资产与仪表盘、开放生态、云原生和商业化能力；生产就绪状态以阶段验收与测试报告为准。
 
 功能：产品与设备管理、MQTT 接入与鉴权、物模型逐测点校验与可插拔解码（V0.2-A）、设备历史曲线（V0.2-B：设备详情「历史」标签页，按时间范围自动聚合，多测点联动缩放）、前端体验优化（首页总览、分组侧栏与面包屑、设备指标卡片与迷你趋势线、暗色模式与侧栏风格切换）、多租户与用户管理（V0.2-C：平台管理员管理租户并可进入租户代为操作，租户管理员管理本租户的产品、设备与用户，只读用户只能查看）、可靠性加固（V0.2-R/R2：transport 单活多备；设备收到平台持久接收回执前保留并重发本地副本；模拟器按物模型模拟各演示租户的设备）。
 
@@ -10,26 +10,9 @@
 
 ## 架构
 
-```mermaid
-flowchart TB
-    D[设备] -->|MQTT| E[EMQX]
-    E -->|"① 连接时同步鉴权"| A
-    E -->|"持久会话订阅"| C["conduit-transport ×2<br/>（Redis 选主，单活多备）"]
-    C -->|写入| R[(Redis Streams)]
-    R -->|"② 消费组拉取"| P
-    subgraph S["conduit-server（同一个进程）"]
-        A["鉴权回调<br/>/internal/mqtt/auth"]
-        P[数据流水线]
-        API[REST 接口]
-    end
-    A --> PG[(PostgreSQL)]
-    P --> PG
-    P --> IF[(InfluxDB)]
-    P --> RD[(Redis 最新值 / 在线状态)]
-    API --> PG
-    API --> RD
-    W["Vue 前端（nginx）"] -->|/api| API
-```
+![Conduit 当前架构：设备接入、同步鉴权、异步数据流水线与存储](docs/images/architecture.svg)
+
+图中展示当前已实现架构；后续 SaaS 能力见 [Roadmap](docs/roadmap-saas.md)。存储连线表示 server 进程的数据访问，具体入口职责见下文。
 
 `conduit-server` 只有一个进程，但有两个入口：
 
@@ -50,14 +33,7 @@ flowchart TB
 
 仓库根目录即 Maven 父工程，Java 模块与前端 `conduit-ui` 平铺在顶层。Java 模块之间的依赖关系：
 
-```mermaid
-flowchart LR
-    common[conduit-common<br/>消息模型 + 总线]
-    transport[conduit-transport<br/>协议接入] --> common
-    server[conduit-server<br/>平台服务] --> common
-    simulator[conduit-simulator<br/>设备模拟器]
-    e2e[conduit-e2e<br/>端到端测试] --> simulator
-```
+![Conduit Java 模块依赖：transport 和 server 依赖 common，e2e 测试依赖 simulator](docs/images/module-dependencies.svg)
 
 `transport` 和 `server` 之间没有代码依赖，只通过 `common` 里定义的消息格式和 Redis Streams 通信。
 

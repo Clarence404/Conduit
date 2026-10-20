@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 790 270" role="img" aria-labelledby="title desc">
+  <title id="title">Conduit Java 模块依赖</title>
+  <desc id="desc">箭头由使用方指向被依赖模块。conduit-transport 和 conduit-server 依赖 conduit-common；conduit-e2e 在测试作用域依赖 conduit-simulator。transport 与 server 无直接代码依赖。</desc>
+  <style>
+    :root {
+      --fg:#1a1a2e; --muted:#6b7280; --bg:#f8f9fc; --card:#ffffff; --border:#e2e8f0;
+      --p:#6366f1; --b:#0284c7; --g:#059669; --y:#d97706; --r:#dc2626;
+    }
+    :root[data-theme="dark"] {
+      --fg:#e5e7eb; --muted:#9ca3af; --bg:#1a1a2e; --card:#252540; --border:#3a3a5c;
+      --p:#818cf8; --b:#38bdf8; --g:#34d399; --y:#fbbf24; --r:#f87171;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg:#e5e7eb; --muted:#9ca3af; --bg:#1a1a2e; --card:#252540; --border:#3a3a5c;
+        --p:#818cf8; --b:#38bdf8; --g:#34d399; --y:#fbbf24; --r:#f87171;
+      }
+    }
+    text{font-family:system-ui,"Microsoft YaHei",sans-serif;fill:var(--fg)}
+    .bg{fill:var(--bg)} .box{fill:var(--card);stroke:var(--border);stroke-width:1.5}
+    .title{font-size:14px;font-weight:700} .name{font-size:14px;font-weight:600}
+    .sub{font-size:12px;fill:var(--muted)}
+    .flow{fill:none;stroke:var(--b);stroke-width:2;stroke-linejoin:round}
+  </style>
+  <defs><marker id="arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 7 3.5 0 7Z" fill="var(--b)"/></marker></defs>
+  <rect class="bg" width="790" height="270"/>
+  <text class="title" x="395" y="34" text-anchor="middle">Java 模块依赖 · 箭头指向被依赖模块</text>
+  <rect class="box" x="30" y="70" width="210" height="70" rx="10"/>
+  <text class="name" x="135" y="98" text-anchor="middle">conduit-transport</text>
+  <text class="sub" x="135" y="121" text-anchor="middle">协议接入</text>
+  <rect class="box" x="290" y="70" width="210" height="70" rx="10"/>
+  <text class="name" x="395" y="98" text-anchor="middle">conduit-server</text>
+  <text class="sub" x="395" y="121" text-anchor="middle">平台服务</text>
+  <rect class="box" x="550" y="70" width="210" height="70" rx="10"/>
+  <text class="name" x="655" y="98" text-anchor="middle">conduit-e2e</text>
+  <text class="sub" x="655" y="121" text-anchor="middle">端到端测试</text>
+  <rect class="box" x="160" y="180" width="340" height="66" rx="10"/>
+  <text class="name" x="330" y="206" text-anchor="middle">conduit-common</text>
+  <text class="sub" x="330" y="229" text-anchor="middle">消息模型 + MessageBus 接口与实现</text>
+  <rect class="box" x="550" y="180" width="210" height="66" rx="10"/>
+  <text class="name" x="655" y="206" text-anchor="middle">conduit-simulator</text>
+  <text class="sub" x="655" y="229" text-anchor="middle">设备模拟器</text>
+  <path class="flow" d="M135 144 V158 H215 V174" marker-end="url(#arrow)"/>
+  <line class="flow" x1="395" y1="144" x2="395" y2="174" marker-end="url(#arrow)"/>
+  <line class="flow" x1="655" y1="144" x2="655" y2="174" marker-end="url(#arrow)"/>
+  <text class="sub" x="670" y="162">test scope</text>
+</svg>
