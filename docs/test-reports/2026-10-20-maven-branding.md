@@ -2,7 +2,7 @@
 
 - 日期：2026-10-20
 - 被测状态：基于 `0b0a525` 的工作区命名变更，覆盖根 POM 和全部五个子模块。
-- 范围：根 artifactId 改为 `conduit-iot-parent`，同步父引用；补齐产品展示名、简介、仓库 URL 与 SCM 信息。
+- 范围：根 artifactId 改为 `conduit-iot`，同步父引用；补齐产品展示名、简介、仓库 URL 与 SCM 信息。
 - 环境：Windows、PowerShell、Maven 3.9.9；实际 Maven 运行时为 Eclipse Adoptium Java 17.0.9，项目编译要求仍为 Java 21。
 
 ## 实际命令与结果
@@ -27,8 +27,8 @@ foreach ($pomFile in $pomFiles) {
     $pom = [xml](Get-Content -Raw -Encoding UTF8 -LiteralPath $pomFile)
     $project = $pom.project
     if ($pomFile -eq 'pom.xml') {
-        if ($project.artifactId -ne 'conduit-iot-parent') { throw 'Invalid root artifactId' }
-    } elseif ($project.parent.artifactId -ne 'conduit-iot-parent') {
+        if ($project.artifactId -ne 'conduit-iot') { throw 'Invalid root artifactId' }
+    } elseif ($project.parent.artifactId -ne 'conduit-iot') {
         throw "Invalid parent: $pomFile"
     }
     if ($project.name -notlike 'Conduit IoT*') { throw "Invalid display name: $pomFile" }
