@@ -18,12 +18,16 @@ import PageHeader from '@/components/PageHeader.vue'
 const MAX_SPAN_MS = 6 * 60 * 60 * 1000
 /** 运行中的状态轮询间隔 */
 const POLL_MS = 2000
+/** 连续失败多少次后显示刷新失败提示 */
+const POLL_FAIL_HINT = 3
 
 const range = ref<[Date, Date] | null>(null)
 const status = ref<ReplayStatus | null>(null)
 const submitting = ref(false)
 /** 已发出取消请求但任务尚未停下 */
 const cancelRequested = ref(false)
+/** 状态轮询连续失败的次数；达到 POLL_FAIL_HINT 后提示「状态刷新失败」 */
+const pollFailures = ref(0)
 let stopPoll: (() => void) | null = null
 
 /** 任务是否在运行中（决定是否轮询、是否显示取消按钮） */
@@ -86,11 +90,13 @@ function syncPolling() {
   }
 }
 
-/** 轮询一次状态；失败保留上次状态，等下一轮 */
+/** 轮询一次状态；失败保留上次状态并累计失败次数，等下一轮 */
 async function poll() {
   try {
     status.value = await replayApi.status()
+    pollFailures.value = 0
   } catch {
+    pollFailures.value++
     return
   }
   if (!running.value) {
@@ -105,6 +111,16 @@ async function load() {
     status.value = await replayApi.status()
   } catch (e) {
     ElMessage.error(problemMessage(e))
+    return
+  }
+  syncPolling()
+}
+
+/** 静默重读一次状态（提交或取消被拒后用来纠正界面，例如 409 说明已有任务在运行）；失败不再提示 */
+async function refresh() {
+  try {
+    status.value = await replayApi.status()
+  } catch {
     return
   }
   syncPolling()
@@ -143,6 +159,7 @@ async function start() {
     syncPolling()
   } catch (e) {
     ElMessage.error(problemMessage(e))
+    await refresh()
   } finally {
     submitting.value = false
   }
@@ -165,6 +182,7 @@ async function cancel() {
     syncPolling()
   } catch (e) {
     ElMessage.error(problemMessage(e))
+    await refresh()
   }
 }
 
@@ -212,6 +230,7 @@ defineExpose({ range, status, start, cancel })
             {{ cancelRequested ? '正在取消…' : '取消' }}
           </el-button>
           <span v-if="running && cancelRequested" class="hint">已请求取消，最长约 90 秒后停止。</span>
+          <span v-if="running && pollFailures >= POLL_FAIL_HINT" class="hint" data-test="poll-failed">状态刷新失败，仍在重试。</span>
         </el-form-item>
       </el-form>
     </div>
@@ -226,8 +245,8 @@ defineExpose({ range, status, start, cancel })
           <el-tag :type="STATE_TYPES[status.state]" disable-transitions>{{ STATE_LABELS[status.state] }}</el-tag>
         </div>
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="开始时间">{{ formatTime(status.from) }}</el-descriptions-item>
-          <el-descriptions-item label="结束时间">{{ formatTime(status.to) }}</el-descriptions-item>
+          <el-descriptions-item label="重放范围开始">{{ formatTime(status.from) }}</el-descriptions-item>
+          <el-descriptions-item label="重放范围结束（不含）">{{ formatTime(status.to) }}</el-descriptions-item>
           <el-descriptions-item label="提交于">{{ formatTime(status.startedAt) }}</el-descriptions-item>
           <el-descriptions-item label="耗时">{{ elapsed }}</el-descriptions-item>
         </el-descriptions>
