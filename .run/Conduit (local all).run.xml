@@ -1,9 +1,9 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Conduit (local all)" type="CompoundRunConfigurationType">
-    <toRun name="Conduit Server (local)" type="SpringBootApplicationConfigurationType" />
-    <toRun name="Conduit Transport (local)" type="SpringBootApplicationConfigurationType" />
     <toRun name="Conduit Simulator (local)" type="Application" />
     <toRun name="Conduit UI (local)" type="js.build_tools.npm" />
+    <toRun name="Conduit Server (local)" type="SpringBootApplicationConfigurationType" />
+    <toRun name="Conduit Transport (local)" type="SpringBootApplicationConfigurationType" />
     <method v="2" />
   </configuration>
 </component>
