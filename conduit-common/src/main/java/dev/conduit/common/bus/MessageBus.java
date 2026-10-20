@@ -51,7 +51,7 @@ public interface MessageBus {
      *
      * @param startId 起始条目 id（含），如 {@code "1760400000000-0"}
      * @param endId   结束条目 id（含）
-     * @param count   本次最多返回的条数
+     * @param count   本次最多返回的条数，必须大于 0，否则抛 IllegalArgumentException
      */
     List<Delivery> range(String startId, String endId, int count);
 }

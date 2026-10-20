@@ -222,11 +222,12 @@ class RedisStreamMessageBusIT {
 
     @Test
     void rangeHonoursTheCountLimit() {
-        bus.publish(message("d1"));
-        bus.publish(message("d2"));
+        String first = bus.publish(message("d1"));
+        String second = bus.publish(message("d2"));
         bus.publish(message("d3"));
 
-        assertThat(bus.range("0-0", "99999999999999-0", 2)).hasSize(2);
+        assertThat(bus.range("0-0", "99999999999999-0", 2))
+                .extracting(Delivery::id).containsExactly(first, second);
     }
 
     @Test
@@ -236,5 +237,23 @@ class RedisStreamMessageBusIT {
 
         assertThat(bus.range("0-0", "99999999999999-0", 100)).hasSize(2);
         assertThat(bus.read(GROUP, "c1", 10, Duration.ofMillis(100))).hasSize(2);
+    }
+
+    @Test
+    void rangeWithMaxSequenceEndIncludesEntriesOfThatMillisecond() {
+        String id = bus.publish(message("d1"));
+        String ms = id.substring(0, id.indexOf('-'));
+
+        assertThat(bus.range(ms + "-0", ms + "-18446744073709551615", 10))
+                .extracting(Delivery::id).containsExactly(id);
+    }
+
+    @Test
+    void rangeCoveringNoEntriesReturnsEmptyList() {
+        assertThat(bus.range("0-0", "99999999999999-0", 10)).isEmpty();
+
+        String id = bus.publish(message("d1"));
+        long ms = Long.parseLong(id.substring(0, id.indexOf('-')));
+        assertThat(bus.range((ms + 1000) + "-0", (ms + 2000) + "-0", 10)).isEmpty();
     }
 }

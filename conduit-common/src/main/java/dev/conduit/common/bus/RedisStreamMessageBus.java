@@ -149,9 +149,12 @@ public class RedisStreamMessageBus implements MessageBus {
         xadd(props.deadKey(), fields, props.deadMaxLen());
     }
 
-    /** XRANGE 上行流 [startId, endId]，最多 count 条；不经过消费组，deliveryCount 固定为 0。 */
+    /** XRANGE 上行流 [startId, endId]，最多 count 条（count 必须大于 0，否则抛 IllegalArgumentException）；不经过消费组，deliveryCount 固定为 0。 */
     @Override
     public List<Delivery> range(String startId, String endId, int count) {
+        if (count <= 0) {
+            throw new IllegalArgumentException("count 必须大于 0，实际为 " + count);
+        }
         List<MapRecord<String, Object, Object>> records = redis.opsForStream()
                 .range(props.streamKey(), Range.closed(startId, endId), Limit.limit().count(count));
         if (records == null) {
