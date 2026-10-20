@@ -86,4 +86,11 @@ class BackoffTest {
             Thread.interrupted();
         }
     }
+
+    @Test
+    void rejectsANegativeAttemptLimit() {
+        assertThatThrownBy(() -> new Backoff(FAST, Duration.ofMillis(5), -1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("-1");
+    }
 }

@@ -111,7 +111,7 @@ public class PipelineProcessor {
             try {
                 switch (message.type()) {
                     case PROPERTY -> properties.add(new PendingProperty(delivery,
-                            backoff.run("lookup", () -> ingestor.prepare(delivery.id(), message))));
+                            backoff.run("lookup", () -> ingestor.prepare(delivery.id(), message, IngestSource.LIVE))));
                     case PRESENCE_CONNECTED, PRESENCE_DISCONNECTED -> {
                         log.debug("Presence message {}: deviceKey={} type={}", delivery.id(), message.deviceKey(),
                                 message.type());

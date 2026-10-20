@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  */
 public class Backoff {
 
-    /** maxAttempts 取该值表示不限次数。 */
+    /** maxAttempts 取该值表示不限次数（注意 0 不是「不重试」；要限制次数必须传正数）。 */
     public static final int UNLIMITED = 0;
 
     private static final Logger log = LoggerFactory.getLogger(Backoff.class);
@@ -29,9 +29,14 @@ public class Backoff {
     /**
      * @param initial     首次重试前的等待时间
      * @param max         等待时间上限
-     * @param maxAttempts 最多尝试次数（含第一次），{@link #UNLIMITED} 表示不限
+     * @param maxAttempts 最多尝试次数（含第一次），正数表示上限；{@link #UNLIMITED}（0）表示不限，不是「不重试」
+     * @throws IllegalArgumentException maxAttempts 为负数
      */
     public Backoff(Duration initial, Duration max, int maxAttempts) {
+        if (maxAttempts < 0) {
+            throw new IllegalArgumentException(
+                    "maxAttempts must be positive, or Backoff.UNLIMITED (0) for no limit, but was " + maxAttempts);
+        }
         this.initial = initial;
         this.max = max;
         this.maxAttempts = maxAttempts;

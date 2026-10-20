@@ -66,7 +66,7 @@ class TelemetryIngestorTest {
 
     @Test
     void buildsATelemetryPointFromTheDecodedAndValidatedPayload() {
-        TelemetryIngestor.Prepared prepared = ingestor.prepare("1-0", message("d1"));
+        TelemetryIngestor.Prepared prepared = ingestor.prepare("1-0", message("d1"), IngestSource.LIVE);
 
         assertThat(prepared.point()).isEqualTo(
                 new TelemetryPoint(7L, "pk", "d1", 1760400000000L, Map.of("Ua", 220.5)));
@@ -77,7 +77,7 @@ class TelemetryIngestorTest {
     void anUnknownDeviceIsReportedAsUnknownDevice() {
         when(identities.find("ghost")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> ingestor.prepare("1-0", message("ghost")))
+        assertThatThrownBy(() -> ingestor.prepare("1-0", message("ghost"), IngestSource.LIVE))
                 .isInstanceOf(DecodeException.class)
                 .extracting(e -> ((DecodeException) e).reason())
                 .isEqualTo(DeadReason.UNKNOWN_DEVICE);
@@ -88,7 +88,7 @@ class TelemetryIngestorTest {
         useModel(new PropertySpec("Ua", "Ua", DataType.DOUBLE, null, null, null, null, Map.of()));
         when(decoder.decode(any(), any())).thenReturn(new DecodedPayload(1760400000000L, Map.of("Ua", "abc")));
 
-        assertThatThrownBy(() -> ingestor.prepare("1-0", message("d1")))
+        assertThatThrownBy(() -> ingestor.prepare("1-0", message("d1"), IngestSource.LIVE))
                 .isInstanceOf(DecodeException.class)
                 .extracting(e -> ((DecodeException) e).reason())
                 .isEqualTo(DeadReason.FIELD_REJECTED);
@@ -104,5 +104,18 @@ class TelemetryIngestorTest {
 
         verify(writer).write(List.of(point));
         verify(latest).update("d1", 1760400000000L, Map.of("Ua", 220.5));
+    }
+
+    @Test
+    void rejectedFieldsAreCountedUnderTheCallersSourceTag() {
+        useModel(new PropertySpec("Ua", "Ua", DataType.DOUBLE, null, null, null, null, Map.of()));
+        when(decoder.decode(any(), any())).thenReturn(
+                new DecodedPayload(1760400000000L, Map.of("Ua", 1.0, "Zz", 2L)));
+
+        ingestor.prepare("1-0", message("d1"), IngestSource.REPLAY);
+
+        assertThat(meters.get("conduit.pipeline.rejected_fields")
+                .tag("reason", "UNDEFINED").tag("source", "replay").counter().count()).isEqualTo(1.0);
+        assertThat(meters.find("conduit.pipeline.rejected_fields").tag("source", "live").counter()).isNull();
     }
 }

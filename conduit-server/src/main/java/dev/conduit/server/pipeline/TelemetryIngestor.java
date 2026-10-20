@@ -60,13 +60,14 @@ public class TelemetryIngestor {
 
     /**
      * 「解码 → 校验」阶段：依次检查设备存在、所属租户已启用、设备已启用、productKey 一致，
-     * 取产品物模型与 codec 并解码，再逐测点校验。被剔除的测点计入 conduit.pipeline.rejected_fields 指标。
+     * 取产品物模型与 codec 并解码，再逐测点校验。被剔除的测点计入 conduit.pipeline.rejected_fields 指标（带 source 标签）。
      *
      * @param traceId 仅用于日志关联：流水线传投递 id，重放传流条目 id
+     * @param source  调用来源，作为 rejected_fields 指标的 source 标签，使重放不污染实时计数
      * @throws DecodeException UNKNOWN_DEVICE / TENANT_DISABLED / DEVICE_DISABLED / PRODUCT_MISMATCH / UNKNOWN_CODEC、
      *                         解码失败，或全部测点被拒绝（FIELD_REJECTED，details 含被拒详情）
      */
-    public Prepared prepare(String traceId, RawMessage message) {
+    public Prepared prepare(String traceId, RawMessage message, IngestSource source) {
         DeviceIdentity identity = identities.find(message.deviceKey())
                 .orElseThrow(() -> new DecodeException(DeadReason.UNKNOWN_DEVICE, message.deviceKey()));
         if (!identity.tenantActive()) {
@@ -92,7 +93,7 @@ public class TelemetryIngestor {
         FieldValidation validation = FieldValidator.validate(profile.properties(), decoded.values());
         logValidation(traceId, identity.deviceKey(), validation);
         validation.rejected().forEach(r ->
-                meters.counter("conduit.pipeline.rejected_fields", "reason", r.reason().name()).increment());
+                meters.counter("conduit.pipeline.rejected_fields", "reason", r.reason().name(), "source", source.tag()).increment());
         if (validation.accepted().isEmpty()) {
             throw new DecodeException(DeadReason.FIELD_REJECTED, "all fields rejected",
                     RejectedFields.details(validation.rejected()));
