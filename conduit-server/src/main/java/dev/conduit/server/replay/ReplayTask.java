@@ -79,7 +79,11 @@ class ReplayTask {
 
     /** 当前状态的快照，供 REST 接口返回。 */
     ReplayStatus snapshot() {
-        return new ReplayStatus(state, from, to, startedAt, finishedAt,
-                scanned.get(), written.get(), skipped.get(), rejected.get(), error);
+        // finish 先写 finishedAt/error、最后写 state（volatile）。这里先读 state：仍是 RUNNING 就不带结束信息，
+        // 已是终态则 finishedAt/error 必然已写入，因此不会出现 RUNNING 与 finishedAt 同时存在的撕裂快照。
+        ReplayState s = state;
+        boolean done = s != ReplayState.RUNNING;
+        return new ReplayStatus(s, from, to, startedAt, done ? finishedAt : null,
+                scanned.get(), written.get(), skipped.get(), rejected.get(), done ? error : null);
     }
 }

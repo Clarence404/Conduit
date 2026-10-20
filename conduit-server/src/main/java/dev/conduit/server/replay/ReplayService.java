@@ -41,10 +41,12 @@ public class ReplayService {
     static final int BATCH_SIZE = 500;
 
     /**
-     * 写库等可恢复错误的最大尝试次数：配合 1s→30s 退避，约 15 秒后仍不可用就把任务置为 FAILED。
+     * 可恢复错误（读流、写库）的最大尝试次数：配合 1s→30s 退避（1+2+4+8+16+30+30），约 90 秒后仍不可用就把任务置为 FAILED。
+     * 取 8 是为了足够撑过一次 InfluxDB 重启，又不至于让取消被重试阶梯卡住太久；
+     * 取消只在批次之间检查，所以不能设为不限次数，否则面对宕机的 InfluxDB 任务将无法取消。
      * 重放是人工发起的恢复动作，失败后重新提交即可，因此不做成配置项。
      */
-    static final int MAX_ATTEMPTS = 5;
+    static final int MAX_ATTEMPTS = 8;
 
     /** Redis 流条目序号是无符号 64 位整数，取最大值作为「某毫秒内的最后一条」。 */
     private static final String MAX_SEQUENCE = "18446744073709551615";
@@ -91,7 +93,15 @@ public class ReplayService {
         log.info("Telemetry replay submitted: from={} to={}", valid.from(), valid.to());
         // 先取快照再交给执行器：同步执行器会在 execute 返回前跑完任务，返回值仍须是提交那一刻的 RUNNING。
         ReplayStatus submitted = task.snapshot();
-        executor.execute(() -> run(task));
+        try {
+            executor.execute(() -> run(task));
+        } catch (RuntimeException e) {
+            // 提交失败时不清除 current，让操作员通过状态接口看到原因；任务置为 FAILED 后下一次提交不再被 409 挡住。
+            String reason = "无法启动重放线程：" + (e.getMessage() == null ? e.toString() : e.getMessage());
+            task.finish(ReplayState.FAILED, reason, clock.millis());
+            log.warn("Telemetry replay could not be started: {}", e.toString());
+            return task.snapshot();
+        }
         return submitted;
     }
 
@@ -103,6 +113,8 @@ public class ReplayService {
 
     /**
      * 请求取消正在运行的任务：只置标志，执行线程在下一个批次之间停止。
+     * 取消不是即时的：标志只在每批开头检查，若此时任务正处于可恢复错误的重试阶梯（最长约 90 秒），要等它结束才会停止，
+     * 界面不应承诺立即取消。
      *
      * @throws ApiException 409 没有正在运行的任务
      */
@@ -131,7 +143,8 @@ public class ReplayService {
                     log.info("Telemetry replay cancelled: {}", task.snapshot());
                     return;
                 }
-                List<Delivery> batch = bus.range(startId, endId, BATCH_SIZE);
+                String from = startId;
+                List<Delivery> batch = backoff.run("replay range", () -> bus.range(from, endId, BATCH_SIZE));
                 if (batch.isEmpty()) {
                     break;
                 }
@@ -211,6 +224,10 @@ public class ReplayService {
         int dash = lastId.indexOf('-');
         String millis = lastId.substring(0, dash);
         long sequence = Long.parseUnsignedLong(lastId.substring(dash + 1));
+        if (sequence == -1L) {
+            // 序号已是无符号最大值，加一会回绕为 0 而重复读取同一批；改为推进到下一毫秒。
+            return (Long.parseLong(millis) + 1) + "-0";
+        }
         return millis + "-" + Long.toUnsignedString(sequence + 1);
     }
 }

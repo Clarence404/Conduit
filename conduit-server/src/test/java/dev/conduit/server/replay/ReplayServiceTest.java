@@ -82,26 +82,31 @@ class ReplayServiceTest {
         return new ReplayService(bus, ingestor, clock, backoff, Runnable::run);
     }
 
+    /** 一条属性上报消息（payload 无关紧要，解码由被 mock 的 ingestor 决定）。 */
     private static Delivery property(String id, String deviceKey) {
         RawMessage m = new RawMessage("pk", deviceKey, MessageType.PROPERTY,
                 "{}".getBytes(StandardCharsets.UTF_8), FROM, Map.of());
         return new Delivery(id, RawMessageCodec.toFields(m), 0);
     }
 
+    /** 一条上下线事件消息：重放只处理属性消息，这类消息应计入 skipped。 */
     private static Delivery presence(String id, String deviceKey) {
         RawMessage m = new RawMessage("pk", deviceKey, MessageType.PRESENCE_CONNECTED,
                 new byte[0], FROM, Map.of());
         return new Delivery(id, RawMessageCodec.toFields(m), 0);
     }
 
+    /** 信封字段不全（缺 productKey 等）无法还原成 RawMessage 的损坏条目：重放应计入 skipped 而不是中止。 */
     private static Delivery broken(String id) {
         return new Delivery(id, Map.of("dk", "d1"), 0);
     }
 
+    /** 一个已通过校验的数据点，供 prepare 的 mock 返回。 */
     private static TelemetryPoint point(String deviceKey) {
         return new TelemetryPoint(1L, "pk", deviceKey, FROM, Map.of("Ua", 220.5));
     }
 
+    /** 让 ingestor.prepare 对任意消息都成功，返回指定设备的数据点且没有被剔除的字段。 */
     private void prepares(String deviceKey) {
         when(ingestor.prepare(anyString(), any(), any())).thenReturn(
                 new TelemetryIngestor.Prepared(point(deviceKey), List.of()));
@@ -266,6 +271,46 @@ class ReplayServiceTest {
         assertThat(status.scanned()).isZero();
         assertThat(status.finishedAt()).isEqualTo(NOW);
         verify(bus, never()).range(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    void retriesARecoverableFailureFromTheStreamRead() {
+        when(bus.range(anyString(), anyString(), anyInt()))
+                .thenThrow(new TelemetryUnavailableException(new RuntimeException("redis blip")))
+                .thenReturn(List.of(property("1760400000000-0", "d1")))
+                .thenReturn(List.of());
+        prepares("d1");
+
+        ReplayService service = syncService();
+        service.start(new ReplayRequest(FROM, TO));
+
+        assertThat(service.status().state()).isEqualTo(ReplayState.SUCCEEDED);
+        assertThat(service.status().written()).isEqualTo(1);
+    }
+
+    @Test
+    void leavesTheTaskFailedWhenTheExecutorRejectsIt() {
+        ReplayService service = new ReplayService(bus, ingestor, clock, backoff,
+                command -> { throw new java.util.concurrent.RejectedExecutionException("no threads"); });
+
+        ReplayStatus returned = service.start(new ReplayRequest(FROM, TO));
+
+        assertThat(returned.state()).isEqualTo(ReplayState.FAILED);
+        assertThat(returned.error()).contains("no threads");
+        assertThat(service.status().state()).isEqualTo(ReplayState.FAILED);
+        assertThat(service.start(new ReplayRequest(FROM, TO)).state()).isEqualTo(ReplayState.FAILED);
+    }
+
+    @Test
+    void movesToTheNextMillisecondWhenTheSequenceIsTheUnsignedMaximum() {
+        when(bus.range(anyString(), anyString(), anyInt()))
+                .thenReturn(List.of(property("1760400000000-18446744073709551615", "d1")))
+                .thenReturn(List.of());
+        prepares("d1");
+
+        syncService().start(new ReplayRequest(FROM, TO));
+
+        verify(bus).range("1760400000001-0", "1760400000999-18446744073709551615", 500);
     }
 
     @Test
