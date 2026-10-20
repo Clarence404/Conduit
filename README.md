@@ -160,18 +160,18 @@ EMQX 开启了磁盘持久会话：compose 环境变量 `EMQX_DURABLE_SESSIONS__
 
 两个 Dockerfile（`deploy/standalone/docker/java.Dockerfile`、`web.Dockerfile`）的构建上下文都是仓库（或包）根目录，用全局 `ARG BUILD_FROM` 与 `FROM ${BUILD_FROM} AS app` 选择 `prebuilt` 或 `source` 阶段，BuildKit 只构建选中的阶段。EMQX 的鉴权回调在独立部署包中固定为 `http://conduit-server:8080`。模拟器默认启动。详见 `deploy/standalone/README.md`。
 
-独立部署包启动后，浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录（默认租户的租户管理员）；管理租户用 `CONDUIT_PLATFORM_ADMIN_USERNAME` / `CONDUIT_PLATFORM_ADMIN_PASSWORD` 登录（平台管理员，见「账号与角色」）。模拟器会自动创建「三相电表（演示）」产品和设备（设备名形如「1号楼配电室 电表01」，每栋楼 10 台；已有设备的旧名称会在启动时改成这种格式，Key 不变），并在产品缺少演示物模型（docs/examples/demo-meter.thing-model.json）中的任一属性时以合并方式导入（已有部署因此会自动补上 V0.2-B 新增的枚举属性「运行状态」st：每台设备每个整点可能切换一次，多数时间为「运行」）（默认 100 台，每 10 秒上报一次，见 `SIM_DEVICE_COUNT` / `SIM_INTERVAL_MS`；上报格式由 `SIM_PAYLOAD_FORMAT`（`standard` / `flat`）指定，新建产品时按此选用解码器，已有产品的解码器不会被修改）。模拟器首次连接 MQTT 失败时每 2 秒重试，最多 15 次；消息收到平台业务回执后才出队，超时原样重发，待确认队列满后暂停产生新数据。
+独立部署包启动后，浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录（默认租户的租户管理员）；管理租户用 `CONDUIT_PLATFORM_ADMIN_USERNAME` / `CONDUIT_PLATFORM_ADMIN_PASSWORD` 登录（平台管理员，见「账号与角色」）。Flyway V4 会在全新数据库预置 4 个演示租户、8 个产品、174 台设备与 36 个物模型属性；默认租户包含 100 台「三相电表（演示）」和 10 台环境传感器，其他租户覆盖电力、水务和光伏场景。模拟器仍会保证默认演示电表达到 `SIM_DEVICE_COUNT`（默认 100），补齐演示电表物模型，并重置所模拟设备的密钥后每 10 秒上报。消息收到平台业务回执后才出队，超时原样重发，待确认队列满后暂停产生新数据。
 
 已有部署升级注意：演示产品的默认名称已从「Demo Meter」改为「三相电表（演示）」，升级前请先在界面上把旧产品改名为「三相电表（演示）」，否则模拟器会新建一个产品、旧产品及其设备会遗留下来；改名后模拟器会复用该产品，并把其下设备原地改成新名称。
 
 ### 模拟器：演示产品与各租户的产品
 
-模拟器始终维护默认租户的演示产品（见上）。配置平台管理员密码后，它在启动时用平台管理员登录，列出启用中的租户（按 `SIM_TENANTS` 过滤），逐个进入租户，取物模型非空的产品及其启用设备（每产品最多 `SIM_MAX_DEVICES_PER_PRODUCT` 台），重置这些设备的密钥后连接，并按产品解码器（`standard-json` / `flat-json`）上报；任一租户或产品失败只记 WARN，不影响其他。退出租户失败时模拟器用平台管理员重新登录，重新登录也失败则发现到此为止，保留已发现的部分；某台设备重置密钥失败只跳过该设备。
+模拟器始终维护默认租户的演示电表产品（见上）。配置平台管理员密码后，它在启动时用平台管理员登录，列出启用中的租户（按 `SIM_TENANTS` 过滤），逐个进入租户，取物模型非空的产品及其启用设备（每产品最多 `SIM_MAX_DEVICES_PER_PRODUCT` 台），重置这些设备的密钥后连接，并按产品解码器（`standard-json` / `flat-json`）上报；任一租户或产品失败只记 WARN，不影响其他。独立部署默认把 `CONDUIT_PLATFORM_ADMIN_PASSWORD` 传给模拟器，因此 Flyway 预置的全部演示产品会自动产生数据；本地 IDE 模式仍需在不入库的 `simulator-local.properties` 中配置 `SIM_PLATFORM_PASSWORD`。退出租户失败时模拟器用平台管理员重新登录，重新登录也失败则发现到此为止，保留已发现的部分；某台设备重置密钥失败只跳过该设备。
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `SIM_PLATFORM_USERNAME` | `sysadmin` | 平台管理员账号 |
-| `SIM_PLATFORM_PASSWORD` | 空 | 平台管理员密码；为空时只模拟演示产品 |
+| `SIM_PLATFORM_PASSWORD` | 独立部署复用平台管理员密码；本地为空 | 平台管理员密码；为空时只模拟默认演示电表 |
 | `SIM_TENANTS` | `*` | 逗号分隔的租户编码，`*` 表示全部启用中的租户 |
 | `SIM_MAX_DEVICES_PER_PRODUCT` | `100` | 每个产品最多模拟的设备数 |
 | `SIM_ACK_TIMEOUT_MS` | `30000` | 等待平台业务回执的毫秒数，超时原样重发 |
@@ -189,7 +189,7 @@ EMQX 开启了磁盘持久会话：compose 环境变量 `EMQX_DURABLE_SESSIONS__
 
 日曲线按模拟器所在时区计算（Docker 中 `TZ=Asia/Shanghai`）。
 
-> **注意**：模拟器会重置所模拟设备的密钥，真实设备随之连不上，只应对演示租户使用；用 `SIM_TENANTS` 限定范围。「华东电力运维」「华南水务」「西北新能源」是本地手工通过平台管理界面或 API 创建的演示租户，并非代码创建；`SIM_TENANTS` 填的是租户编码，不是名称。
+> **注意**：模拟器会重置所模拟设备的密钥，真实设备随之连不上，只应对演示租户使用；用 `SIM_TENANTS` 限定范围。「华东电力运维」「华南水务」「西北新能源」由 Flyway V4 预置；`SIM_TENANTS` 填的是租户编码，不是名称。迁移只写稳定资产，不伪造在线状态与历史曲线；后两者由模拟器运行后写入 Redis / InfluxDB。
 
 宿主机端口在 `.env` 中配置（开发环境包 `deploy/dev/.env`，独立部署包 `deploy/standalone/.env`），括号内为默认值：
 

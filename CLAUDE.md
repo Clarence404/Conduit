@@ -34,6 +34,7 @@ conduit-ui（Vue）──REST──> conduit-server
 - **消息总线**：经 `MessageBus` 接口，当前实现为 Redis Streams（消费组、`XPENDING` 认领、死信流 `conduit:stream:dead`）。将来评估 RabbitMQ（下行）、Kafka（大规模）时只换实现。
 - **投递语义**：至少一次。下游写入成功后才 ack；可恢复错误（时序库不可用、数据库连接失败等，判断时沿异常 cause 链查找）原地退避重试 1s→30s，不消耗投递次数；意外错误只把该条消息进死信 `PROCESSING_ERROR`；超过 5 次投递进死信 `MAX_DELIVERY_EXCEEDED`。接入侧：EMQX 开启磁盘持久会话，transport 写入总线成功后才回 PUBACK，transport 离线期间的消息存 EMQX 磁盘（保留 1 天），重连后补发。
 - **端到端可靠上报**（V0.2-R2）：属性上报顶层带 1～128 字符字符串 `id` 即启用；此时 `ts` 必填且重发保持不变。transport 在 `XADD` 成功后向 `conduit/{productKey}/{deviceKey}/down/ack` 发布 QoS 0 `{"id":...,"ts":receivedAt}`，含义是“平台已持久接收”，不是“已入库”。回执失败不影响 PUBACK，设备收不到会原样重发；真实设备必须把待确认队列持久化到本地。无 `id` 的旧设备行为不变。当前幂等依靠同设备同 `ts` 覆盖，尚无按 id 去重。
+- **演示数据种子**（Flyway V4）：全新库预置 4 个租户、8 个产品、174 台设备、36 个物模型属性，名称与开发演示环境一致；已有租户按 code、产品按租户内名称、设备按产品内名称复用，升级不重复。种子设备只有不可用的占位密钥哈希，模拟器启动后经 API 重置；在线状态、最新值和历史曲线不写迁移，由模拟器写 Redis / InfluxDB。独立部署的 `SIM_PLATFORM_PASSWORD` 默认复用 `CONDUIT_PLATFORM_ADMIN_PASSWORD`，自动模拟全部演示租户（`2026-10-20-conduit-demo-seed-design.md`）。
 - **transport 单活多备**（V0.2-R）：
   - 会话与订阅：所有实例共用 clientId `conduit-transport`（`conduit.transport.mqtt.client-id`）、`cleanStart=false`、会话保留 86400 秒，普通订阅 `conduit/+/+/up/#`，订阅选项 `retainHandling=DO_NOT_SEND`（重连不重放保留消息）。EMQX 5.8.6 的磁盘持久会话拒绝共享订阅（原因码 158），所以放弃多实例分摊。
   - 选主：Redis 键 `conduit:transport:leader`，抢锁是一段 Lua 脚本（键不存在则 `SET PX`；键里已是本实例 id 则刷新 TTL 并视为抢到，所以 Redis 抖动后原主立即拿回锁；否则拒绝），续期与释放同样 Lua 比对 id 后 `PEXPIRE` / `DEL`；ttl 15s，续期 5s，抢锁 2s。只有主实例连接 EMQX；续期失败立即断开并转为备用，正常停止时释放锁（compose 中两个 transport 均 `stop_grace_period: 20s`）。transport 的 Redis 命令超时为 2s。
@@ -127,3 +128,4 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-19：开发与独立部署模板、集成测试镜像统一为 EMQX 5.10.5；5.8.6/5.8.9 的正常交接补发错位问题经专项实验 9 次未复现，标记为已解决。Redis AOF 改为每次写入刷盘；Broker 强杀仍有已确认消息丢失，详见 `docs/durability-validation.md`；本地 `application-local.yml` 取消 Git 跟踪，部署打包增加检查。
 - 2026-10-20 V0.2-R2：设备带 `id` 启用端到端可靠上报；transport 在 Redis 总线写入成功后发 QoS 0 业务回执，设备收到后才删除持久化本地副本。模拟器实现内存待确认队列、超时重发和背压；e2e 新增强杀 EMQX 场景（`2026-10-20-conduit-reliable-uplink-design.md`）。
 - 2026-10-20：所有实际测试执行都必须在 `docs/test-reports/` 留存测试报告；报告必须区分通过、失败、跳过、阻塞和未执行，记录可复现命令与证据位置（见 2.2）。
+- 2026-10-20 演示数据种子：Flyway V4 固化 4 租户 / 8 产品 / 174 设备 / 36 属性的稳定资产基线；动态遥测仍由模拟器生成，独立部署默认开启全部演示租户模拟（`2026-10-20-conduit-demo-seed-design.md`）。

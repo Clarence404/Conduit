@@ -34,12 +34,12 @@ class AuthIT extends IntegrationTestBase {
         String setCookie = result.getResponse().getHeader(HttpHeaders.SET_COOKIE);
         assertThat(setCookie).contains("conduit_refresh=").contains("HttpOnly")
                 .contains("SameSite=Strict").contains("Path=/api/v1/auth");
-        assertThat(result.getResponse().getContentAsString()).contains("\"tenantName\":\"Default\"");
+        assertThat(result.getResponse().getContentAsString()).contains("\"tenantName\":\"默认租户\"");
         mvc.perform(get("/api/v1/auth/me").header(HttpHeaders.AUTHORIZATION, bearer(loginAsAdmin())))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value("admin"))
                 .andExpect(jsonPath("$.role").value("TENANT_ADMIN"))
-                .andExpect(jsonPath("$.tenantName").value("Default"));
+                .andExpect(jsonPath("$.tenantName").value("默认租户"));
     }
 
     @Test

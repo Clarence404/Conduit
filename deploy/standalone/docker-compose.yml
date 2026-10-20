@@ -164,7 +164,8 @@ services:
       SIM_MAX_PENDING: ${SIM_MAX_PENDING:-1000}
       # 多租户模拟（V0.2-R）：平台管理员密码为空时只模拟演示产品；非空时模拟 SIM_TENANTS 中各租户有物模型的产品
       SIM_PLATFORM_USERNAME: ${SIM_PLATFORM_USERNAME:-sysadmin}
-      SIM_PLATFORM_PASSWORD: ${SIM_PLATFORM_PASSWORD:-}
+      # 默认复用平台管理员密码，使 Flyway 预置的全部演示租户都会自动产生遥测；仍可用 SIM_PLATFORM_PASSWORD 单独覆盖
+      SIM_PLATFORM_PASSWORD: ${SIM_PLATFORM_PASSWORD:-${CONDUIT_PLATFORM_ADMIN_PASSWORD}}
       SIM_TENANTS: ${SIM_TENANTS:-*}
       SIM_MAX_DEVICES_PER_PRODUCT: ${SIM_MAX_DEVICES_PER_PRODUCT:-100}
       # 光伏、用电、用水的日曲线按本地时间计算
