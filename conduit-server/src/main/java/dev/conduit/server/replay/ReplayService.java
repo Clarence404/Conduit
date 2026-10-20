@@ -125,7 +125,8 @@ public class ReplayService {
         }
         task.cancel();
         log.info("Telemetry replay cancellation requested");
-        return task.snapshot();
+        // 读取与取消之间任务可能已结束并被新任务取代：返回当前任务的快照，避免操作员看到另一个任务的状态。
+        return status();
     }
 
     /**
@@ -162,6 +163,11 @@ public class ReplayService {
             String reason = e.getMessage() == null ? e.toString() : e.getMessage();
             task.finish(ReplayState.FAILED, reason, clock.millis());
             log.warn("Telemetry replay failed: {}", reason);
+        } catch (Error e) {
+            // OutOfMemoryError 等 Error 不能放过：否则任务永远停在 RUNNING，后续提交全部 409，只能重启服务。
+            task.finish(ReplayState.FAILED, "重放线程异常终止：" + e, clock.millis());
+            log.error("Telemetry replay thread died", e);
+            throw e;
         }
     }
 

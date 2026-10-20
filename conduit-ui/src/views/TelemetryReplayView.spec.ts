@@ -77,6 +77,21 @@ describe('TelemetryReplayView', () => {
     expect(wrapper.find('[data-test="cancel"]').exists()).toBe(false)
   })
 
+  it('shows a retry affordance instead of the empty state when the first status load fails', async () => {
+    vi.mocked(replayApi.status).mockRejectedValueOnce(new Error('boom'))
+    const { wrapper } = await mountView()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('还没有重放过数据')
+
+    vi.mocked(replayApi.status).mockResolvedValue(status())
+    await wrapper.find('[data-test="load-failed"] button').trigger('click')
+    await settle()
+
+    expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="cancel"]').exists()).toBe(true)
+  })
+
   it('accepts a range of exactly six hours', async () => {
     vi.mocked(replayApi.start).mockResolvedValue(status())
     const { vm } = await mountView()

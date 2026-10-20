@@ -58,7 +58,7 @@ public class PipelineProcessor {
                 Backoff.unlimited(Duration.ofSeconds(1), Duration.ofSeconds(30)));
     }
 
-    /** 可指定退避策略的构造器，测试用。 */
+    /** 可指定退避策略的构造器（供另外两个构造器委托）。 */
     PipelineProcessor(MessageBus bus, PipelineProperties props, TelemetryIngestor ingestor,
                       PresenceHandler presenceHandler, PresenceStore presence, MeterRegistry meters,
                       Backoff backoff) {

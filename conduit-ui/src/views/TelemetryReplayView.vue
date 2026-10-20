@@ -3,7 +3,7 @@
  * 数据重放（平台管理员）：按时间范围把总线中保留的原始报文重新写入时序库，用于 InfluxDB 断电丢数后的恢复。
  * 跨度上限 6 小时，提交前在前端先行校验并弹确认；任务运行中每 2 秒轮询状态并可取消，任务结束即停止轮询，
  * 离开页面时清除定时器。从未提交过任务时显示空状态。
- * 取消只在批次之间与重试等待中检查，最长约 90 秒才生效，所以点击后界面显示「正在取消」直到状态变为已取消；
+ * 取消只在批次之间检查；若此时正处于重试阶梯，要等该阶梯结束（最长约 90 秒）才会停下，所以点击后界面显示「正在取消」直到状态变为已取消；
  * 运行中的状态没有结束时间与错误信息，这两项只在任务结束后出现。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -28,12 +28,14 @@ const submitting = ref(false)
 const cancelRequested = ref(false)
 /** 状态轮询连续失败的次数；达到 POLL_FAIL_HINT 后提示「状态刷新失败」 */
 const pollFailures = ref(0)
+/** 首次读取状态失败且还没有任何状态：此时不能显示「还没有重放过数据」，否则会掩盖正在运行的任务 */
+const loadFailed = ref(false)
 let stopPoll: (() => void) | null = null
 
 /** 任务是否在运行中（决定是否轮询、是否显示取消按钮） */
 const running = computed(() => status.value?.state === 'RUNNING')
 /** 从未提交过任务：显示空状态与引导文案 */
-const empty = computed(() => !status.value || status.value.state === 'NONE')
+const empty = computed(() => !loadFailed.value && (!status.value || status.value.state === 'NONE'))
 
 const STATE_LABELS: Record<ReplayState, string> = {
   NONE: '未开始',
@@ -109,7 +111,9 @@ async function poll() {
 async function load() {
   try {
     status.value = await replayApi.status()
+    loadFailed.value = false
   } catch (e) {
+    loadFailed.value = status.value === null
     ElMessage.error(problemMessage(e))
     return
   }
@@ -236,7 +240,10 @@ defineExpose({ range, status, start, cancel })
     </div>
 
     <div class="cd-panel task">
-      <el-empty v-if="empty" description="还没有重放过数据">
+      <el-empty v-if="loadFailed" description="任务状态加载失败" data-test="load-failed">
+        <el-button type="primary" @click="load">重试</el-button>
+      </el-empty>
+      <el-empty v-else-if="empty" description="还没有重放过数据">
         <span class="hint">选择一段时间范围后点击「开始重放」，恢复该时间段内丢失的时序数据。</span>
       </el-empty>
       <template v-else-if="status">

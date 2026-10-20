@@ -121,13 +121,16 @@ class ReplayIT extends IntegrationTestBase {
                 .containsEntry("Ua", new LatestValue(221.5, ts + 1000));
         assertThat(redis.opsForStream().size("test:dead")).isEqualTo(deadBefore);
 
+        // 旧数据不能盖掉新值：先写入一个更新的最新值，重放（只含更旧的数据）之后它必须保留。
+        latest.update(device.deviceKey(), ts + 5000, Map.of("Ua", 230.0));
+
         // 幂等：同一窗口再重放一次，同设备同时间戳的写入覆盖为同一个值，计数与最新值都不变（spec 3 的安全前提）。
         String again = replayAndWait();
         assertThat((String) JsonPath.read(again, "$.state")).isEqualTo("SUCCEEDED");
         assertThat((int) JsonPath.read(again, "$.scanned")).isEqualTo(2);
         assertThat(count(influx, device.deviceKey(), "Ua")).isEqualTo(2);
         assertThat(latest.get(device.deviceKey()))
-                .containsEntry("Ua", new LatestValue(221.5, ts + 1000));
+                .containsEntry("Ua", new LatestValue(230.0, ts + 5000));
     }
 
     @Test

@@ -289,6 +289,21 @@ class ReplayServiceTest {
     }
 
     @Test
+    void anErrorFromTheIngestPathLeavesTheTaskFailedNotRunning() {
+        readsOneBatch(List.of(property("1760400000000-0", "d1")));
+        when(ingestor.prepare(anyString(), any(), any())).thenThrow(new OutOfMemoryError("boom"));
+
+        ReplayService service = syncService();
+        assertThatThrownBy(() -> service.start(new ReplayRequest(FROM, TO)))
+                .isInstanceOf(OutOfMemoryError.class);
+
+        assertThat(service.status().state()).isEqualTo(ReplayState.FAILED);
+        // 任务已结束，后续提交不再被 409 挡住。
+        when(bus.range(anyString(), anyString(), anyInt())).thenReturn(List.of());
+        assertThat(service.start(new ReplayRequest(FROM, TO)).state()).isNotNull();
+    }
+
+    @Test
     void leavesTheTaskFailedWhenTheExecutorRejectsIt() {
         ReplayService service = new ReplayService(bus, ingestor, clock, backoff,
                 command -> { throw new java.util.concurrent.RejectedExecutionException("no threads"); });
