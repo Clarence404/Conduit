@@ -97,9 +97,9 @@ class ReplayApiIT extends IntegrationTestBase {
     @Test
     void submittingWhileATaskIsRunningIsAConflictAndCancelStopsIt() throws Exception {
         // 执行器只收下任务不执行，所以第一次提交后任务一直是 RUNNING，第二次提交走真实的 409 路径。
-        submit("{\"from\":0,\"to\":1000}").andExpect(status().isOk())
-                .andExpect(jsonPath("$.state").value("RUNNING"));
         try {
+            submit("{\"from\":0,\"to\":1000}").andExpect(status().isOk())
+                    .andExpect(jsonPath("$.state").value("RUNNING"));
             submit("{\"from\":0,\"to\":1000}").andExpect(status().isConflict())
                     .andExpect(jsonPath("$.detail").value("已有重放任务正在运行"));
             mvc.perform(delete(PATH).header(HttpHeaders.AUTHORIZATION, bearer(sys)))
@@ -127,6 +127,27 @@ class ReplayApiIT extends IntegrationTestBase {
         assertThat(statusOf(impersonation, HttpMethod.DELETE)).isEqualTo(403);
     }
 
+    @Test
+    void theStatusEndpointAnswersThePlatformAdmin() throws Exception {
+        mvc.perform(get(PATH).header(HttpHeaders.AUTHORIZATION, bearer(sys)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").exists());
+    }
+
+    @Test
+    void tenantRolesCannotReachAnyOfTheThreeEndpoints() throws Exception {
+        long tenantId = createTenant("rp-");
+        String admin = login(createUser(tenantId, Roles.TENANT_ADMIN, false), TEST_PASSWORD);
+        String viewer = login(createUser(tenantId, Roles.TENANT_VIEWER, false), TEST_PASSWORD);
+
+        for (String token : new String[]{admin, viewer}) {
+            assertThat(statusOf(token, HttpMethod.GET)).isEqualTo(403);
+            assertThat(statusOf(token, HttpMethod.POST)).isEqualTo(403);
+            assertThat(statusOf(token, HttpMethod.DELETE)).isEqualTo(403);
+        }
+    }
+
+    // 本类刻意用嵌套配置替换 ReplayService，因此拥有独立的 Spring 上下文；不要把它「整理」进共享基类，否则会破坏这个测试缝。
     /** 用只收下任务、等测试放行的执行器替换重放服务，让「任务正在运行」的状态可以确定地构造。 */
     @TestConfiguration
     static class HeldExecutorConfig {
@@ -152,26 +173,6 @@ class ReplayApiIT extends IntegrationTestBase {
         static void releaseAll() {
             HELD.forEach(Runnable::run);
             HELD.clear();
-        }
-    }
-
-    @Test
-    void theStatusEndpointAnswersThePlatformAdmin() throws Exception {
-        mvc.perform(get(PATH).header(HttpHeaders.AUTHORIZATION, bearer(sys)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.state").exists());
-    }
-
-    @Test
-    void tenantRolesCannotReachAnyOfTheThreeEndpoints() throws Exception {
-        long tenantId = createTenant("rp-");
-        String admin = login(createUser(tenantId, Roles.TENANT_ADMIN, false), TEST_PASSWORD);
-        String viewer = login(createUser(tenantId, Roles.TENANT_VIEWER, false), TEST_PASSWORD);
-
-        for (String token : new String[]{admin, viewer}) {
-            assertThat(statusOf(token, HttpMethod.GET)).isEqualTo(403);
-            assertThat(statusOf(token, HttpMethod.POST)).isEqualTo(403);
-            assertThat(statusOf(token, HttpMethod.DELETE)).isEqualTo(403);
         }
     }
 }
