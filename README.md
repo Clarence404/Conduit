@@ -31,7 +31,7 @@ Conduit IoT 以建设面向工业、能源、园区与设备运营场景的生�
 
 ## 代码结构
 
-仓库根目录即 Maven 父工程，Java 模块与前端 `conduit-ui` 平铺在顶层。Java 模块之间的依赖关系：
+仓库根目录即 Maven 父工程 `dev.conduit:conduit-iot-parent`（展示名 `Conduit IoT`），Java 模块与前端 `conduit-ui` 平铺在顶层。Java 模块之间的依赖关系：
 
 ![Conduit Java 模块依赖：transport 和 server 依赖 common，e2e 测试依赖 simulator](docs/images/module-dependencies.svg)
 

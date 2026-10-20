@@ -6,12 +6,13 @@
 
   <parent>
     <groupId>dev.conduit</groupId>
-    <artifactId>conduit-parent</artifactId>
+    <artifactId>conduit-iot-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
   </parent>
 
   <!-- 端到端测试（-Pe2e）：Testcontainers 临时环境 + 本地 jar 进程，需先 mvn -B -DskipTests install -->
   <artifactId>conduit-e2e</artifactId>
+  <name>Conduit IoT :: End-to-End Tests</name>
 
   <dependencies>
     <dependency>

@@ -6,11 +6,12 @@
 
   <parent>
     <groupId>dev.conduit</groupId>
-    <artifactId>conduit-parent</artifactId>
+    <artifactId>conduit-iot-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
   </parent>
 
   <artifactId>conduit-server</artifactId>
+  <name>Conduit IoT :: Server</name>
 
   <dependencies>
     <dependency>

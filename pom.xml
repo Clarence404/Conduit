@@ -12,9 +12,20 @@
   </parent>
 
   <groupId>dev.conduit</groupId>
-  <artifactId>conduit-parent</artifactId>
+  <artifactId>conduit-iot-parent</artifactId>
   <version>0.1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
+
+  <name>Conduit IoT</name>
+  <description>Multi-tenant IoT platform evolving toward production-grade SaaS.</description>
+  <url>https://github.com/Clarence404/conduit-iot</url>
+
+  <scm>
+    <connection>scm:git:https://github.com/Clarence404/conduit-iot.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/Clarence404/conduit-iot.git</developerConnection>
+    <url>https://github.com/Clarence404/conduit-iot</url>
+    <tag>HEAD</tag>
+  </scm>
 
   <modules>
     <module>conduit-common</module>
