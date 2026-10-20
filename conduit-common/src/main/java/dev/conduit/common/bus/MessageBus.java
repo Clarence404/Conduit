@@ -18,6 +18,7 @@ import java.util.Map;
  *       已被 MAXLEN 裁剪掉的条目不会再出现在结果中（见设计文档 9.3 已知限制）。</li>
  *   <li>{@link #deadLetter} 先写死信流再 ack 原消息；两步之间崩溃会产生重复死信，属于至少一次语义可接受。</li>
  *   <li>{@link #recordDead} 只写死信流、不确认原消息，用于原消息已部分处理成功、仍需留痕的情况。</li>
+ *   <li>{@link #range} 只读、不进消费组、不改变待确认列表，返回的 deliveryCount 为 0。</li>
  * </ul>
  */
 public interface MessageBus {
@@ -42,4 +43,15 @@ public interface MessageBus {
 
     /** 写一条死信记录（原始字段 + details + reason/originalId/deliveryCount/failedAt），不 ack。 */
     void recordDead(Delivery delivery, String reason, Map<String, String> details);
+
+    /**
+     * 按条目 id 区间读取上行流的原始条目（XRANGE，两端均含），最多 count 条，按 id 升序返回。
+     * 用于遥测重放：Redis 流条目 id 的前半段就是毫秒时间戳，所以时间范围直接对应 id 范围。
+     * 不经过消费组，不影响待确认列表：返回的 Delivery 的 deliveryCount 固定为 0，调用方不得 ack。
+     *
+     * @param startId 起始条目 id（含），如 {@code "1760400000000-0"}
+     * @param endId   结束条目 id（含）
+     * @param count   本次最多返回的条数
+     */
+    List<Delivery> range(String startId, String endId, int count);
 }

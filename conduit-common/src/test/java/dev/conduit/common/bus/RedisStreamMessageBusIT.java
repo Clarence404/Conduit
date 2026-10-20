@@ -198,4 +198,43 @@ class RedisStreamMessageBusIT {
 
         assertThat(redis.opsForStream().size("test:dead")).isLessThan(200);
     }
+
+    @Test
+    void rangeReturnsTheEntriesBetweenTwoIdsInclusive() {
+        String first = bus.publish(message("d1"));
+        String second = bus.publish(message("d2"));
+        bus.publish(message("d3"));
+
+        List<Delivery> entries = bus.range(first, second, 100);
+
+        assertThat(entries).extracting(Delivery::id).containsExactly(first, second);
+        assertThat(entries.getFirst().message().deviceKey()).isEqualTo("d1");
+        assertThat(entries.getFirst().fields()).containsEntry("dk", "d1");
+    }
+
+    @Test
+    void rangeMarksEntriesAsNotDeliveredThroughAGroup() {
+        String id = bus.publish(message("d1"));
+
+        assertThat(bus.range(id, id, 100)).singleElement()
+                .extracting(Delivery::deliveryCount).isEqualTo(0L);
+    }
+
+    @Test
+    void rangeHonoursTheCountLimit() {
+        bus.publish(message("d1"));
+        bus.publish(message("d2"));
+        bus.publish(message("d3"));
+
+        assertThat(bus.range("0-0", "99999999999999-0", 2)).hasSize(2);
+    }
+
+    @Test
+    void rangeDoesNotConsumeTheEntries() {
+        bus.publish(message("d1"));
+        bus.publish(message("d2"));
+
+        assertThat(bus.range("0-0", "99999999999999-0", 100)).hasSize(2);
+        assertThat(bus.read(GROUP, "c1", 10, Duration.ofMillis(100))).hasSize(2);
+    }
 }
