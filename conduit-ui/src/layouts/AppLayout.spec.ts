@@ -68,10 +68,10 @@ describe('AppLayout', () => {
     wrapper.unmount()
   })
 
-  it('gives the platform admin the overview and the tenant list', async () => {
+  it('gives the platform admin the overview, the tenant list and the data replay page', async () => {
     const { wrapper } = await mountAt('/tenants', PLATFORM)
 
-    expect(menuLabels(wrapper)).toEqual(['首页', '租户'])
+    expect(menuLabels(wrapper)).toEqual(['首页', '租户', '数据重放'])
     expect(wrapper.find('.el-menu-item.is-active').text()).toBe('租户')
     expect(wrapper.text()).not.toContain('设备接入')
     expect(wrapper.find('.tenant').exists()).toBe(false)
