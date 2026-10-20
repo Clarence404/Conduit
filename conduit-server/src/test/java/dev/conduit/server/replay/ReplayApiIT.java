@@ -1,14 +1,25 @@
 package dev.conduit.server.replay;
 
+import com.jayway.jsonpath.JsonPath;
+import dev.conduit.common.bus.MessageBus;
 import dev.conduit.server.auth.Roles;
+import dev.conduit.server.pipeline.Backoff;
+import dev.conduit.server.pipeline.TelemetryIngestor;
 import dev.conduit.server.support.IntegrationTestBase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -25,9 +36,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ReplayApiIT extends IntegrationTestBase {
 
     private static final String PATH = "/api/v1/platform/telemetry/replay";
-
-    @org.springframework.beans.factory.annotation.Autowired
-    ReplayService replayService;
 
     private String sys;
 
@@ -86,29 +94,67 @@ class ReplayApiIT extends IntegrationTestBase {
                 .andExpect(jsonPath("$.detail").value("没有正在运行的重放任务"));
     }
 
-
     @Test
-    @SuppressWarnings("unchecked")
     void submittingWhileATaskIsRunningIsAConflictAndCancelStopsIt() throws Exception {
-        // 构造一个确定处于 RUNNING 的任务并放进服务（真实执行太快，无法稳定地在运行中提交第二次）。
-        java.lang.reflect.Field field = ReplayService.class.getDeclaredField("current");
-        field.setAccessible(true);
-        java.util.concurrent.atomic.AtomicReference<ReplayTask> holder =
-                (java.util.concurrent.atomic.AtomicReference<ReplayTask>) field.get(replayService);
-        ReplayTask previous = holder.get();
-        ReplayTask running = new ReplayTask(0, 1000, System.currentTimeMillis());
-        holder.set(running);
+        // 执行器只收下任务不执行，所以第一次提交后任务一直是 RUNNING，第二次提交走真实的 409 路径。
+        submit("{\"from\":0,\"to\":1000}").andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("RUNNING"));
         try {
             submit("{\"from\":0,\"to\":1000}").andExpect(status().isConflict())
                     .andExpect(jsonPath("$.detail").value("已有重放任务正在运行"));
             mvc.perform(delete(PATH).header(HttpHeaders.AUTHORIZATION, bearer(sys)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.state").value("RUNNING"));
-            assertThat(running.isCancelled()).isTrue();
         } finally {
-            holder.set(previous);
+            // 放行被收下的任务：它发现已取消，直接置为 CANCELLED，不影响其他测试看到的「没有运行中任务」。
+            HeldExecutor.releaseAll();
+        }
+        mvc.perform(get(PATH).header(HttpHeaders.AUTHORIZATION, bearer(sys)))
+                .andExpect(jsonPath("$.state").value("CANCELLED"));
+    }
+
+    @Test
+    void anImpersonatingPlatformAdminCannotReachAnyOfTheThreeEndpoints() throws Exception {
+        String code = tenantCode(createTenant("rp-"));
+        String body = mvc.perform(post("/api/v1/platform/tenants/{c}/enter", code)
+                        .header(HttpHeaders.AUTHORIZATION, bearer(sys)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        String impersonation = JsonPath.read(body, "$.accessToken");
+
+        assertThat(statusOf(impersonation, HttpMethod.GET)).isEqualTo(403);
+        assertThat(statusOf(impersonation, HttpMethod.POST)).isEqualTo(403);
+        assertThat(statusOf(impersonation, HttpMethod.DELETE)).isEqualTo(403);
+    }
+
+    /** 用只收下任务、等测试放行的执行器替换重放服务，让「任务正在运行」的状态可以确定地构造。 */
+    @TestConfiguration
+    static class HeldExecutorConfig {
+
+        @Bean
+        @Primary
+        ReplayService heldReplayService(MessageBus bus, TelemetryIngestor ingestor, Clock clock) {
+            return new ReplayService(bus, ingestor, clock,
+                    new Backoff(Duration.ofMillis(10), Duration.ofMillis(10), ReplayService.MAX_ATTEMPTS),
+                    HeldExecutor::hold);
         }
     }
+
+    /** 收下提交的任务而不执行，直到 {@link #releaseAll()}。 */
+    static final class HeldExecutor {
+        private static final java.util.List<Runnable> HELD = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        static void hold(Runnable task) {
+            HELD.add(task);
+        }
+
+        /** 依次执行并清空已收下的任务。 */
+        static void releaseAll() {
+            HELD.forEach(Runnable::run);
+            HELD.clear();
+        }
+    }
+
     @Test
     void theStatusEndpointAnswersThePlatformAdmin() throws Exception {
         mvc.perform(get(PATH).header(HttpHeaders.AUTHORIZATION, bearer(sys)))
