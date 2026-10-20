@@ -63,7 +63,8 @@ public final class SimulatorApplication {
                     demoProductKeys));
 
             new DeviceSimulator(config.mqttHost(), config.mqttPort(), config.interval(), config.messagesPerDevice(),
-                    DeviceSimulator.DEFAULT_COMPLETION_TIMEOUT, format, true).runDevices(devices);
+                    DeviceSimulator.DEFAULT_COMPLETION_TIMEOUT, format, true, config.ackTimeout(),
+                    config.maxPending()).runDevices(devices);
         }
     }
 

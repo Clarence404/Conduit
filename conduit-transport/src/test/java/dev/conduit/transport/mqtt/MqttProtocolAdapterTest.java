@@ -20,6 +20,7 @@ import org.mockito.InOrder;
 
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -105,6 +106,58 @@ class MqttProtocolAdapterTest {
 
         verify(bus, times(1)).publish(any());
         verify(publish, times(1)).acknowledge();
+    }
+
+    @Test
+    void sendsApplicationAckForReliablePropertyAfterBusPublish() {
+        AckCapturingAdapter reliable = new AckCapturingAdapter(bus);
+        when(bus.publish(any())).thenReturn("1-0");
+        when(publish.getPayloadAsBytes())
+                .thenReturn("{\"id\":\"dk1-42\",\"ts\":1760400000000,\"params\":{\"Ua\":220.1}}"
+                        .getBytes(StandardCharsets.UTF_8));
+
+        reliable.onPublish(reliable.openSession(), publish);
+
+        assertThat(reliable.ackTopic).isEqualTo("conduit/pk1/dk1/down/ack");
+        assertThat(new String(reliable.ackPayload, StandardCharsets.UTF_8))
+                .contains("\"id\":\"dk1-42\"")
+                .contains("\"ts\":1");
+        verify(bus).publish(any());
+        verify(publish).acknowledge();
+        reliable.stop();
+    }
+
+    @Test
+    void skipsApplicationAckWithoutAnIdOrForMalformedJson() {
+        AckCapturingAdapter reliable = new AckCapturingAdapter(bus);
+        when(bus.publish(any())).thenReturn("1-0");
+        when(publish.getPayloadAsBytes()).thenReturn("{\"ts\":1,\"params\":{}}".getBytes(StandardCharsets.UTF_8));
+        reliable.onPublish(reliable.openSession(), publish);
+        assertThat(reliable.ackTopic).isNull();
+
+        when(publish.getPayloadAsBytes()).thenReturn(new byte[]{1, 2, 3});
+        reliable.onPublish(reliable.openSession(), publish);
+
+        assertThat(reliable.ackTopic).isNull();
+        verify(bus, times(2)).publish(any());
+        verify(publish, times(2)).acknowledge();
+        reliable.stop();
+    }
+
+    @Test
+    void applicationAckSendFailureStillAcknowledgesTheUplink() {
+        AckCapturingAdapter reliable = new AckCapturingAdapter(bus);
+        reliable.ackResult = CompletableFuture.failedFuture(new IllegalStateException("connection lost"));
+        when(bus.publish(any())).thenReturn("1-0");
+        when(publish.getPayloadAsBytes())
+                .thenReturn("{\"id\":\"dk1-1\",\"ts\":1,\"params\":{}}".getBytes(StandardCharsets.UTF_8));
+
+        reliable.onPublish(reliable.openSession(), publish);
+
+        assertThat(reliable.ackTopic).isEqualTo("conduit/pk1/dk1/down/ack");
+        verify(bus).publish(any());
+        verify(publish).acknowledge();
+        reliable.stop();
     }
 
     @Test
@@ -219,6 +272,25 @@ class MqttProtocolAdapterTest {
 
         synchronized int connectCount() {
             return connects.size();
+        }
+    }
+
+    /** 捕获业务回执而不连接 broker。 */
+    private static final class AckCapturingAdapter extends MqttProtocolAdapter {
+        String ackTopic;
+        byte[] ackPayload;
+        CompletableFuture<?> ackResult = CompletableFuture.completedFuture(null);
+
+        AckCapturingAdapter(MessageBus bus) {
+            super(new MqttTransportProperties("localhost", 1883, "conduit-transport-ut", null, null, 86400,
+                    "conduit-"), bus, Clock.fixed(Instant.ofEpochMilli(1), ZoneOffset.UTC), Duration.ofMillis(1));
+        }
+
+        @Override
+        CompletableFuture<?> publishReliableAck(Session session, String topic, byte[] payload) {
+            ackTopic = topic;
+            ackPayload = payload;
+            return ackResult;
         }
     }
 

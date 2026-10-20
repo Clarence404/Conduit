@@ -314,6 +314,24 @@ final class E2eEnvironment implements AutoCloseable {
         log.info("EMQX is running again");
     }
 
+    /** 向容器主进程发送 KILL 后原地启动同一容器，保留固定宿主机端口，用于复现 broker 非正常退出。 */
+    void killEmqxAndRestart() {
+        log.info("Killing the EMQX container with SIGKILL");
+        var docker = DockerClientFactory.instance().client();
+        docker.killContainerCmd(emqx.getContainerId()).withSignal("KILL").exec();
+        await().atMost(Duration.ofSeconds(30)).until(() -> !docker.inspectContainerCmd(emqx.getContainerId())
+                .exec().getState().getRunning());
+        docker.startContainerCmd(emqx.getContainerId()).exec();
+        await().atMost(Duration.ofMinutes(2)).pollInterval(Duration.ofSeconds(2)).until(() -> {
+            try {
+                return emqx.execInContainer("/opt/emqx/bin/emqx", "ctl", "status").getExitCode() == 0;
+            } catch (Exception e) {
+                return false;
+            }
+        });
+        log.info("EMQX is running again after SIGKILL");
+    }
+
     /** 每个场景开始前：把被结束的进程重新启动，并等到有已连接的主 transport。 */
     void ensureRunning() throws IOException {
         if (!server.alive()) {

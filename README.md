@@ -2,9 +2,9 @@
 
 个人研究性质的 IoT 平台。V0.1 跑通「设备 MQTT 直连 → 接入 → 总线 → 处理 → 时序存储 → Web 展示」主链路。
 
-功能：产品与设备管理、MQTT 接入与鉴权、物模型逐测点校验与可插拔解码（V0.2-A）、设备历史曲线（V0.2-B：设备详情「历史」标签页，按时间范围自动聚合，多测点联动缩放）、前端体验优化（首页总览、分组侧栏与面包屑、设备指标卡片与迷你趋势线、暗色模式与侧栏风格切换）、多租户与用户管理（V0.2-C：平台管理员管理租户并可进入租户代为操作，租户管理员管理本租户的产品、设备与用户，只读用户只能查看）、可靠性加固（V0.2-R：EMQX 磁盘持久会话 + transport 单活多备，杀 server / transport、重启 EMQX 都不丢数据；模拟器按物模型模拟各演示租户的设备）。
+功能：产品与设备管理、MQTT 接入与鉴权、物模型逐测点校验与可插拔解码（V0.2-A）、设备历史曲线（V0.2-B：设备详情「历史」标签页，按时间范围自动聚合，多测点联动缩放）、前端体验优化（首页总览、分组侧栏与面包屑、设备指标卡片与迷你趋势线、暗色模式与侧栏风格切换）、多租户与用户管理（V0.2-C：平台管理员管理租户并可进入租户代为操作，租户管理员管理本租户的产品、设备与用户，只读用户只能查看）、可靠性加固（V0.2-R/R2：transport 单活多备；设备收到平台持久接收回执前保留并重发本地副本；模拟器按物模型模拟各演示租户的设备）。
 
-设计文档：`docs/superpowers/specs/2026-10-14-conduit-v0.1-design.md`（版本路线与 V0.1）、`docs/superpowers/specs/2026-10-15-conduit-v0.2a-thing-model-design.md`（V0.2-A 物模型与编解码）、`docs/superpowers/specs/2026-10-15-conduit-v0.2b-history-design.md`（V0.2-B 历史查询与曲线）、`docs/superpowers/specs/2026-10-15-conduit-ui-refresh-design.md`（前端体验优化）、`docs/superpowers/specs/2026-10-16-conduit-v0.2c-tenants-users-design.md`（V0.2-C 多租户与用户管理）、`docs/superpowers/specs/2026-10-16-conduit-v0.2r-reliability-design.md`（V0.2-R 可靠性加固）
+设计文档：`docs/superpowers/specs/2026-10-14-conduit-v0.1-design.md`（版本路线与 V0.1）、`docs/superpowers/specs/2026-10-15-conduit-v0.2a-thing-model-design.md`（V0.2-A 物模型与编解码）、`docs/superpowers/specs/2026-10-15-conduit-v0.2b-history-design.md`（V0.2-B 历史查询与曲线）、`docs/superpowers/specs/2026-10-15-conduit-ui-refresh-design.md`（前端体验优化）、`docs/superpowers/specs/2026-10-16-conduit-v0.2c-tenants-users-design.md`（V0.2-C 多租户与用户管理）、`docs/superpowers/specs/2026-10-16-conduit-v0.2r-reliability-design.md`（V0.2-R 可靠性加固）、`docs/superpowers/specs/2026-10-20-conduit-reliable-uplink-design.md`（V0.2-R2 端到端可靠上报）
 
 设备接入指南（流程、连接参数、上报格式、示例代码、排错）：[`docs/device-integration.md`](docs/device-integration.md)
 
@@ -160,7 +160,7 @@ EMQX 开启了磁盘持久会话：compose 环境变量 `EMQX_DURABLE_SESSIONS__
 
 两个 Dockerfile（`deploy/standalone/docker/java.Dockerfile`、`web.Dockerfile`）的构建上下文都是仓库（或包）根目录，用全局 `ARG BUILD_FROM` 与 `FROM ${BUILD_FROM} AS app` 选择 `prebuilt` 或 `source` 阶段，BuildKit 只构建选中的阶段。EMQX 的鉴权回调在独立部署包中固定为 `http://conduit-server:8080`。模拟器默认启动。详见 `deploy/standalone/README.md`。
 
-独立部署包启动后，浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录（默认租户的租户管理员）；管理租户用 `CONDUIT_PLATFORM_ADMIN_USERNAME` / `CONDUIT_PLATFORM_ADMIN_PASSWORD` 登录（平台管理员，见「账号与角色」）。模拟器会自动创建「三相电表（演示）」产品和设备（设备名形如「1号楼配电室 电表01」，每栋楼 10 台；已有设备的旧名称会在启动时改成这种格式，Key 不变），并在产品缺少演示物模型（docs/examples/demo-meter.thing-model.json）中的任一属性时以合并方式导入（已有部署因此会自动补上 V0.2-B 新增的枚举属性「运行状态」st：每台设备每个整点可能切换一次，多数时间为「运行」）（默认 100 台，每 10 秒上报一次，见 `SIM_DEVICE_COUNT` / `SIM_INTERVAL_MS`；上报格式由 `SIM_PAYLOAD_FORMAT`（`standard` / `flat`）指定，新建产品时按此选用解码器，已有产品的解码器不会被修改）。模拟器首次连接 MQTT 失败时每 2 秒重试，最多 15 次。
+独立部署包启动后，浏览器打开 `http://<docker-host>:8090`（Docker 在本机时为 `localhost`），用 `.env` 中的 `CONDUIT_ADMIN_USERNAME` / `CONDUIT_ADMIN_PASSWORD` 登录（默认租户的租户管理员）；管理租户用 `CONDUIT_PLATFORM_ADMIN_USERNAME` / `CONDUIT_PLATFORM_ADMIN_PASSWORD` 登录（平台管理员，见「账号与角色」）。模拟器会自动创建「三相电表（演示）」产品和设备（设备名形如「1号楼配电室 电表01」，每栋楼 10 台；已有设备的旧名称会在启动时改成这种格式，Key 不变），并在产品缺少演示物模型（docs/examples/demo-meter.thing-model.json）中的任一属性时以合并方式导入（已有部署因此会自动补上 V0.2-B 新增的枚举属性「运行状态」st：每台设备每个整点可能切换一次，多数时间为「运行」）（默认 100 台，每 10 秒上报一次，见 `SIM_DEVICE_COUNT` / `SIM_INTERVAL_MS`；上报格式由 `SIM_PAYLOAD_FORMAT`（`standard` / `flat`）指定，新建产品时按此选用解码器，已有产品的解码器不会被修改）。模拟器首次连接 MQTT 失败时每 2 秒重试，最多 15 次；消息收到平台业务回执后才出队，超时原样重发，待确认队列满后暂停产生新数据。
 
 已有部署升级注意：演示产品的默认名称已从「Demo Meter」改为「三相电表（演示）」，升级前请先在界面上把旧产品改名为「三相电表（演示）」，否则模拟器会新建一个产品、旧产品及其设备会遗留下来；改名后模拟器会复用该产品，并把其下设备原地改成新名称。
 
@@ -174,6 +174,8 @@ EMQX 开启了磁盘持久会话：compose 环境变量 `EMQX_DURABLE_SESSIONS__
 | `SIM_PLATFORM_PASSWORD` | 空 | 平台管理员密码；为空时只模拟演示产品 |
 | `SIM_TENANTS` | `*` | 逗号分隔的租户编码，`*` 表示全部启用中的租户 |
 | `SIM_MAX_DEVICES_PER_PRODUCT` | `100` | 每个产品最多模拟的设备数 |
+| `SIM_ACK_TIMEOUT_MS` | `30000` | 等待平台业务回执的毫秒数，超时原样重发 |
+| `SIM_MAX_PENDING` | `1000` | 每台设备的内存待确认上限，达到后暂停产生新数据 |
 
 取值按物模型逐测点生成，满足上下限与小数位：
 - 电压在 220 V 附近，三相略有差别；电流与用电功率按日用电曲线。
@@ -338,6 +340,8 @@ cd conduit-ui && npm install && npm test && npm run dev
    # SIM_PRODUCT_NAME 不设置则使用默认的「三相电表（演示）」
    SIM_DEVICE_COUNT=5
    SIM_INTERVAL_MS=5000
+   SIM_ACK_TIMEOUT_MS=30000
+   SIM_MAX_PENDING=1000
    # 多租户模拟（可选）：填写平台管理员密码后，同时模拟 SIM_TENANTS 中各租户有物模型的产品（会重置这些设备的密钥）
    SIM_PLATFORM_PASSWORD=<CONDUIT_PLATFORM_ADMIN_PASSWORD>
    SIM_TENANTS=*
@@ -366,7 +370,7 @@ cd conduit-ui && npm install && npm test && npm run dev
 
 ## 端到端测试：故障场景不丢数据
 
-`conduit-e2e`（`-Pe2e` 时才参与构建）在完全独立的临时环境中验证四种故障下数据不丢。Testcontainers 在 Docker 宿主机上起 PostgreSQL 16.8、Redis 7.4.2、InfluxDB 3.12.0-core，以及开启磁盘持久会话的 EMQX 5.10.5（端口随机，与 `conduit` 开发环境互不影响）；测试机本地以 jar 启动 1 个 server 与 2 个 transport。每个场景新建产品「e2e 场景 N 电表」与 10 台设备，每台以 QoS1 发送 50 条（未收到 PUBACK 时重连重发），发送中途注入故障：
+`conduit-e2e`（`-Pe2e` 时才参与构建）在完全独立的临时环境中验证五种故障下数据不丢。Testcontainers 在 Docker 宿主机上起 PostgreSQL 16.8、Redis 7.4.2、InfluxDB 3.12.0-core，以及 EMQX 5.10.5（端口随机，与 `conduit` 开发环境互不影响）；测试机本地以 jar 启动 1 个 server 与 2 个 transport。每个场景新建产品「e2e 场景 N 电表」与 10 台设备，每台发送 50 条，发送中途注入故障：
 
 | 场景 | 故障 | 验证的机制 |
 |---|---|---|
@@ -374,6 +378,7 @@ cd conduit-ui && npm install && npm test && npm run dev
 | 2 | 强制结束主 transport | 备实例接管，磁盘积压补齐 |
 | 3 | 两个 transport 都结束，设备继续上报约 20 秒后重启 | 磁盘持久会话兜底 |
 | 4 | 重启 EMQX 容器 | 设备与 transport 重连，会话与积压不丢 |
+| 5 | 可靠上报期间 SIGKILL EMQX 后原地启动 | 设备收到平台业务回执才出队，未确认消息原样重发 |
 
 每个场景断言 InfluxDB 中该产品恰好 500 条、死信流中没有该产品、消费组 `conduit-server` 没有待确认消息，结束时删除所建产品与设备。口令与 token 每次运行随机生成。
 
@@ -388,7 +393,7 @@ E2E_DEV_HOST=<dev-host> mvn -B verify -Pe2e -pl conduit-e2e
 
 ## 已知限制
 
-- Broker 自身崩溃、客户机强制重启的持久性尚未闭环：EMQX 5.10.5 仍可丢失已 PUBACK 的消息，并观察到新建会话未恢复；InfluxDB 曾因零字节 catalog 无法启动。Redis 部署已改为 AOF 每次刷盘，详见 [持久性验证](docs/durability-validation.md)。
+- EMQX 5.10.5 自身仍可能丢失已 PUBACK 的消息或会话；带 `id` 的可靠上报由设备本地待确认副本覆盖该边界，旧设备仍不具备这一保证。InfluxDB 曾因零字节 catalog 无法启动。Redis 部署已改为 AOF 每次刷盘，详见 [持久性验证](docs/durability-validation.md)。
 
 - 物模型缓存为进程内缓存：多实例部署时，修改物模型最多 60 秒后在其他实例生效。
 - 未启用 TLS；凭证均为演示用途。

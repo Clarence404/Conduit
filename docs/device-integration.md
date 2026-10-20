@@ -1,6 +1,6 @@
 # 设备接入指南
 
-本文说明一台设备从开通、连接到数据上报的完整流程，以及对接时需要遵守的约定。内容对应 V0.2-A 的实际实现。
+本文说明一台设备从开通、连接到可靠数据上报的完整流程，以及对接时需要遵守的约定。内容对应 V0.2-R2 的实际实现。
 
 ## 1. 整体流程
 
@@ -22,27 +22,9 @@ sequenceDiagram
     EMQX-->>Dev: CONNACK
 ```
 
-连接成功后，每条数据按下面的链路流转。每一跳都在下游确认收到之后才向上游确认，所以任一环节重启都不会丢数据，最多重复一次（重复数据会被幂等吸收）。
+连接成功后，每条数据按下面的链路流转。EMQX 的 PUBACK 只确认 broker 收到消息；设备必须保留本地副本，直到收到平台业务回执。该回执在 transport 成功写入 Redis Stream 后发出，表示“平台已持久接收”，不表示测点已经通过校验或写入 InfluxDB。
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Dev as 设备
-    participant EMQX
-    participant Transport as conduit-transport
-    participant Bus as Redis Stream
-    participant Server as conduit-server
-    participant Store as InfluxDB / Redis
-    Dev->>EMQX: PUBLISH QoS1 conduit/{productKey}/{deviceKey}/up/property
-    EMQX->>Transport: ACL 检查后投递给主（leader）transport，它通过普通订阅挂在 EMQX 磁盘持久会话上
-    Transport->>Bus: XADD conduit:stream:up
-    Transport-->>EMQX: PUBACK（写入成功后才确认）
-    EMQX-->>Dev: PUBACK
-    Server->>Bus: 消费组读取
-    Server->>Server: 按产品解码器解码，按物模型逐测点校验
-    Server->>Store: 写 InfluxDB，更新最新值
-    Server->>Bus: XACK
-```
+![端到端可靠上报链路](images/reliable-uplink.svg)
 
 设备上下线不需要设备自己上报：EMQX 的连接、断开事件经 transport 进入同一条总线，由 server 更新在线状态。
 
@@ -91,7 +73,7 @@ curl -s -X POST "$API/api/v1/devices" -H "Authorization: Bearer $TOKEN" \
 
 ```json
 {
-  "id": "可选，消息 ID，只用于追踪",
+  "id": "dev01-000123",
   "ts": 1760400000000,
   "params": { "Ua": 220.1, "Ia": 5.2, "EPimp": 12345.6, "mode": "auto", "alarm": false }
 }
@@ -99,7 +81,8 @@ curl -s -X POST "$API/api/v1/devices" -H "Authorization: Bearer $TOKEN" \
 
 | 字段 | 规则 |
 |---|---|
-| `ts` | 采样时间，**毫秒**时间戳。可省略，省略时用平台接收时间。必须在 `[当前时间 − 30 天, 当前时间 + 5 分钟]` 之内，秒级时间戳会被当作超出范围 |
+| `id` | 可选字符串，1～128 个字符；同一设备内唯一。带上即启用可靠上报，建议使用“设备标识 + 单调序号” |
+| `ts` | 采样时间，**毫秒**时间戳。可靠上报时必填，且重发必须保持不变；普通上报可省略。必须在 `[当前时间 − 30 天, 当前时间 + 5 分钟]` 之内 |
 | `params` | 非空对象，值只能是数字、字符串、布尔，不能是 null、数组或嵌套对象 |
 | 测点名 | 不能为空，不能以 `__` 开头（平台保留） |
 | 数字 | 产品没有物模型时一律按浮点数存储（`220` 与 `220.0` 等价）；有物模型时按属性类型存储，见第 5 节 |
@@ -115,7 +98,19 @@ curl -s -X POST "$API/api/v1/devices" -H "Authorization: Bearer $TOKEN" \
 { "id": "可选", "ts": 1760400000000, "Ua": 220.1, "Ia": 5.2 }
 ```
 
-顶层 `ts` 为时间戳（规则同上），`id` 忽略，其余键都是测点，至少要有一个。解码器在「产品详情 → 基本信息」中选择，修改后立即生效。
+顶层 `ts` 和 `id` 的规则与标准 JSON 相同，其余键都是测点，至少要有一个。解码器在「产品详情 → 基本信息」中选择，修改后立即生效。
+
+### 4.2 平台业务回执
+
+可靠上报设备连接后应订阅 `conduit/{productKey}/{deviceKey}/down/ack`。平台对每条带有效 `id` 的属性上报发送一条 QoS 0 回执：
+
+```json
+{ "id": "dev01-000123", "ts": 1760400000123 }
+```
+
+其中 `ts` 是平台接收上行的时间。设备按 `id` 删除本地待确认副本；超时未收到时，必须使用完全相同的 `id`、`ts` 和测点值重发。QoS 0 回执可能丢失，这是正常情况，重发会由同设备同时间戳的存储幂等性吸收。
+
+设备侧待确认队列必须持久化到本地存储，并设置容量上限；队列满时应暂停采集新上报，不能删除最旧消息。仓库模拟器实现了同样的状态机，但演示用途的队列只保存在内存中。
 
 ## 5. 物模型
 
@@ -160,14 +155,29 @@ client.username_pw_set(DEVICE_KEY, SECRET)
 client.connect(HOST, PORT, keepalive=60)
 client.loop_start()
 
+pending = load_pending_from_local_storage()
+
+def on_message(client, userdata, message):
+    ack_id = json.loads(message.payload)["id"]
+    if ack_id in pending:
+        del pending[ack_id]
+        persist_pending(pending)
+
+client.on_message = on_message
+client.subscribe(f"conduit/{PRODUCT_KEY}/{DEVICE_KEY}/down/ack", qos=0)
+
 while True:
-    payload = {"ts": int(time.time() * 1000), "params": {"Ua": 220.1, "Ia": 5.2}}
-    info = client.publish(TOPIC, json.dumps(payload), qos=1)
-    info.wait_for_publish()          # 等平台确认（PUBACK）后再发下一条
+    message_id = next_monotonic_id()
+    payload = {"id": message_id, "ts": int(time.time() * 1000),
+               "params": {"Ua": 220.1, "Ia": 5.2}}
+    pending[message_id] = payload
+    persist_pending(pending)         # 先持久保存，再发送
+    client.publish(TOPIC, json.dumps(payload), qos=1)
+    resend_expired_pending_unchanged()
     time.sleep(10)
 ```
 
-仓库里的设备模拟器 `conduit-simulator` 是一个完整的 Java 参考实现，使用 HiveMQ MQTT Client，支持断线重连和发送失败重试。
+仓库里的设备模拟器 `conduit-simulator` 是 Java 参考实现，使用 HiveMQ MQTT Client，支持业务回执、断线重连、超时重发与待确认队列背压。其待确认队列仅在内存中，不能直接照搬为生产设备的持久化方案。
 
 ## 7. 核对结果
 
@@ -208,9 +218,9 @@ docker compose exec redis \
 | `PROCESSING_ERROR` | 平台内部处理异常，只影响这一条消息 |
 | `MAX_DELIVERY_EXCEEDED` | 同一条消息投递超过 5 次仍未处理成功 |
 
-**发出去的消息没有收到 PUBACK**
+**收到 PUBACK，但没有收到平台业务回执**
 
-平台下游（Redis）暂时不可用时，主 transport 的锁续期会在几秒内失败并主动断开与 EMQX 的连接，Redis 恢复前没有任何 transport 实例连接 EMQX。这期间设备上报的消息保存在 EMQX 的磁盘持久会话中（最长保留 1 天），设备仍能照常从 EMQX 收到 PUBACK；Redis 与主实例恢复后，积压消息会被一并投递，不会丢失。
+PUBACK 不能证明消息已持久进入平台。设备继续保留本地副本，并在自己的回执超时后原样重发。Redis 或 transport 暂时不可用时也采用同一处理；收到业务回执后才可删除副本。
 
 ## 9. 当前限制
 

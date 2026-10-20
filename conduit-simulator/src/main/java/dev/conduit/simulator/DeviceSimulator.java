@@ -5,6 +5,8 @@ import com.hivemq.client.mqtt.datatypes.MqttQos;
 import com.hivemq.client.mqtt.mqtt5.Mqtt5AsyncClient;
 import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5PublishResult;
 import com.hivemq.client.mqtt.mqtt5.message.publish.puback.Mqtt5PubAck;
+import com.hivemq.client.mqtt.mqtt5.message.subscribe.suback.Mqtt5SubAck;
+import com.hivemq.client.mqtt.mqtt5.message.subscribe.suback.Mqtt5SubAckReasonCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,24 +15,29 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
- * 每台设备一个 MQTT 连接，按固定周期以 QoS1 上报；各设备的首次上报在一个周期内均匀错开。
- * 每台设备有自己的上报格式与读数来源（{@link SimulatedDevice}）；首次连接失败时按 {@link ConnectRetry} 重试。
+ * 每台设备一个 MQTT 连接，按固定周期以 QoS1 上报；消息收到平台业务回执后才从内存队列删除，超时原样重发。
+ * 各设备的首次上报在一个周期内均匀错开，并有自己的上报格式与读数来源（{@link SimulatedDevice}）。
  */
 public class DeviceSimulator {
 
     private static final Logger log = LoggerFactory.getLogger(DeviceSimulator.class);
-    private static final int MAX_PUBLISH_ATTEMPTS = 10;
-    private static final long RETRY_DELAY_MS = 1_000;
     private static final long CONNECT_TIMEOUT_MS = 5_000;
+    private static final long SESSION_EXPIRY_SECONDS = 86_400;
     static final Duration DEFAULT_COMPLETION_TIMEOUT = Duration.ofMinutes(10);
+    static final Duration DEFAULT_ACK_TIMEOUT = Duration.ofSeconds(30);
+    static final int DEFAULT_MAX_PENDING = 1000;
 
     private final String host;
     private final int port;
@@ -39,6 +46,8 @@ public class DeviceSimulator {
     private final Duration completionTimeout;
     private final PayloadFormat format;
     private final boolean operatingState;
+    private final Duration ackTimeout;
+    private final int maxPending;
     private ConnectRetry connectRetry = new ConnectRetry();
 
     public DeviceSimulator(String host, int port, Duration interval, int messagesPerDevice) {
@@ -64,6 +73,14 @@ public class DeviceSimulator {
      */
     public DeviceSimulator(String host, int port, Duration interval, int messagesPerDevice,
                            Duration completionTimeout, PayloadFormat format, boolean operatingState) {
+        this(host, port, interval, messagesPerDevice, completionTimeout, format, operatingState,
+                DEFAULT_ACK_TIMEOUT, DEFAULT_MAX_PENDING);
+    }
+
+    /** 完整构造器，可配置业务回执超时和每台设备的待确认上限。 */
+    public DeviceSimulator(String host, int port, Duration interval, int messagesPerDevice,
+                           Duration completionTimeout, PayloadFormat format, boolean operatingState,
+                           Duration ackTimeout, int maxPending) {
         this.host = host;
         this.port = port;
         this.interval = interval;
@@ -71,6 +88,14 @@ public class DeviceSimulator {
         this.completionTimeout = completionTimeout;
         this.format = format;
         this.operatingState = operatingState;
+        if (ackTimeout.isZero() || ackTimeout.isNegative()) {
+            throw new IllegalArgumentException("ackTimeout must be positive");
+        }
+        if (maxPending < 1) {
+            throw new IllegalArgumentException("maxPending must be at least 1");
+        }
+        this.ackTimeout = ackTimeout;
+        this.maxPending = maxPending;
     }
 
     /** 替换连接重试策略（测试用较短的间隔与次数）。 */
@@ -86,11 +111,11 @@ public class DeviceSimulator {
 
     /**
      * 连接所有设备并按周期上报，阻塞到结束。messagesPerDevice &gt; 0 时为有限模式：每台发完即结束，
-     * 超过 completionTimeout 未完成或有消息最终发送失败则抛 IllegalStateException；否则无限运行直到被中断。
+     * 超过 completionTimeout 未收到全部平台业务回执或生成任务失败则抛 IllegalStateException；否则无限运行直到被中断。
      * 每台设备的首次连接按 connectRetry 重试（默认间隔 2 秒、最多 15 次），仍连不上则抛异常；
      * 结束时（含异常）关闭线程池并断开所有连接。
      *
-     * @throws IllegalStateException 某台设备重试后仍连不上、超时未完成或有消息最终发送失败
+     * @throws IllegalStateException 某台设备重试后仍连不上、超时未确认完毕或上报生成任务失败
      */
     public void runDevices(List<SimulatedDevice> devices) throws InterruptedException {
         boolean finite = messagesPerDevice > 0;
@@ -102,58 +127,84 @@ public class DeviceSimulator {
             return t;
         });
         CountDownLatch finished = new CountDownLatch(finite ? devices.size() : 1);
-        AtomicInteger failedMessages = new AtomicInteger();
+        AtomicInteger failedDevices = new AtomicInteger();
         AtomicInteger doneMessages = new AtomicInteger();
         List<Mqtt5AsyncClient> connected = new ArrayList<>();
 
         try {
             List<Mqtt5AsyncClient> clients = new ArrayList<>();
+            List<PendingReportQueue> queues = new ArrayList<>();
             for (SimulatedDevice device : devices) {
-                clients.add(connect(device.credentials(), connected));
+                PendingReportQueue queue = new PendingReportQueue(maxPending);
+                AtomicInteger completed = new AtomicInteger();
+                queues.add(queue);
+                clients.add(connect(device.credentials(), connected, id -> {
+                    if (queue.acknowledge(id)) {
+                        int totalDone = doneMessages.incrementAndGet();
+                        log.debug("Platform ack received: deviceKey={} id={} pending={} totalDone={}",
+                                device.credentials().deviceKey(), id, queue.size(), totalDone);
+                        if (finite && completed.incrementAndGet() == messagesPerDevice) {
+                            finished.countDown();
+                        }
+                    } else {
+                        log.debug("Ignoring unknown or duplicate platform ack: deviceKey={} id={}",
+                                device.credentials().deviceKey(), id);
+                    }
+                }));
             }
 
             for (int i = 0; i < devices.size(); i++) {
                 SimulatedDevice device = devices.get(i);
                 DeviceCredentials d = device.credentials();
                 Mqtt5AsyncClient client = clients.get(i);
+                PendingReportQueue queue = queues.get(i);
                 String topic = "conduit/%s/%s/up/property".formatted(d.productKey(), d.deviceKey());
                 AtomicInteger sent = new AtomicInteger();
-                AtomicInteger completed = new AtomicInteger();
                 AtomicLong lastTs = new AtomicLong();
+                AtomicBoolean deviceFailed = new AtomicBoolean();
                 long initialDelay = intervalMs * i / Math.max(1, devices.size());
-
-                Runnable onMessageDone = () -> {
-                    doneMessages.incrementAndGet();
-                    if (finite && completed.incrementAndGet() == messagesPerDevice) {
-                        finished.countDown();
-                    }
-                };
 
                 scheduler.scheduleAtFixedRate(() -> {
                     try {
-                        if (finite && sent.get() >= messagesPerDevice) {
+                        if (deviceFailed.get() || (finite && sent.get() >= messagesPerDevice)
+                                || !queue.hasCapacity()) {
                             return;
                         }
-                        int seq = sent.incrementAndGet();
+                        int seq = sent.get() + 1;
                         long ts = Math.max(System.currentTimeMillis(), lastTs.get() + 1);
-                        lastTs.set(ts);
                         Map<String, Object> reading = device.readings().next(ts, intervalMs / 1000.0);
-                        byte[] payload = device.format().encode(d.deviceKey() + "-" + seq, ts, reading);
+                        String id = d.deviceKey() + "-" + seq;
+                        byte[] payload = device.format().encode(id, ts, reading);
+                        long now = System.currentTimeMillis();
+                        if (!queue.offer(id, topic, payload, now)) {
+                            return;
+                        }
+                        sent.incrementAndGet();
+                        lastTs.set(ts);
                         log.debug("Publishing {} seq={} ts={} bytes={}", d.deviceKey(), seq, ts, payload.length);
                         if (log.isTraceEnabled()) {
                             String body = new String(payload, StandardCharsets.UTF_8);
                             log.trace("Payload of {}: {}", d.deviceKey(),
                                     body.length() <= 256 ? body : body.substring(0, 256) + "...(truncated)");
                         }
-                        publish(scheduler, client, d.deviceKey(), topic, payload, 1, onMessageDone, failedMessages);
+                        publish(client, d.deviceKey(), topic, payload);
                     } catch (RuntimeException e) {
                         log.error("Report task failed for {}", d.deviceKey(), e);
-                        if (finite) {
-                            failedMessages.incrementAndGet();
-                            onMessageDone.run();
+                        if (finite && deviceFailed.compareAndSet(false, true)) {
+                            failedDevices.incrementAndGet();
+                            finished.countDown();
                         }
                     }
                 }, initialDelay, intervalMs, TimeUnit.MILLISECONDS);
+
+                long retryScanMs = Math.max(10, Math.min(1000, ackTimeout.toMillis() / 2));
+                scheduler.scheduleWithFixedDelay(() -> {
+                    for (PendingReportQueue.PendingReport report
+                            : queue.claimExpired(System.currentTimeMillis(), ackTimeout)) {
+                        log.debug("Platform ack timed out, resending: deviceKey={} id={}", d.deviceKey(), report.id());
+                        publish(client, d.deviceKey(), report.topic(), report.payload());
+                    }
+                }, retryScanMs, retryScanMs, TimeUnit.MILLISECONDS);
             }
 
             log.info("Simulating {} devices every {} ms", devices.size(), intervalMs);
@@ -162,11 +213,10 @@ public class DeviceSimulator {
                 if (!completedInTime) {
                     throw new IllegalStateException("Simulator did not finish within " + completionTimeout
                             + ": " + doneMessages.get() + " of " + (long) devices.size() * messagesPerDevice
-                            + " messages done, " + failedMessages.get() + " failed");
+                            + " messages acknowledged, " + failedDevices.get() + " device tasks failed");
                 }
-                if (failedMessages.get() > 0) {
-                    throw new IllegalStateException(failedMessages.get() + " of "
-                            + (long) devices.size() * messagesPerDevice + " messages failed to publish");
+                if (failedDevices.get() > 0) {
+                    throw new IllegalStateException(failedDevices.get() + " device report tasks failed");
                 }
             } else {
                 finished.await();
@@ -185,12 +235,17 @@ public class DeviceSimulator {
      *
      * @throws IllegalStateException 重试次数用尽
      */
-    private Mqtt5AsyncClient connect(DeviceCredentials d, List<Mqtt5AsyncClient> connected)
+    private Mqtt5AsyncClient connect(DeviceCredentials d, List<Mqtt5AsyncClient> connected, Consumer<String> onAck)
             throws InterruptedException {
         return connectRetry.call("device " + d.deviceKey() + " to " + host + ":" + port, () -> {
-            Mqtt5AsyncClient client = buildClient(d);
+            CompletableFuture<Void> firstSubscription = new CompletableFuture<>();
+            AtomicReference<Mqtt5AsyncClient> reference = new AtomicReference<>();
+            Mqtt5AsyncClient client = buildClient(d, reference, firstSubscription, onAck);
+            reference.set(client);
             try {
-                client.connect().get(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                client.connectWith().cleanStart(false).sessionExpiryInterval(SESSION_EXPIRY_SECONDS).send()
+                        .get(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+                firstSubscription.get(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
             } catch (Exception e) {
                 disconnectQuietly(client);
                 throw e;
@@ -201,15 +256,54 @@ public class DeviceSimulator {
         });
     }
 
-    /** 构造一台设备的 MQTT5 客户端（以 deviceKey 为用户名、密钥为密码，开启自动重连）。 */
-    private Mqtt5AsyncClient buildClient(DeviceCredentials d) {
+    /** 构造一台设备的 MQTT5 客户端；每次连接都安装回执订阅，避免会话丢失后停止接收回执。 */
+    private Mqtt5AsyncClient buildClient(DeviceCredentials d, AtomicReference<Mqtt5AsyncClient> reference,
+                                         CompletableFuture<Void> firstSubscription, Consumer<String> onAck) {
+        String ackTopic = "conduit/%s/%s/down/ack".formatted(d.productKey(), d.deviceKey());
         return MqttClient.builder().useMqttVersion5()
                 .identifier(d.deviceKey())
                 .serverHost(host).serverPort(port)
                 .automaticReconnectWithDefaultConfig()
+                .addConnectedListener(context -> {
+                    Mqtt5AsyncClient client = reference.get();
+                    if (client == null) {
+                        firstSubscription.completeExceptionally(
+                                new IllegalStateException("MQTT client unavailable while subscribing"));
+                        return;
+                    }
+                    subscribeForAcks(client, ackTopic, d.deviceKey(), onAck).whenComplete((ignored, error) -> {
+                        if (error == null) {
+                            firstSubscription.complete(null);
+                            log.debug("Device {} subscribed to {}", d.deviceKey(), ackTopic);
+                        } else {
+                            firstSubscription.completeExceptionally(error);
+                            log.warn("Device {} could not subscribe to platform acks: {}", d.deviceKey(),
+                                    error.getMessage());
+                        }
+                    });
+                })
                 .simpleAuth().username(d.deviceKey()).password(d.secret().getBytes(StandardCharsets.UTF_8))
                 .applySimpleAuth()
                 .buildAsync();
+    }
+
+    /** 每次连接（含自动重连）都重新订阅业务回执，避免 broker 丢失会话后静默失去订阅。 */
+    private CompletableFuture<Void> subscribeForAcks(Mqtt5AsyncClient client, String topic, String deviceKey,
+                                                      Consumer<String> onAck) {
+        return client.subscribeWith().topicFilter(topic).qos(MqttQos.AT_MOST_ONCE)
+                .callback(publish -> ApplicationAck.id(publish.getPayloadAsBytes()).ifPresentOrElse(onAck,
+                        () -> log.debug("Ignoring malformed platform ack for device {}", deviceKey)))
+                .send().thenApply(ack -> {
+                    requireGranted(ack);
+                    return null;
+                });
+    }
+
+    /** 任一 SUBACK 错误码都视为订阅失败。 */
+    private static void requireGranted(Mqtt5SubAck ack) {
+        if (ack.getReasonCodes().stream().anyMatch(Mqtt5SubAckReasonCode::isError)) {
+            throw new IllegalStateException("MQTT ack subscription rejected: " + ack.getReasonCodes());
+        }
     }
 
     /** 断开客户端；对从未连上的客户端也会停止其自动重连循环。断开本身的失败只记日志。 */
@@ -221,38 +315,14 @@ public class DeviceSimulator {
         }
     }
 
-    /**
-     * 以 QoS1 发布一条消息；失败（异常或 PUBACK 错误码）时间隔 1 秒重试，最多 10 次，
-     * 最终失败计入 failed。无论成败 onDone 恰好回调一次（调度器已关闭时除外）。
-     */
-    private void publish(ScheduledExecutorService scheduler, Mqtt5AsyncClient client, String deviceKey,
-                         String topic, byte[] payload, int attempt, Runnable onDone, AtomicInteger failed) {
+    /** 以 QoS1 发起一次上报；失败不删除待确认副本，由业务回执超时任务再次发送。 */
+    private void publish(Mqtt5AsyncClient client, String deviceKey, String topic, byte[] payload) {
         client.publishWith().topic(topic).qos(MqttQos.AT_LEAST_ONCE).payload(payload).send()
                 .whenComplete((result, error) -> {
                     String problem = error != null ? String.valueOf(error.getMessage()) : problemOf(result);
-                    if (problem == null) {
-                        onDone.run();
-                        return;
-                    }
-                    log.warn("Publish failed for {} (attempt {}): {}", deviceKey, attempt, problem);
-                    if (attempt >= MAX_PUBLISH_ATTEMPTS) {
-                        failed.incrementAndGet();
-                        onDone.run();
-                        return;
-                    }
-                    try {
-                        scheduler.schedule(() -> {
-                            try {
-                                publish(scheduler, client, deviceKey, topic, payload, attempt + 1, onDone, failed);
-                            } catch (RuntimeException e) {
-                                log.error("Retry failed for {}", deviceKey, e);
-                                failed.incrementAndGet();
-                                onDone.run();
-                            }
-                        }, RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
-                    } catch (RuntimeException e) {
-                        // scheduler already shut down: the run is over, nothing left to account for
-                        log.debug("Retry not scheduled for {}: {}", deviceKey, e.getMessage());
+                    if (problem != null) {
+                        log.warn("Publish attempt failed for {}: {}; pending message will be retried after {} ms",
+                                deviceKey, problem, ackTimeout.toMillis());
                     }
                 });
     }

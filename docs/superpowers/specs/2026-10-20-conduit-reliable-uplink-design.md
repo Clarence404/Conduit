@@ -1,7 +1,7 @@
 # Conduit V0.2-R2 设计：端到端可靠上报
 
 - 日期：2026-10-20
-- 状态：已评审，待实现
+- 状态：已实现，待 Docker 环境复跑 e2e
 - 范围：设备带消息 id 上报、平台在数据写入总线后回执、设备收到回执才删除本地副本；模拟器作为参考实现；e2e 验证强杀 EMQX 不丢数据。
 - 前置：V0.2-R 已完成；EMQX 已统一为 5.10.5；Redis 已改为 `appendfsync always`（见 `docs/durability-validation.md`）。
 

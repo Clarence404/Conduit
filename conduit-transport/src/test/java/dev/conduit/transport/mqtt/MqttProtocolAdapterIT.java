@@ -3,6 +3,8 @@ package dev.conduit.transport.mqtt;
 import com.hivemq.client.mqtt.MqttClient;
 import com.hivemq.client.mqtt.datatypes.MqttQos;
 import com.hivemq.client.mqtt.mqtt5.Mqtt5BlockingClient;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.conduit.common.bus.Delivery;
 import dev.conduit.common.bus.MessageBus;
 import dev.conduit.common.bus.MessageBusProperties;
@@ -25,6 +27,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -117,6 +120,27 @@ class MqttProtocolAdapterIT {
         assertThat(message.payload()).containsExactly(payload);
         assertThat(message.receivedAt()).isEqualTo(NOW);
         assertThat(message.attributes()).containsEntry("topic", "conduit/" + productKey + "/dk-prop/up/property");
+    }
+
+    @Test
+    void acknowledgesAReliablePropertyAfterWritingItToTheBus() throws Exception {
+        Mqtt5BlockingClient client = device("dk-reliable");
+        List<byte[]> acknowledgements = new CopyOnWriteArrayList<>();
+        client.toAsync().subscribeWith().topicFilter("conduit/" + productKey + "/dk-reliable/down/ack")
+                .qos(MqttQos.AT_MOST_ONCE).callback(p -> acknowledgements.add(p.getPayloadAsBytes())).send().join();
+
+        publish(client, "dk-reliable", "property",
+                "{\"id\":\"dk-reliable-7\",\"ts\":1760400000000,\"params\":{\"Ua\":220.1}}"
+                        .getBytes(StandardCharsets.UTF_8));
+
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(acknowledgements).hasSize(1));
+        JsonNode ack = new ObjectMapper().readTree(acknowledgements.getFirst());
+        assertThat(ack.get("id").asText()).isEqualTo("dk-reliable-7");
+        assertThat(ack.get("ts").asLong()).isEqualTo(NOW);
+        assertThat(drain()).anySatisfy(d -> {
+            assertThat(d.message().deviceKey()).isEqualTo("dk-reliable");
+            assertThat(d.message().type()).isEqualTo(MessageType.PROPERTY);
+        });
     }
 
     @Test

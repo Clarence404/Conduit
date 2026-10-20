@@ -24,13 +24,16 @@ import java.util.Properties;
  * @param interval          每台设备的上报周期
  * @param messagesPerDevice 每台设备发送条数；0 表示无限发送
  * @param payloadFormat     上报载荷格式，同时决定新建产品的解码器
+ * @param ackTimeout        等待平台业务回执的超时时间，超时后原样重发
+ * @param maxPending        每台设备最多保留的待确认消息数，达到后暂停产生新数据
  */
 public record SimulatorConfig(URI apiUrl, String adminUsername, String adminPassword,
                               String mqttHost, int mqttPort, String productName,
                               int deviceCount, Duration interval, int messagesPerDevice,
                               PayloadFormat payloadFormat,
                               String platformUsername, String platformPassword,
-                              TenantFilter tenants, int maxDevicesPerProduct) {
+                              TenantFilter tenants, int maxDevicesPerProduct,
+                              Duration ackTimeout, int maxPending) {
 
     /** 本地联调用的配置文件（classpath 根目录，不入库），键名与环境变量相同。 */
     static final String LOCAL_PROPERTIES = "simulator-local.properties";
@@ -69,7 +72,9 @@ public record SimulatorConfig(URI apiUrl, String adminUsername, String adminPass
                 env.getOrDefault("SIM_PLATFORM_USERNAME", "sysadmin"),
                 env.getOrDefault("SIM_PLATFORM_PASSWORD", ""),
                 TenantFilter.parse(env.getOrDefault("SIM_TENANTS", "*")),
-                atLeastOne(env, "SIM_MAX_DEVICES_PER_PRODUCT", 100));
+                atLeastOne(env, "SIM_MAX_DEVICES_PER_PRODUCT", 100),
+                positiveDuration(env, "SIM_ACK_TIMEOUT_MS", 30_000),
+                atLeastOne(env, "SIM_MAX_PENDING", 1000));
     }
 
     /** 是否模拟各租户的产品：平台管理员密码非空时才开启。 */
@@ -108,5 +113,14 @@ public record SimulatorConfig(URI apiUrl, String adminUsername, String adminPass
             throw new IllegalStateException(name + " must be at least 1, got: " + value);
         }
         return value;
+    }
+
+    /** 读取大于 0 的毫秒时长。 */
+    private static Duration positiveDuration(Map<String, String> env, String name, long defaultValue) {
+        long value = Long.parseLong(env.getOrDefault(name, Long.toString(defaultValue)).trim());
+        if (value < 1) {
+            throw new IllegalStateException(name + " must be at least 1, got: " + value);
+        }
+        return Duration.ofMillis(value);
     }
 }

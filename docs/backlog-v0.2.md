@@ -1,6 +1,6 @@
 # V0.2 待办（V0.1 评审遗留的次要事项）
 
-2026-10-19 持久性验证更新：Redis 部署已改为 `appendfsync always`，客户机强制重启三轮未丢已确认数据；EMQX 5.10.5 强杀仍丢已 PUBACK 的尾部消息，强制重启还观察到新建会话未恢复。另发现 InfluxDB 零字节 catalog 导致启动失败。详见 [实验与后续工作](durability-validation.md)，这些边界不被既有应用进程故障 e2e 覆盖。
+2026-10-20 持久性验证更新：Redis 使用 `appendfsync always`；EMQX 5.10.5 强杀仍会丢已 PUBACK 的尾部消息，强制重启还观察到新建会话未恢复。V0.2-R2 已用设备侧可靠上报覆盖带 `id` 的设备，并增加强杀 broker 的 e2e；旧设备仍不具备该保证。另发现 InfluxDB 零字节 catalog 导致启动失败。详见 [实验与后续工作](durability-validation.md)。
 
 ## 后端：模拟器
 

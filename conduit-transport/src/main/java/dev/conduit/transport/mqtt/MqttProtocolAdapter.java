@@ -11,6 +11,8 @@ import com.hivemq.client.mqtt.mqtt5.exceptions.Mqtt5DisconnectException;
 import com.hivemq.client.mqtt.mqtt5.message.connect.connack.Mqtt5ConnAck;
 import com.hivemq.client.mqtt.mqtt5.message.disconnect.Mqtt5DisconnectReasonCode;
 import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5Publish;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hivemq.client.mqtt.mqtt5.message.subscribe.Mqtt5RetainHandling;
 import com.hivemq.client.mqtt.mqtt5.message.subscribe.suback.Mqtt5SubAck;
 import com.hivemq.client.mqtt.mqtt5.message.subscribe.suback.Mqtt5SubAckReasonCode;
@@ -34,12 +36,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BooleanSupplier;
 
 /**
  * MQTT 协议适配器：以固定 clientId、cleanStart=false 的会话普通订阅设备上行 topic 与 EMQX 的 $SYS 上下线 topic，
- * XADD 成功后才回 PUBACK（手动 ACK），保证至少一次投递。EMQX 开启磁盘持久会话，transport 离线期间的消息保存在会话中，
- * 下次 start（本实例或接管的新主实例）时补发。
+ * XADD 成功后才回 PUBACK（手动 ACK），保证至少一次投递；属性报文带 id 时还向设备发送“平台已持久接收”的业务回执。
+ * EMQX 开启磁盘持久会话，transport 离线期间的消息保存在会话中，下次 start（本实例或接管的新主实例）时补发。
  *
  * <p>每次 start 打开一个独立的 {@link Session}（客户端、投递线程、状态标志），stop 关闭它，可反复调用。
  * 不使用 HiveMQ 自动重连：意外断线或会话被接管时置 needsRestart，由选主协调器确认仍持锁后重新 start。
@@ -55,12 +58,15 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
     private static final Logger log = LoggerFactory.getLogger(MqttProtocolAdapter.class);
     private static final Duration DISCONNECT_TIMEOUT = Duration.ofSeconds(5);
     private static final Duration MAX_RETRY_DELAY = Duration.ofSeconds(30);
+    private static final long MISSING_TS_WARN_INTERVAL_MS = Duration.ofMinutes(1).toMillis();
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private final MqttTransportProperties props;
     private final MessageBus bus;
     private final Clock clock;
     private final Duration initialBackoff;
     private final AtomicReference<Session> current = new AtomicReference<>();
+    private final ConcurrentHashMap<String, Long> missingTimestampWarnings = new ConcurrentHashMap<>();
 
     /** 一次 start 到 stop 之间的连接及其资源；停止后即作废，不再复用。 */
     final class Session {
@@ -380,8 +386,66 @@ public class MqttProtocolAdapter implements ProtocolAdapter {
             log.trace("MQTT payload of {}: {}", t.deviceKey(), preview(message.payload()));
         }
         if (publishWithRetry(s, message)) {
+            if (t.type() == MessageType.PROPERTY) {
+                sendReliableAck(s, t, message);
+            }
             acknowledge(publish);
         }
+    }
+
+    /**
+     * 总线持久写入成功后，为带有效 id 的属性上报发 QoS 0 业务回执。发送失败只记日志，设备会因收不到回执而重发。
+     */
+    private void sendReliableAck(Session s, ParsedTopic topic, RawMessage message) {
+        Optional<ReliableUplink.Metadata> metadata = ReliableUplink.extract(message.payload());
+        if (metadata.isEmpty()) {
+            log.debug("Reliable uplink metadata absent or invalid for device {}, skipping ack", message.deviceKey());
+            return;
+        }
+        ReliableUplink.Metadata reliable = metadata.get();
+        if (!reliable.hasTimestamp()) {
+            warnMissingTimestamp(message.deviceKey(), message.receivedAt());
+        }
+        String ackTopic = "conduit/%s/%s/down/ack".formatted(topic.productKey(), topic.deviceKey());
+        byte[] payload;
+        try {
+            payload = JSON.writeValueAsBytes(Map.of("id", reliable.id(), "ts", message.receivedAt()));
+        } catch (JsonProcessingException e) {
+            log.warn("Could not encode reliable uplink ack for device {}: {}", message.deviceKey(), e.getMessage());
+            return;
+        }
+        publishReliableAck(s, ackTopic, payload).whenComplete((ignored, error) -> {
+            if (error != null) {
+                log.warn("Reliable uplink ack send failed for device {}: {}", message.deviceKey(), describe(error));
+            } else {
+                log.debug("Reliable uplink ack sent: deviceKey={} id={}", message.deviceKey(), reliable.id());
+            }
+        });
+    }
+
+    /** MQTT 发布测试接缝；生产环境使用当前主会话连接发送 QoS 0 回执。 */
+    CompletableFuture<?> publishReliableAck(Session s, String topic, byte[] payload) {
+        Mqtt5AsyncClient client = s.client;
+        if (client == null || !client.getState().isConnected()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("MQTT session is not connected"));
+        }
+        try {
+            return client.publishWith().topic(topic).qos(MqttQos.AT_MOST_ONCE).payload(payload).send();
+        } catch (RuntimeException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+    }
+
+    /** 同一设备缺少 ts 的告警每分钟最多一条，避免故障设备持续上报时刷屏。 */
+    private void warnMissingTimestamp(String deviceKey, long now) {
+        missingTimestampWarnings.compute(deviceKey, (key, last) -> {
+            if (last == null || now - last >= MISSING_TS_WARN_INTERVAL_MS || now < last) {
+                log.warn("Reliable uplink from device {} has id but no ts; retries may create duplicate points",
+                        deviceKey);
+                return now;
+            }
+            return last;
+        });
     }
 
     /** 取 payload 的前 256 个字符用于 TRACE 日志（按 UTF-8 解码，避免大报文刷屏）。 */

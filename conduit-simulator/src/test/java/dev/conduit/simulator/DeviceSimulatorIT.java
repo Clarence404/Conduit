@@ -55,7 +55,21 @@ class DeviceSimulatorIT {
                 .serverHost(EMQX.getHost()).serverPort(EMQX.getMappedPort(1883)).buildBlocking();
         subscriber.connect();
         subscriber.toAsync().subscribeWith().topicFilter("conduit/+/+/up/property").qos(MqttQos.AT_LEAST_ONCE)
-                .callback(p -> payloads.add(new String(p.getPayloadAsBytes(), StandardCharsets.UTF_8)))
+                .callback(p -> {
+                    byte[] body = p.getPayloadAsBytes();
+                    payloads.add(new String(body, StandardCharsets.UTF_8));
+                    try {
+                        JsonNode json = new ObjectMapper().readTree(body);
+                        String[] topic = p.getTopic().toString().split("/");
+                        byte[] ack = new ObjectMapper().writeValueAsBytes(Map.of(
+                                "id", json.get("id").asText(), "ts", System.currentTimeMillis()));
+                        subscriber.toAsync().publishWith()
+                                .topic("conduit/%s/%s/down/ack".formatted(topic[1], topic[2]))
+                                .qos(MqttQos.AT_MOST_ONCE).payload(ack).send();
+                    } catch (IOException e) {
+                        throw new IllegalStateException(e);
+                    }
+                })
                 .send().join();
         return subscriber;
     }

@@ -33,6 +33,8 @@ class SimulatorConfigTest {
         assertThat(config.multiTenant()).isFalse();
         assertThat(config.tenants().all()).isTrue();
         assertThat(config.maxDevicesPerProduct()).isEqualTo(100);
+        assertThat(config.ackTimeout()).isEqualTo(java.time.Duration.ofSeconds(30));
+        assertThat(config.maxPending()).isEqualTo(1000);
     }
 
     @Test
@@ -82,5 +84,20 @@ class SimulatorConfigTest {
                 "SIM_MAX_DEVICES_PER_PRODUCT", "0")))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("SIM_MAX_DEVICES_PER_PRODUCT");
+    }
+
+    @Test
+    void readsAndValidatesReliableUplinkSettings() {
+        SimulatorConfig config = SimulatorConfig.fromEnv(Map.of(
+                "CONDUIT_ADMIN_PASSWORD", "pw", "SIM_ACK_TIMEOUT_MS", "250", "SIM_MAX_PENDING", "7"));
+
+        assertThat(config.ackTimeout()).isEqualTo(java.time.Duration.ofMillis(250));
+        assertThat(config.maxPending()).isEqualTo(7);
+        assertThatThrownBy(() -> SimulatorConfig.fromEnv(Map.of(
+                "CONDUIT_ADMIN_PASSWORD", "pw", "SIM_ACK_TIMEOUT_MS", "0")))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("SIM_ACK_TIMEOUT_MS");
+        assertThatThrownBy(() -> SimulatorConfig.fromEnv(Map.of(
+                "CONDUIT_ADMIN_PASSWORD", "pw", "SIM_MAX_PENDING", "0")))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("SIM_MAX_PENDING");
     }
 }

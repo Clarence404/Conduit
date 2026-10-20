@@ -24,15 +24,16 @@ conduit-ui（Vue）──REST──> conduit-server
 | `conduit-common` | 跨进程共享：`MessageBus` 接口与 Redis Streams 实现、协议无关的 `RawMessage` |
 | `conduit-transport` | 协议接入层（对应 ThingsBoard 的 transport）：单活多备（Redis 选主，只有主实例连接 EMQX），以固定 clientId 的磁盘持久会话普通订阅设备主题，把设备报文原样组装成 `RawMessage` 发布到总线；不做业务解析 |
 | `conduit-server` | 业务核心：EMQX 鉴权回调、总线消费流水线（解码 → 物模型校验 → 写时序库/最新值）、REST API、多租户与用户（平台管理员 / 租户管理员 / 只读用户、进入租户） |
-| `conduit-simulator` | 演示用设备模拟器：自动创建演示产品/设备、导入演示物模型、按间隔上报；演示设备附带枚举运行状态 st，首次连接 MQTT 失败每 2 秒重试、最多 15 次；配置平台管理员密码后模拟各租户的物模型产品 |
+| `conduit-simulator` | 演示用设备模拟器与可靠上报参考实现：自动创建演示产品/设备、导入演示物模型、按间隔上报；收到平台业务回执才从内存待确认队列删除，超时原样重发、队列满后背压；配置平台管理员密码后模拟各租户的物模型产品 |
 | `conduit-ui` | 前端：Vue 3 + TypeScript + Element Plus + ECharts；统一框架（分组可折叠侧栏、面包屑顶栏、PageHeader）、首页总览、暗色模式、按角色的菜单与写操作、平台首页与租户/用户管理 |
-| `conduit-e2e` | 端到端测试（`-Pe2e`）：Testcontainers 临时环境 + 本地 jar 进程，杀 server / 主 transport / 全部 transport、重启 EMQX 四个场景不丢数据 |
+| `conduit-e2e` | 端到端测试（`-Pe2e`）：Testcontainers 临时环境 + 本地 jar 进程，杀 server / 主 transport / 全部 transport、重启 EMQX 及可靠设备上报途中强杀 EMQX 五个场景不丢数据 |
 | `deploy/` | 开发环境包 `dev/`（开发用）、独立部署包 `standalone/`（extends 基础服务 + 应用，预编译产物或源码构建）、`package.sh`（打独立部署包）；项目名均为 `conduit` |
 
 ### 1.2 关键设计决定
 
 - **消息总线**：经 `MessageBus` 接口，当前实现为 Redis Streams（消费组、`XPENDING` 认领、死信流 `conduit:stream:dead`）。将来评估 RabbitMQ（下行）、Kafka（大规模）时只换实现。
 - **投递语义**：至少一次。下游写入成功后才 ack；可恢复错误（时序库不可用、数据库连接失败等，判断时沿异常 cause 链查找）原地退避重试 1s→30s，不消耗投递次数；意外错误只把该条消息进死信 `PROCESSING_ERROR`；超过 5 次投递进死信 `MAX_DELIVERY_EXCEEDED`。接入侧：EMQX 开启磁盘持久会话，transport 写入总线成功后才回 PUBACK，transport 离线期间的消息存 EMQX 磁盘（保留 1 天），重连后补发。
+- **端到端可靠上报**（V0.2-R2）：属性上报顶层带 1～128 字符字符串 `id` 即启用；此时 `ts` 必填且重发保持不变。transport 在 `XADD` 成功后向 `conduit/{productKey}/{deviceKey}/down/ack` 发布 QoS 0 `{"id":...,"ts":receivedAt}`，含义是“平台已持久接收”，不是“已入库”。回执失败不影响 PUBACK，设备收不到会原样重发；真实设备必须把待确认队列持久化到本地。无 `id` 的旧设备行为不变。当前幂等依靠同设备同 `ts` 覆盖，尚无按 id 去重。
 - **transport 单活多备**（V0.2-R）：
   - 会话与订阅：所有实例共用 clientId `conduit-transport`（`conduit.transport.mqtt.client-id`）、`cleanStart=false`、会话保留 86400 秒，普通订阅 `conduit/+/+/up/#`，订阅选项 `retainHandling=DO_NOT_SEND`（重连不重放保留消息）。EMQX 5.8.6 的磁盘持久会话拒绝共享订阅（原因码 158），所以放弃多实例分摊。
   - 选主：Redis 键 `conduit:transport:leader`，抢锁是一段 Lua 脚本（键不存在则 `SET PX`；键里已是本实例 id 则刷新 TTL 并视为抢到，所以 Redis 抖动后原主立即拿回锁；否则拒绝），续期与释放同样 Lua 比对 id 后 `PEXPIRE` / `DEL`；ttl 15s，续期 5s，抢锁 2s。只有主实例连接 EMQX；续期失败立即断开并转为备用，正常停止时释放锁（compose 中两个 transport 均 `stop_grace_period: 20s`）。transport 的 Redis 命令超时为 2s。
@@ -40,7 +41,7 @@ conduit-ui（Vue）──REST──> conduit-server
   - 日志：抢锁或适配器启动首次失败 WARN，后续重试 DEBUG，恢复与每次角色变化 INFO。
   - 健康检查：`components.leader.details` 显示 `role` / `instanceId` / `connected`，`connected` 仅在已连接且订阅被批准后为 true。
   - 已解决的旧版问题：EMQX 5.8.6/5.8.9 在正常停止交接时曾出现持久会话补发错位并丢少量消息；升级到当前项目版本 5.10.5 后，专项实验 9 次均未复现。Broker 自身崩溃仍可能丢已确认消息，见 `docs/durability-validation.md`。
-- **e2e**（V0.2-R）：`ReliabilityE2EIT` 在 Testcontainers 临时环境中运行。EMQX 开启持久会话，并固定一个 20000～29999 的随机宿主机端口，以便 docker restart 后端口不变。测试本地以 jar 启动 1 个 server、2 个 transport，配置全部经环境变量传入，口令每次随机生成；设备由测试代码扮演（QoS1 直到收到 PUBACK，断线重连）。四个场景各发 500 条，断言计数恰好、无死信、无待确认。运行需 `E2E_DEV_HOST`：先 `mvn -B -DskipTests install`，再 `mvn -B verify -Pe2e -pl conduit-e2e`。
+- **e2e**（V0.2-R/R2）：`ReliabilityE2EIT` 在 Testcontainers 临时环境中运行。EMQX 开启持久会话，并固定一个 20000～29999 的随机宿主机端口，以便容器重启后端口不变。测试本地以 jar 启动 1 个 server、2 个 transport，配置全部经环境变量传入，口令每次随机生成。前四个场景仍用 PUBACK 设备验证应用进程故障与正常重启；第五个场景用业务回执设备并向 EMQX 发 SIGKILL。各发 500 条，断言计数恰好、无死信、无待确认。运行需 `E2E_DEV_HOST`：先 `mvn -B -DskipTests install`，再 `mvn -B verify -Pe2e -pl conduit-e2e`。
 - **模拟器多租户**（V0.2-R）：
   - 发现：`SIM_PLATFORM_PASSWORD` 非空时，用平台管理员（`SIM_PLATFORM_USERNAME`）发现 `SIM_TENANTS` 中启用租户的物模型产品与启用设备（每产品最多 `SIM_MAX_DEVICES_PER_PRODUCT` 台），并重置其密钥；任一租户失败只记 WARN。退出租户失败时用平台管理员重新登录，再失败则发现停止并保留已发现的部分；单台设备重置密钥失败只跳过该设备。
   - 生成：按解码器选上报格式，按物模型规则生成数据（spec 5.2），取值满足上下限与小数位；日曲线按系统时区（Docker 中 `TZ=Asia/Shanghai`）。产品含 eday/etotal/发电/光伏/pv/solar 测点或辐照度测点即为光伏模型，其 kW/W 功率测点（如交流功率）按日照曲线（夜间为 0）并累加成日发电量，用电类模型的功率按用电曲线；有多个功率测点时取最大的一个，不求和。
@@ -80,6 +81,7 @@ conduit-ui（Vue）──REST──> conduit-server
 
 - Java 21、Spring Boot 3.5、MyBatis-Plus、Flyway；包名 `dev.conduit.<模块>`；按业务分包（`device`、`product`、`thingmodel`、`telemetry`、`pipeline` …）。
 - 测试：先写失败测试（TDD）；集成测试用 Testcontainers；前端用 Vitest + `@vue/test-utils`。
+- 测试报告：每次实际执行测试后，必须在 `docs/test-reports/` 新建或更新 `YYYY-MM-DD-<主题>.md`。报告至少记录被测范围与代码状态、环境、实际命令、用例数/结果/耗时、跳过或阻塞项、非阻塞警告及日志位置；失败和无效尝试也要如实记录。没有执行的测试不得写成“通过”。最终交付时必须给出本次报告链接。
 - 界面：中文文案；所有分页表格默认每页 10 条（可选 10/20/50/100），分页、请求序号与越界页码修正统一用 `useTable`；功能入口要显眼（列表有「操作」列按钮、全局面包屑、产品与设备互相可跳转）；详情页的标签页与路由 query `tab` 同步（`router.replace`）。页面顶部用 `PageHeader`，列表筛选用 `FilterBar`，在线状态用 `OnlineDot`，启用/禁用用 `el-tag`，时间用 `RelativeTime`；空状态为 `el-empty` + 引导按钮，首次加载显示骨架屏。样式只用 CSS 变量（`--el-*` 或 `src/styles/tokens.css` 的 `--cd-*`），不写死颜色，深色主题下必须可读。新增页面在 `router/meta.ts` 的 `ROUTE_META` 中登记页面名称、面包屑与菜单归属。写操作按钮（新建、编辑、删除、导入、启用/禁用、重置密钥/密码）按 `usePermission().canWrite` 显示，只读身份隐藏而非禁用；新页面在 `ROUTE_META` 标注 `scope` 与 `requires`。
 - 演示与测试数据：用有意义的中文名称（如「三相电表（演示）」「1号楼配电室 电表01」），测试结束清理自己创建的数据。
 - 日志：SLF4J 参数化；消息链路上 DEBUG 每条消息/每批一行（transport 收发、流水线解码/校验/写库/ACK、鉴权放行、在线状态、历史与总览、REST 访问行），逐字段细节放 TRACE；构造字符串或集合的日志用 `isDebugEnabled()`/`isTraceEnabled()` 保护；绝不记录设备密钥、口令、JWT、内部 token、Authorization；payload 值只在 TRACE 且截断 256 字符。；管理操作（租户与用户的增删改、重置密码、进入/退出租户、代入期间的写请求）各记一行 INFO，不记请求体与口令。
@@ -123,3 +125,5 @@ conduit-ui（Vue）──REST──> conduit-server
 - 2026-10-16 部署包整理：`deploy/` 拆为开发环境包 `infra/`（EMQX 官方镜像 + 只读挂载配置，`CONDUIT_AUTH_URL` 必填，不依赖 server）与独立部署包 `full/`（extends infra，应用服务与模拟器默认启动，单一 `.env`）；项目名均为 `conduit`、数据卷不变；应用镜像构建上下文为仓库根，`ARG BUILD_FROM=prebuilt|source` + `FROM ${BUILD_FROM} AS app` 选择预编译产物或源码构建；`deploy/package.sh` 从干净检出打 `target/conduit-standalone-<短提交>.tar.gz`；删除根 `Dockerfile`、`conduit-ui/Dockerfile`、自定义 EMQX 镜像、`build-local.sh` 与 `sync-to-host.sh`（`2026-10-16-conduit-deploy-packages-design.md`）。
 - 2026-10-16：部署包目录定名为 deploy/dev（开发环境：虚拟机只跑基础服务，应用在 IDEA）与 deploy/standalone（独立部署：全部组件在 Linux 上），打包 conduit-standalone-<短提交>.tar.gz。
 - 2026-10-19：开发与独立部署模板、集成测试镜像统一为 EMQX 5.10.5；5.8.6/5.8.9 的正常交接补发错位问题经专项实验 9 次未复现，标记为已解决。Redis AOF 改为每次写入刷盘；Broker 强杀仍有已确认消息丢失，详见 `docs/durability-validation.md`；本地 `application-local.yml` 取消 Git 跟踪，部署打包增加检查。
+- 2026-10-20 V0.2-R2：设备带 `id` 启用端到端可靠上报；transport 在 Redis 总线写入成功后发 QoS 0 业务回执，设备收到后才删除持久化本地副本。模拟器实现内存待确认队列、超时重发和背压；e2e 新增强杀 EMQX 场景（`2026-10-20-conduit-reliable-uplink-design.md`）。
+- 2026-10-20：所有实际测试执行都必须在 `docs/test-reports/` 留存测试报告；报告必须区分通过、失败、跳过、阻塞和未执行，记录可复现命令与证据位置（见 2.2）。

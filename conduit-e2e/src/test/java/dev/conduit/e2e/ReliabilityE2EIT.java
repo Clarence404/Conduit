@@ -24,7 +24,8 @@ import static org.awaitility.Awaitility.await;
 
 /**
  * V0.2-R 可靠性端到端测试（spec 第 4 节）：在独立临时环境中，10 台设备 × 50 条 QoS1 上报的发送中途分别
- * ①强制结束 server 数秒后重启；②强制结束主 transport；③两个 transport 都结束、设备继续上报约 20 秒后重启；④重启 EMQX 容器。
+ * ①强制结束 server 数秒后重启；②强制结束主 transport；③两个 transport 都结束、设备继续上报约 20 秒后重启；④重启 EMQX 容器；
+ * ⑤可靠上报期间强杀 EMQX 后原地启动。
  * 每个场景断言：InfluxDB 中该产品恰好 500 条、死信流中没有该产品、消费组 conduit-server 没有待确认消息；结束时删除所建产品与设备。
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -105,6 +106,45 @@ class ReliabilityE2EIT {
             env.restartEmqx();
             env.awaitLeaderConnected(Duration.ofMinutes(2));
         });
+    }
+
+    /** 场景 5：强杀 broker 会丢失其内存尾部，但设备未收到业务回执时原样重发，最终仍恰好入库 500 条。 */
+    @Test
+    @Order(5)
+    void reliableDevicesCoverAnEmqxProcessKill() throws Exception {
+        try (ConduitApiClient api = env.api()) {
+            ReliableDeviceFleet started = null;
+            String productKey = api.findOrCreateProduct("e2e 场景 5 电表", "standard-json");
+            try {
+                List<DeviceCredentials> devices = new ArrayList<>();
+                for (int i = 1; i <= DEVICES; i++) {
+                    devices.add(api.createDevice(productKey, "e2e 场景5 电表%02d".formatted(i)));
+                }
+                ReliableDeviceFleet fleet = new ReliableDeviceFleet(env.mqttHost(), env.mqttPort(), devices,
+                        MESSAGES_PER_DEVICE, INTERVAL);
+                started = fleet;
+                CompletableFuture<Void> sending = fleet.start();
+                fleet.awaitAcknowledged(100, Duration.ofSeconds(60));
+                assertThat(sending.isDone()).as("the fault must land mid-stream").isFalse();
+                log.info("Scenario 5: killing EMQX after {} platform acknowledgements", fleet.acknowledged());
+
+                env.killEmqxAndRestart();
+                env.awaitLeaderConnected(Duration.ofMinutes(2));
+                sending.get(5, TimeUnit.MINUTES);
+
+                await().atMost(Duration.ofMinutes(3)).pollInterval(Duration.ofSeconds(3))
+                        .untilAsserted(() -> assertThat(env.influxCount(productKey)).isEqualTo(fleet.total()));
+                assertThat(env.deadLetters()).doesNotContain(productKey);
+                await().atMost(E2eEnvironment.CLAIM_MIN_IDLE.plusSeconds(60)).pollInterval(Duration.ofSeconds(3))
+                        .untilAsserted(() -> assertThat(env.pendingCount()).isZero());
+                assertThat(env.influxCount(productKey)).isEqualTo(fleet.total());
+            } finally {
+                if (started != null) {
+                    started.stop();
+                }
+                cleanUp(api, productKey);
+            }
+        }
     }
 
     /**
