@@ -222,7 +222,7 @@ class PipelineProcessorTest {
         Thread.currentThread().interrupt();
         try {
             assertThatThrownBy(() -> processor.process(List.of(delivery("1-0", "d1"))))
-                    .isInstanceOf(PipelineProcessor.ProcessingAbortedException.class);
+                    .isInstanceOf(ProcessingAbortedException.class);
             assertThat(Thread.currentThread().isInterrupted()).isTrue();
         } finally {
             Thread.interrupted();
