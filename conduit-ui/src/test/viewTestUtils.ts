@@ -37,6 +37,12 @@ export function createTestRouter(): Router {
         meta: ROUTE_META['device-detail'],
       },
       { path: '/tenants', name: 'tenants', component: Empty, meta: ROUTE_META.tenants },
+      {
+        path: '/telemetry-replay',
+        name: 'telemetry-replay',
+        component: Empty,
+        meta: ROUTE_META['telemetry-replay'],
+      },
       { path: '/users', name: 'users', component: Empty, meta: ROUTE_META.users },
       { path: '/:pathMatch(.*)*', name: 'not-found', component: Empty, meta: ROUTE_META['not-found'] },
     ],

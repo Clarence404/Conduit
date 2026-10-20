@@ -1,9 +1,9 @@
 /**
  * 侧栏菜单定义：按身份给出分组与菜单项（路径、名称、图标）。
- * 平台管理员：概览、系统管理（租户）；租户管理员（含代入的平台管理员）：概览、设备接入、系统管理（用户）；只读用户：概览、设备接入。
+ * 平台管理员：概览、系统管理（租户、数据重放）；租户管理员（含代入的平台管理员）：概览、设备接入、系统管理（用户）；只读用户：概览、设备接入。
  */
 import type { Component } from 'vue'
-import { Box, Cpu, House, OfficeBuilding, User } from '@element-plus/icons-vue'
+import { Box, Cpu, House, OfficeBuilding, RefreshRight, User } from '@element-plus/icons-vue'
 import type { Permissions } from '@/utils/permissions'
 
 /** 菜单项；path 同时是 el-menu 的 index 与跳转地址 */
@@ -34,7 +34,16 @@ const DEVICE_ACCESS: MenuGroup = {
  */
 export function menuGroupsFor(p: Permissions): MenuGroup[] {
   if (p.isPlatformAdmin) {
-    return [OVERVIEW, { title: '系统管理', items: [{ path: '/tenants', label: '租户', icon: OfficeBuilding }] }]
+    return [
+      OVERVIEW,
+      {
+        title: '系统管理',
+        items: [
+          { path: '/tenants', label: '租户', icon: OfficeBuilding },
+          { path: '/telemetry-replay', label: '数据重放', icon: RefreshRight },
+        ],
+      },
+    ]
   }
   const groups = [OVERVIEW, DEVICE_ACCESS]
   if (p.canManageUsers) {

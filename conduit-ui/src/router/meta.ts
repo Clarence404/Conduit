@@ -64,6 +64,12 @@ export const ROUTE_META = {
     scope: 'platform',
     breadcrumb: [{ label: '系统管理' }, { label: '租户' }],
   },
+  'telemetry-replay': {
+    title: '数据重放',
+    menu: '/telemetry-replay',
+    scope: 'platform',
+    breadcrumb: [{ label: '系统管理' }, { label: '数据重放' }],
+  },
   users: {
     title: '用户',
     menu: '/users',

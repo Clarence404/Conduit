@@ -11,7 +11,7 @@ describe('menuGroupsFor', () => {
   it('gives the platform admin the overview and the tenant list', () => {
     expect(layout({ isPlatformAdmin: true, isImpersonating: false, canWrite: false, canManageUsers: false })).toEqual([
       '概览:/home',
-      '系统管理:/tenants',
+      '系统管理:/tenants,/telemetry-replay',
     ])
   })
 
