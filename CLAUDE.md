@@ -147,3 +147,4 @@
 - 2026-10-20 Maven 命名统一：根父工程改为 `dev.conduit:conduit-iot`，同步全部五个子模块父引用，补齐根 POM 的产品名称、简介、URL 和 SCM，各子模块增加独立展示名；版本号及子模块 artifactId 不变。模块依赖与运行架构未变，无需修改架构 SVG。
 - 2026-10-20：链路精简评估完成，结论暂不精简——关闭 EMQX 磁盘持久会话的前提是所有设备走可靠模式，而契约允许设备不带 `id`；删除 transport 选主的前提是共享订阅，受 EMQX 版本阻塞（5.10.5 不支持，6.3.0 可用但许可与吞吐未澄清）。Redis 总线因承担消费组、认领与死信而维持现状。重新评估的触发条件见 `2026-10-20-conduit-reliable-uplink-design.md` 第 10 节。
 - 2026-10-20 V0.2-R3：遥测重放——`/api/v1/platform/telemetry/replay` 三个接口，范围左闭右开、跨度上限 6 小时、每批 500、同时只允许一个任务且状态只在内存；重放不更新在线状态、不写死信；窗口按 Redis 时钟匹配故运维两端各多留约 1 分钟；`PipelineProcessor` 抽出 `TelemetryIngestor`（`IngestSource` + 指标 `source` 标签）与 `Backoff` 供正常消费与重放共用，`MessageBus` 增加 `range` 按条目 id 区间只读（`2026-10-20-conduit-telemetry-replay-design.md`）。
+- 2026-10-21：V0.2-R3 遥测重放验收通过（幂等、不写死信、不改在线状态、取消与权限矩阵均在本地整套服务上验证）。验收期间发现 EMQX 持久会话不可恢复会使接入彻底停住（已知故障模式首次实际发生），人工以 `cleanStart=true` 丢弃损坏会话恢复；自动兜底列入 backlog「V0.2-R3 遗留」。
