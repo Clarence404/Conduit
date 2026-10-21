@@ -149,3 +149,4 @@
 - 2026-10-20 V0.2-R3：遥测重放——`/api/v1/platform/telemetry/replay` 三个接口，范围左闭右开、跨度上限 6 小时、每批 500、同时只允许一个任务且状态只在内存；重放不更新在线状态、不写死信；窗口按 Redis 时钟匹配故运维两端各多留约 1 分钟；`PipelineProcessor` 抽出 `TelemetryIngestor`（`IngestSource` + 指标 `source` 标签）与 `Backoff` 供正常消费与重放共用，`MessageBus` 增加 `range` 按条目 id 区间只读（`2026-10-20-conduit-telemetry-replay-design.md`）。
 - 2026-10-21：V0.2-R3 遥测重放验收通过（幂等、不写死信、不改在线状态、取消与权限矩阵均在本地整套服务上验证）。验收期间发现 EMQX 持久会话不可恢复会使接入彻底停住（已知故障模式首次实际发生），人工以 `cleanStart=true` 丢弃损坏会话恢复；自动兜底列入 backlog「V0.2-R3 遗留」。
 - 2026-10-21：EMQX 持久会话损坏的专项实验结论——同 clientId 主备切换（活体、连续、旧主已死、正常断开共 18 轮）均正常恢复，「互踢防双主」的设计无风险；仅服务端 `clients kick` 必然损坏会话（9/9），且与在途消息、`$SYS` 订阅无关。据此决定**暂不实现自动兜底**，按低频边界场景处理，人工以 `cleanStart=true` 丢弃损坏会话恢复，详见 backlog「V0.2-R3 遗留」。
+- 2026-10-21：V0.3 拆为六个子项目 A 租户隔离硬化 → B 组织模型与 RBAC → C 租户生命周期控制面 → D 计量与配额 → E 资源治理，F 工程与运维基线可并行（见 `docs/roadmap-saas.md` V0.3 一节）；CI 暂不建设，理由与重启条件一并记录在该节。
