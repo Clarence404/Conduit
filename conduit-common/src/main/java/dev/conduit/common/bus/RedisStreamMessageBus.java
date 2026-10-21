@@ -2,7 +2,9 @@ package dev.conduit.common.bus;
 
 import dev.conduit.common.message.RawMessage;
 import dev.conduit.common.message.RawMessageCodec;
+import org.springframework.data.domain.Range;
 import org.springframework.data.redis.RedisSystemException;
+import org.springframework.data.redis.connection.Limit;
 import org.springframework.data.redis.connection.RedisStreamCommands.XAddOptions;
 import org.springframework.data.redis.connection.stream.Consumer;
 import org.springframework.data.redis.connection.stream.MapRecord;
@@ -145,6 +147,22 @@ public class RedisStreamMessageBus implements MessageBus {
         fields.put("deliveryCount", Long.toString(delivery.deliveryCount()));
         fields.put("failedAt", Long.toString(System.currentTimeMillis()));
         xadd(props.deadKey(), fields, props.deadMaxLen());
+    }
+
+    /** XRANGE 上行流 [startId, endId]，最多 count 条（count 必须大于 0，否则抛 IllegalArgumentException）；不经过消费组，deliveryCount 固定为 0。 */
+    @Override
+    public List<Delivery> range(String startId, String endId, int count) {
+        if (count <= 0) {
+            throw new IllegalArgumentException("count 必须大于 0，实际为 " + count);
+        }
+        List<MapRecord<String, Object, Object>> records = redis.opsForStream()
+                .range(props.streamKey(), Range.closed(startId, endId), Limit.limit().count(count));
+        if (records == null) {
+            return List.of();
+        }
+        return records.stream()
+                .map(r -> new Delivery(r.getId().getValue(), toStringMap(r.getValue()), 0))
+                .toList();
     }
 
     /** 以字节方式 XADD 并近似裁剪到 maxLen；Redis 未返回 id 时抛 IllegalStateException。 */

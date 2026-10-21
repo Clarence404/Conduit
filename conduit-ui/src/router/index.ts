@@ -61,6 +61,12 @@ export const routes: RouteRecordRaw[] = [
         meta: ROUTE_META.tenants,
       },
       {
+        path: 'telemetry-replay',
+        name: 'telemetry-replay',
+        component: () => import('@/views/TelemetryReplayView.vue'),
+        meta: ROUTE_META['telemetry-replay'],
+      },
+      {
         path: 'users',
         name: 'users',
         component: () => import('@/views/UsersView.vue'),

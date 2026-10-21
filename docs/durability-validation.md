@@ -90,6 +90,20 @@ always 单连接吞吐约下降 80%，16 连接约下降 60%。当前演示负�
 
 这表明端到端断电可靠性还需覆盖 InfluxDB 的 WAL、catalog 与文件存储恢复，不能在 EMQX / Redis 两项之外宣告验证完成。
 
+### 写入落盘边界（2026-10-20 专项调查）
+
+核对 v3.12.0 源码：`no_sync` 默认为 `false`（`influxdb3_types/src/http.rs`、`influxdb3_server/src/http.rs`），写入走 `WalObjectStore::write_ops`（`influxdb3_wal/src/object_store.rs`）等待 `object_store.put_opts` 返回；但 `object_store` 0.12.5 的 `LocalFileSystem::put_opts`（`src/local.rs`）只做 `write_all` 加 `rename`，**没有 `sync_all`**。因此 2xx 的含义是「字节已进入操作系统页缓存、文件已改名」，真正的丢数据窗口是内核回写窗口（Linux 默认约 30 秒），不是 WAL 的 1 秒刷新间隔。
+
+实测：默认设置下强杀进程三轮均 2000/2000 幸存；`no_sync=true` 时 2000 条只剩 1380。因此默认值必须保持不变，不能为了吞吐改用 `no_sync=true`。
+
+这个缺口无法在 Conduit 侧消除：缺的 fsync 在 `object_store` 内部。
+
+### 恢复手段：遥测重放
+
+上述缺口现在有了恢复路径，但它不等于修复。`XACK` 只把消息移出待确认列表，条目本身仍留在 Redis 上行流中直到被 `MAXLEN` 裁剪（默认约 100 万条，可回溯时长随流量变化，当前演示负载约 16 小时），而 Redis 配置为 `appendfsync always`。因此平台管理员可以在「系统管理 → 数据重放」按时间范围把流中仍保留的原始报文重新写入（单次最多 6 小时，两端各多留约 1 分钟，因为条目 ID 取自 Redis 服务端时钟）。重放幂等、不更新在线状态、不重复写死信。
+
+边界：重放只能找回仍在总线中的数据，超出保留范围的丢失无法恢复；InfluxDB 自身的写入仍不是持久的，下次断电同样会丢回写窗口内的数据，只是之后可以补回。步骤见 README「运维：InfluxDB 断电后恢复」。
+
 ## 复现入口
 
 工具位于 [`tools/durability`](../tools/durability)：

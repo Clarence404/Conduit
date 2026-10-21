@@ -298,3 +298,30 @@ export interface ChangePasswordRequest {
   oldPassword: string
   newPassword: string
 }
+
+/** 遥测重放任务状态；NONE 表示服务端本次启动以来从未提交过任务 */
+export type ReplayState = 'NONE' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED'
+
+/**
+ * 遥测重放任务状态。除 state 外的字段在从未提交过任务时不返回，因此都是可选的；
+ * finishedAt 与 error 只在任务结束（成功、失败、取消）后才有，运行中不返回。
+ * scanned 为读出的条目数，written 为成功写入时序库的条数，skipped 为跳过的条数，rejected 为物模型全部测点被拒的条数。
+ */
+export interface ReplayStatus {
+  state: ReplayState
+  from?: number
+  to?: number
+  startedAt?: number
+  finishedAt?: number
+  scanned?: number
+  written?: number
+  skipped?: number
+  rejected?: number
+  error?: string
+}
+
+/** 提交重放：毫秒时间范围，左闭右开，跨度不超过 6 小时 */
+export interface ReplayRequest {
+  from: number
+  to: number
+}
